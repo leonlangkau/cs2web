@@ -1,0 +1,38 @@
+<%- include('../partials/header', { title: title }) %>
+<section class="section auth-page">
+  <div class="container auth-card">
+    <h1>Create your account</h1>
+    <p class="muted">Join the GoyHub community — it takes 20 seconds.</p>
+    <% if (errors.length) { %>
+      <div class="form-errors" role="alert">
+        <ul><% errors.forEach(function (e) { %><li><%= e %></li><% }) %></ul>
+      </div>
+    <% } %>
+    <form method="post" action="/auth/signup" class="stack">
+      <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+      <label>
+        <span>Username</span>
+        <input type="text" name="username" required minlength="3" maxlength="20"
+               pattern="[A-Za-z0-9_]+" title="Letters, numbers and underscores only"
+               autocomplete="username" value="<%= values.username || '' %>" autofocus>
+      </label>
+      <label>
+        <span>Email</span>
+        <input type="email" name="email" required maxlength="254" autocomplete="email"
+               value="<%= values.email || '' %>">
+      </label>
+      <label>
+        <span>Password <small class="muted">(min. 8 characters)</small></span>
+        <input type="password" name="password" required minlength="8" maxlength="128" autocomplete="new-password">
+      </label>
+      <label>
+        <span>Confirm password</span>
+        <input type="password" name="confirm" required minlength="8" maxlength="128" autocomplete="new-password">
+      </label>
+      <button type="submit" class="btn btn-primary btn-block">Sign up</button>
+    </form>
+    <p class="muted center">Already have an account? <a href="/auth/login">Log in</a></p>
+    <p class="fineprint">By signing up you agree to keep it friendly. For security and anti-abuse, we record the IP address and browser of sign-ups, logins and downloads.</p>
+  </div>
+</section>
+<%- include('../partials/footer') %>

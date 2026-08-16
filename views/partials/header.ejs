@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title><%= typeof title !== 'undefined' && title ? `${title} · ${appName}` : `${appName} — The Ultimate CS2 Companion` %></title>
+  <meta name="description" content="GoyHub is the all-in-one CS2 companion app: match stats, crosshair & config manager, skin tracker and performance presets. Free download.">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='13' fill='none' stroke='%23ff8c1a' stroke-width='2.5'/%3E%3Cpath d='M16 2v9M16 21v9M2 16h9M21 16h9' stroke='%23ff8c1a' stroke-width='2.5'/%3E%3Ccircle cx='16' cy='16' r='2.5' fill='%23ff8c1a'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body class="<%= typeof bodyClass !== 'undefined' ? bodyClass : '' %>">
+<a class="skip-link" href="#main">Skip to content</a>
+<header class="site-nav" id="site-nav">
+  <div class="container nav-inner">
+    <a class="brand" href="/" aria-label="GoyHub home">
+      <svg class="brand-mark" viewBox="0 0 32 32" aria-hidden="true">
+        <circle cx="16" cy="16" r="13" fill="none" stroke="currentColor" stroke-width="2.5"/>
+        <path d="M16 2v9M16 21v9M2 16h9M21 16h9" stroke="currentColor" stroke-width="2.5"/>
+        <circle cx="16" cy="16" r="2.5" fill="currentColor"/>
+      </svg>
+      <span>Goy<em>Hub</em></span>
+    </a>
+    <nav class="nav-links" aria-label="Main">
+      <a href="/" class="<%= path === '/' ? 'active' : '' %>">Home</a>
+      <a href="/forum" class="<%= path.startsWith('/forum') ? 'active' : '' %>">Forum</a>
+      <a href="/download" class="<%= path.startsWith('/download') ? 'active' : '' %>">Download</a>
+      <% if (user && user.role === 'admin') { %>
+        <a href="/admin" class="<%= path.startsWith('/admin') ? 'active' : '' %>">Admin</a>
+      <% } %>
+    </nav>
+    <div class="nav-auth">
+      <% if (user) { %>
+        <span class="nav-user"><span class="avatar" aria-hidden="true"><%= user.username[0].toUpperCase() %></span><%= user.username %></span>
+        <form method="post" action="/auth/logout" class="inline-form">
+          <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+          <button type="submit" class="btn btn-ghost btn-sm">Log out</button>
+        </form>
+      <% } else { %>
+        <a href="/auth/login" class="btn btn-ghost btn-sm">Log in</a>
+        <a href="/auth/signup" class="btn btn-primary btn-sm">Sign up</a>
+      <% } %>
+    </div>
+  </div>
+</header>
+<% if (flash) { %>
+  <div class="flash flash-<%= flash.type %>" role="status">
+    <div class="container"><%= flash.message %></div>
+  </div>
+<% } %>
+<main id="main">

@@ -1,0 +1,12 @@
+<div class="page-head">
+  <div>
+    <p class="section-kicker">// ADMIN BACKEND</p>
+    <h1 class="section-title"><%= heading %></h1>
+  </div>
+</div>
+<nav class="admin-tabs" aria-label="Admin sections">
+  <a href="/admin" class="<%= path === '/admin' ? 'active' : '' %>">Dashboard</a>
+  <a href="/admin/users" class="<%= path.startsWith('/admin/users') ? 'active' : '' %>">Users</a>
+  <a href="/admin/logs" class="<%= path.startsWith('/admin/logs') ? 'active' : '' %>">IP logs</a>
+  <a href="/admin/forum" class="<%= path.startsWith('/admin/forum') ? 'active' : '' %>">Forum</a>
+</nav>

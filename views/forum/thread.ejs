@@ -1,0 +1,83 @@
+<%- include('../partials/header', { title: title }) %>
+<section class="section forum-page">
+  <div class="container">
+    <nav class="breadcrumbs" aria-label="Breadcrumb">
+      <a href="/forum">Forum</a> <span aria-hidden="true">/</span>
+      <a href="/forum/c/<%= thread.category_slug %>"><%= thread.category_name %></a>
+      <span aria-hidden="true">/</span> <span><%= thread.title %></span>
+    </nav>
+
+    <div class="page-head">
+      <div>
+        <h1 class="section-title thread-heading">
+          <% if (thread.pinned) { %><span class="tag tag-pin">PINNED</span><% } %>
+          <% if (thread.locked) { %><span class="tag tag-lock">LOCKED</span><% } %>
+          <%= thread.title %>
+        </h1>
+        <p class="muted">Started by <%= thread.username %> · <%= timeAgo(thread.created_at) %> · <%= thread.views %> views</p>
+      </div>
+      <% if (user && user.role === 'admin') { %>
+        <div class="admin-actions">
+          <form method="post" action="/admin/threads/<%= thread.id %>/pin" class="inline-form">
+            <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+            <button class="btn btn-ghost btn-sm" type="submit"><%= thread.pinned ? 'Unpin' : 'Pin' %></button>
+          </form>
+          <form method="post" action="/admin/threads/<%= thread.id %>/lock" class="inline-form">
+            <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+            <button class="btn btn-ghost btn-sm" type="submit"><%= thread.locked ? 'Unlock' : 'Lock' %></button>
+          </form>
+          <form method="post" action="/admin/threads/<%= thread.id %>/delete" class="inline-form"
+                data-confirm="Delete this thread and all its replies?">
+            <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+            <button class="btn btn-danger btn-sm" type="submit">Delete</button>
+          </form>
+        </div>
+      <% } %>
+    </div>
+
+    <div class="post-list">
+      <% posts.forEach(function (p, i) { %>
+        <article class="post" id="post-<%= p.id %>">
+          <aside class="post-author">
+            <span class="avatar avatar-lg" aria-hidden="true"><%= p.username[0].toUpperCase() %></span>
+            <span class="post-username"><%= p.username %><% if (p.author_role === 'admin') { %> <span class="tag tag-admin">STAFF</span><% } %></span>
+            <span class="muted">joined <%= timeAgo(p.author_since) %></span>
+            <span class="muted"><%= p.author_posts %> posts</span>
+          </aside>
+          <div class="post-body">
+            <div class="post-meta">
+              <span class="muted">#<%= i + 1 %> · <%= timeAgo(p.created_at) %></span>
+              <% if (user && user.role === 'admin' && p.id !== firstPostId) { %>
+                <form method="post" action="/admin/posts/<%= p.id %>/delete" class="inline-form"
+                      data-confirm="Delete this post?">
+                  <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+                  <button class="btn btn-danger btn-xs" type="submit">Delete</button>
+                </form>
+              <% } %>
+            </div>
+            <div class="post-text"><%= p.body %></div>
+          </div>
+        </article>
+      <% }) %>
+    </div>
+
+    <% if (thread.locked && (!user || user.role !== 'admin')) { %>
+      <p class="muted locked-note">🔒 This thread is locked. New replies are disabled.</p>
+    <% } else if (user) { %>
+      <div class="reply-box">
+        <h2>Post a reply</h2>
+        <form method="post" action="/forum/t/<%= thread.id %>/reply" class="stack">
+          <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+          <textarea name="body" rows="6" required maxlength="10000" placeholder="Write your reply…"></textarea>
+          <button class="btn btn-primary" type="submit">Reply</button>
+        </form>
+      </div>
+    <% } else { %>
+      <p class="muted locked-note">
+        <a href="/auth/login?next=<%= encodeURIComponent('/forum/t/' + thread.id) %>">Log in</a> or
+        <a href="/auth/signup">sign up</a> to join the conversation.
+      </p>
+    <% } %>
+  </div>
+</section>
+<%- include('../partials/footer') %>

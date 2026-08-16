@@ -1,0 +1,19 @@
+{
+  "name": "goyhub-web",
+  "version": "1.0.0",
+  "description": "GoyHub — CS2 companion app website, community forum, and secured admin backend",
+  "main": "server.js",
+  "scripts": {
+    "start": "node --no-warnings server.js",
+    "dev": "node --no-warnings --watch server.js",
+    "test": "node --no-warnings test/smoke.js"
+  },
+  "engines": {
+    "node": ">=22.5.0"
+  },
+  "dependencies": {
+    "cookie-parser": "^1.4.7",
+    "ejs": "^3.1.10",
+    "express": "^5.1.0"
+  }
+}

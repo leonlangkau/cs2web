@@ -1,0 +1,80 @@
+<%- include('../partials/header', { title: title }) %>
+<section class="section admin-page">
+  <div class="container">
+    <%- include('../partials/adminnav', { heading: 'Users' }) %>
+
+    <form method="get" action="/admin/users" class="filter-bar">
+      <input type="search" name="q" value="<%= q %>" placeholder="Search username, email or IP…">
+      <button class="btn btn-outline" type="submit">Search</button>
+      <% if (q) { %><a class="btn btn-ghost" href="/admin/users">Clear</a><% } %>
+      <span class="muted"><%= total %> user<%= total === 1 ? '' : 's' %></span>
+    </form>
+
+    <div class="panel">
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>User</th><th>Email</th><th>Signup IP</th><th>Last login</th><th>Posts</th><th>Actions</th></tr>
+          </thead>
+          <tbody>
+            <% users.forEach(function (u) { %>
+              <tr class="<%= u.banned ? 'row-banned' : '' %>">
+                <td>
+                  <strong><%= u.username %></strong>
+                  <% if (u.role === 'admin') { %><span class="tag tag-admin">ADMIN</span><% } %>
+                  <% if (u.banned) { %><span class="tag tag-banned">BANNED</span><% } %>
+                  <div class="muted">#<%= u.id %> · joined <%= timeAgo(u.created_at) %></div>
+                </td>
+                <td><%= u.email %></td>
+                <td class="mono"><%= u.signup_ip || '—' %></td>
+                <td>
+                  <span class="mono"><%= u.last_login_ip || '—' %></span>
+                  <div class="muted"><%= timeAgo(u.last_login_at) %></div>
+                </td>
+                <td><%= u.post_count %></td>
+                <td class="actions-cell">
+                  <% if (u.id !== user.id) { %>
+                    <% if (u.banned) { %>
+                      <form method="post" action="/admin/users/<%= u.id %>/unban" class="inline-form">
+                        <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+                        <button class="btn btn-ghost btn-xs" type="submit">Unban</button>
+                      </form>
+                    <% } else { %>
+                      <form method="post" action="/admin/users/<%= u.id %>/ban" class="inline-form"
+                            data-confirm="Ban <%= u.username %>? They will be signed out everywhere.">
+                        <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+                        <button class="btn btn-warn btn-xs" type="submit">Ban</button>
+                      </form>
+                    <% } %>
+                    <form method="post" action="/admin/users/<%= u.id %>/role" class="inline-form"
+                          data-confirm="<%= u.role === 'admin' ? 'Remove admin rights from' : 'Make' %> <%= u.username %> <%= u.role === 'admin' ? '?' : 'an admin?' %>">
+                      <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+                      <button class="btn btn-ghost btn-xs" type="submit"><%= u.role === 'admin' ? 'Demote' : 'Promote' %></button>
+                    </form>
+                    <form method="post" action="/admin/users/<%= u.id %>/delete" class="inline-form"
+                          data-confirm="Permanently delete <%= u.username %> and ALL their threads and posts?">
+                      <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+                      <button class="btn btn-danger btn-xs" type="submit">Delete</button>
+                    </form>
+                  <% } else { %>
+                    <span class="muted">you</span>
+                  <% } %>
+                </td>
+              </tr>
+            <% }) %>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <% if (pages > 1) { %>
+      <nav class="pagination" aria-label="Pages">
+        <% for (let p = 1; p <= pages; p++) { %>
+          <% if (p === page) { %><span class="page current"><%= p %></span>
+          <% } else { %><a class="page" href="/admin/users?page=<%= p %>&q=<%= encodeURIComponent(q) %>"><%= p %></a><% } %>
+        <% } %>
+      </nav>
+    <% } %>
+  </div>
+</section>
+<%- include('../partials/footer') %>

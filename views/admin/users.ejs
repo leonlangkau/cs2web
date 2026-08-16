@@ -4,7 +4,7 @@
     <%- include('../partials/adminnav', { heading: 'Users' }) %>
 
     <form method="get" action="/admin/users" class="filter-bar">
-      <input type="search" name="q" value="<%= q %>" placeholder="Search username, email or IP…">
+      <input type="search" name="q" value="<%= q %>" aria-label="Search users by username, email or IP" placeholder="Search username, email or IP…">
       <button class="btn btn-outline" type="submit">Search</button>
       <% if (q) { %><a class="btn btn-ghost" href="/admin/users">Clear</a><% } %>
       <span class="muted"><%= total %> user<%= total === 1 ? '' : 's' %></span>
@@ -69,10 +69,11 @@
 
     <% if (pages > 1) { %>
       <nav class="pagination" aria-label="Pages">
-        <% for (let p = 1; p <= pages; p++) { %>
-          <% if (p === page) { %><span class="page current"><%= p %></span>
+        <% pageWindow(page, pages).forEach(function (p) { %>
+          <% if (p === '…') { %><span class="page gap" aria-hidden="true">…</span>
+          <% } else if (p === page) { %><span class="page current" aria-current="page"><%= p %></span>
           <% } else { %><a class="page" href="/admin/users?page=<%= p %>&q=<%= encodeURIComponent(q) %>"><%= p %></a><% } %>
-        <% } %>
+        <% }) %>
       </nav>
     <% } %>
   </div>

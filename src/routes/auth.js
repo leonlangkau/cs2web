@@ -3,7 +3,7 @@
 const express = require('express');
 
 const { db } = require('../db');
-const { hashPassword, verifyPassword } = require('../security');
+const { hashPassword, hashPasswordAsync, verifyPasswordAsync } = require('../security');
 const { createSession, destroySession, audit, clientIp } = require('../middleware');
 const { limits, tooMany } = require('../limits');
 
@@ -12,6 +12,9 @@ const router = express.Router();
 const USERNAME_RE = /^[A-Za-z0-9_]{3,20}$/;
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
 const RESERVED_USERNAMES = new Set(['admin', 'administrator', 'moderator', 'system', 'goyhub', 'root', 'support', 'staff']);
+
+// Constant-cost comparison target for unknown accounts (prevents user-enumeration timing).
+const DUMMY_HASH = hashPassword('dummy-password-for-timing');
 
 /** Only allow same-site relative redirect targets. */
 function safeNext(raw) {
@@ -25,7 +28,7 @@ router.get('/signup', (req, res) => {
   res.render('auth/signup', { title: 'Sign up', errors: [], values: {} });
 });
 
-router.post('/signup', (req, res) => {
+router.post('/signup', async (req, res) => {
   if (req.user) return res.redirect('/');
   const verdict = limits.signup.check(`su:${clientIp(req)}`);
   if (!verdict.ok) return tooMany(res, verdict.retryAfterSec);
@@ -53,7 +56,7 @@ router.post('/signup', (req, res) => {
 
   const result = db.prepare(
     'INSERT INTO users (username, email, password_hash, signup_ip) VALUES (?, ?, ?, ?)'
-  ).run(username, email, hashPassword(password), clientIp(req));
+  ).run(username, email, await hashPasswordAsync(password), clientIp(req));
   const userId = Number(result.lastInsertRowid);
 
   audit(req, 'signup', { userId, username });
@@ -69,7 +72,7 @@ router.get('/login', (req, res) => {
   res.render('auth/login', { title: 'Log in', errors: [], values: {}, next: safeNext(req.query.next) });
 });
 
-router.post('/login', (req, res) => {
+router.post('/login', async (req, res) => {
   if (req.user) return res.redirect('/');
   const verdict = limits.login.check(`li:${clientIp(req)}`);
   if (!verdict.ok) return tooMany(res, verdict.retryAfterSec);
@@ -82,7 +85,7 @@ router.post('/login', (req, res) => {
     ? db.prepare('SELECT * FROM users WHERE username = ? OR email = ?').get(identifier, identifier)
     : null;
 
-  const valid = user ? verifyPassword(password, user.password_hash) : verifyPassword(password, DUMMY_HASH);
+  const valid = await verifyPasswordAsync(password, user ? user.password_hash : DUMMY_HASH);
 
   if (!user || !valid) {
     audit(req, 'login_failed', {
@@ -116,9 +119,6 @@ router.post('/login', (req, res) => {
   res.setFlash('success', `Welcome back, ${user.username}!`);
   res.redirect(next);
 });
-
-// Constant-cost comparison target for unknown accounts (prevents user-enumeration timing).
-const DUMMY_HASH = hashPassword('dummy-password-for-timing');
 
 router.post('/logout', (req, res) => {
   if (req.user) {

@@ -40,13 +40,15 @@ function securityHeaders(req, res, next) {
 /** Creates a session row for a user and sets the cookie. Returns the raw token. */
 function createSession(req, res, userId) {
   const token = newToken(32);
+  // Rotate the CSRF token alongside the session (fixation hygiene) and bind it
+  // to the session server-side so a planted cookie can't satisfy double-submit.
+  const csrf = newToken(16);
   const expires = new Date(Date.now() + SESSION_DAYS * 24 * 60 * 60 * 1000);
   db.prepare(
-    "INSERT INTO sessions (token_hash, user_id, ip, user_agent, expires_at) VALUES (?, ?, ?, ?, datetime(?, 'unixepoch'))"
-  ).run(sha256hex(token), userId, clientIp(req), String(req.get('user-agent') || '').slice(0, 300), Math.floor(expires.getTime() / 1000));
+    "INSERT INTO sessions (token_hash, user_id, csrf_hash, ip, user_agent, expires_at) VALUES (?, ?, ?, ?, ?, datetime(?, 'unixepoch'))"
+  ).run(sha256hex(token), userId, sha256hex(csrf), clientIp(req), String(req.get('user-agent') || '').slice(0, 300), Math.floor(expires.getTime() / 1000));
   res.cookie(SESSION_COOKIE, token, cookieOptions(req, { maxAge: SESSION_DAYS * 24 * 60 * 60 * 1000 }));
-  // Rotate the CSRF token alongside the session (fixation hygiene).
-  res.cookie(CSRF_COOKIE, newToken(16), cookieOptions(req));
+  res.cookie(CSRF_COOKIE, csrf, cookieOptions(req));
   return token;
 }
 
@@ -70,13 +72,16 @@ function loadSession(req, res, next) {
   if (token) {
     const row = /^[a-f0-9]{64}$/.test(token)
       ? db.prepare(
-          `SELECT u.id, u.username, u.email, u.role, u.banned, u.created_at, s.id AS session_id
+          `SELECT u.id, u.username, u.email, u.role, u.banned, u.created_at,
+                  s.id AS session_id, s.csrf_hash
            FROM sessions s JOIN users u ON u.id = s.user_id
            WHERE s.token_hash = ? AND s.expires_at > datetime('now')`
         ).get(sha256hex(token))
       : null;
     if (row && !row.banned) {
       req.user = row;
+      req.sessionId = row.session_id;
+      req.sessionCsrfHash = row.csrf_hash;
     } else {
       // Dead, malformed or banned session — drop it server- and client-side.
       if (row && row.banned) destroyUserSessions(row.id);
@@ -88,18 +93,31 @@ function loadSession(req, res, next) {
   next();
 }
 
-/** Double-submit CSRF: cookie value must match the _csrf form field on writes. */
+/**
+ * CSRF protection. Anonymous visitors get double-submit (cookie must match the
+ * _csrf form field); logged-in sessions are additionally bound server-side —
+ * the cookie's hash must match the session row, so a cookie planted by a
+ * network attacker or sibling subdomain is rotated away instead of trusted.
+ */
 function csrfProtection(req, res, next) {
   let csrf = req.cookies[CSRF_COOKIE];
-  if (!csrf || !/^[a-f0-9]{32}$/.test(csrf)) {
+  const bound = req.user && req.sessionCsrfHash
+    ? Boolean(csrf) && sha256hex(csrf) === req.sessionCsrfHash
+    : true;
+  if (!csrf || !/^[a-f0-9]{32}$/.test(csrf) || !bound) {
     csrf = newToken(16);
     res.cookie(CSRF_COOKIE, csrf, cookieOptions(req));
+    if (req.user && req.sessionId) {
+      db.prepare('UPDATE sessions SET csrf_hash = ? WHERE id = ?').run(sha256hex(csrf), req.sessionId);
+      req.sessionCsrfHash = sha256hex(csrf);
+    }
   }
   res.locals.csrfToken = csrf;
 
   if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method)) {
     const submitted = req.body ? req.body._csrf : undefined;
-    if (!submitted || !safeEqual(submitted, csrf)) {
+    const sessionOk = req.user && req.sessionCsrfHash ? sha256hex(csrf) === req.sessionCsrfHash : true;
+    if (!submitted || !safeEqual(submitted, csrf) || !sessionOk) {
       res.status(403);
       return res.render('error', {
         title: 'Request blocked',

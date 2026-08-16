@@ -11,7 +11,8 @@ const { limits, tooMany } = require('../limits');
 
 const router = express.Router();
 
-const DOWNLOAD_FILE = path.join(__dirname, '..', '..', 'public', 'downloads', 'GoyHub-Setup-1.0.0.zip');
+// Stored OUTSIDE public/ so every download goes through this route (audit + rate limit).
+const DOWNLOAD_FILE = path.join(__dirname, '..', '..', 'artifacts', 'GoyHub-Setup-1.0.0.zip');
 const DOWNLOAD_NAME = 'GoyHub-Setup-1.0.0.zip';
 
 // Computed once at boot so the landing page can show an integrity checksum.

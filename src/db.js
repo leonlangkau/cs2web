@@ -32,6 +32,7 @@ CREATE TABLE IF NOT EXISTS sessions (
   id         INTEGER PRIMARY KEY AUTOINCREMENT,
   token_hash TEXT NOT NULL UNIQUE,
   user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  csrf_hash  TEXT,
   ip         TEXT,
   user_agent TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now')),

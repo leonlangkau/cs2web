@@ -4,13 +4,13 @@
     <%- include('../partials/adminnav', { heading: 'IP logs' }) %>
 
     <form method="get" action="/admin/logs" class="filter-bar">
-      <select name="event">
+      <select name="event" aria-label="Filter by event type">
         <option value="">All events</option>
         <% events.forEach(function (e) { %>
           <option value="<%= e %>" <%= event === e ? 'selected' : '' %>><%= e %></option>
         <% }) %>
       </select>
-      <input type="search" name="q" value="<%= q %>" placeholder="Filter by IP, username or detail…">
+      <input type="search" name="q" value="<%= q %>" aria-label="Filter logs by IP, username or detail" placeholder="Filter by IP, username or detail…">
       <button class="btn btn-outline" type="submit">Filter</button>
       <% if (q || event) { %><a class="btn btn-ghost" href="/admin/logs">Clear</a><% } %>
       <span class="muted"><%= total %> entr<%= total === 1 ? 'y' : 'ies' %></span>
@@ -44,10 +44,11 @@
 
     <% if (pages > 1) { %>
       <nav class="pagination" aria-label="Pages">
-        <% for (let p = 1; p <= pages; p++) { %>
-          <% if (p === page) { %><span class="page current"><%= p %></span>
+        <% pageWindow(page, pages).forEach(function (p) { %>
+          <% if (p === '…') { %><span class="page gap" aria-hidden="true">…</span>
+          <% } else if (p === page) { %><span class="page current" aria-current="page"><%= p %></span>
           <% } else { %><a class="page" href="/admin/logs?page=<%= p %>&event=<%= encodeURIComponent(event) %>&q=<%= encodeURIComponent(q) %>"><%= p %></a><% } %>
-        <% } %>
+        <% }) %>
       </nav>
     <% } %>
   </div>

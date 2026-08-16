@@ -70,23 +70,34 @@
   var ctx = canvas.getContext('2d');
   if (!ctx) return;
 
-  var dpr = Math.min(2, window.devicePixelRatio || 1);
+  var dpr = 1;
   var width = 0;
   var height = 0;
   var particles = [];
   var mouse = { x: -9999, y: -9999 };
   var LINK_DIST = 130;
+  var resizeTimer = null;
 
   function resize() {
     var rect = canvas.getBoundingClientRect();
+    var nextDpr = Math.min(2, window.devicePixelRatio || 1);
+    // Mobile browsers fire resize when the URL bar collapses during scroll —
+    // don't rebuild the field unless the canvas actually changed.
+    if (rect.width === width && rect.height === height && nextDpr === dpr) return;
     width = rect.width;
     height = rect.height;
+    dpr = nextDpr;
     canvas.width = Math.round(width * dpr);
     canvas.height = Math.round(height * dpr);
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     var count = Math.min(110, Math.max(35, Math.round((width * height) / 16000)));
     particles = [];
     for (var i = 0; i < count; i++) particles.push(makeParticle(true));
+  }
+
+  function scheduleResize() {
+    if (resizeTimer) clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(resize, 150);
   }
 
   function makeParticle(anywhere) {
@@ -153,12 +164,16 @@
         pt.vy += mdy * f;
       }
       pt.vx = Math.max(-0.9, Math.min(0.9, pt.vx)) * 0.995;
-      pt.vy = pt.ember ? pt.vy : Math.max(-0.9, Math.min(0.9, pt.vy)) * 0.995;
+      // Embers keep their upward drift but are still clamped so the cursor
+      // can't fling them off-canvas permanently.
+      pt.vy = pt.ember
+        ? Math.max(-1.4, Math.min(1.4, pt.vy))
+        : Math.max(-0.9, Math.min(0.9, pt.vy)) * 0.995;
 
       pt.x += pt.vx;
       pt.y += pt.vy;
 
-      if (pt.ember && pt.y < -12) {
+      if (pt.ember && (pt.y < -12 || pt.y > height + 16)) {
         particles[k] = makeParticle(false);
         continue;
       }
@@ -183,6 +198,6 @@
   }
 
   resize();
-  window.addEventListener('resize', resize);
+  window.addEventListener('resize', scheduleResize);
   requestAnimationFrame(draw);
 })();

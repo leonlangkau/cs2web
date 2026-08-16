@@ -28,8 +28,9 @@ ADMIN_USERNAME=admin ADMIN_PASSWORD='choose-a-strong-one' npm start
 
 ### Website
 - Animated hero (particle canvas, gradient headline, floating HUD cards, scroll reveals)
-- Download button serving the installer from `public/downloads/` with SHA-256 shown on page
-- Live site stats (users, downloads, threads, posts)
+- Download button serving the installer via an audited, rate-limited route (SHA-256 shown on page);
+  the artifact lives in `artifacts/`, outside the static web root, so the audit log cannot be bypassed
+- Live site stats (users, downloads, threads, posts); the landing page stays fully readable without JavaScript
 
 ### Accounts
 - Sign up / log in / log out with scrypt-hashed passwords
@@ -48,10 +49,12 @@ ADMIN_USERNAME=admin ADMIN_PASSWORD='choose-a-strong-one' npm start
 - Forum management: create/delete categories, pin/lock/delete threads, delete posts
 
 ### Security hardening
-- CSRF protection (double-submit token) on every state-changing request
-- Rate limits: login, signup, posting and downloads
-- Login timing-equalized against user enumeration; reserved usernames
+- CSRF protection on every state-changing request: double-submit token, additionally
+  bound server-side to the session for logged-in users
+- Rate limits: login, signup, posting and downloads (with periodic pruning)
+- Async scrypt on the request path; login timing-equalized against user enumeration; reserved usernames
 - Strict security headers (CSP `default-src 'self'`, no frames, nosniff, referrer policy)
+- Error responses preserve status codes and never leak stack traces
 - Banned users are locked out and force-logged-out everywhere
 
 ## Configuration (env vars)
@@ -80,6 +83,7 @@ admin gating, ban flow, download logging and rate limiting.
 
 ## Replacing the download
 
-Drop your real installer at `public/downloads/GoyHub-Setup-1.0.0.zip` (or update the
-filename in `src/routes/main.js`). The SHA-256 checksum shown on the site is computed
-automatically at startup.
+Drop your real installer at `artifacts/GoyHub-Setup-1.0.0.zip` (or update the filename
+in `src/routes/main.js`). It is deliberately stored outside `public/` so every download
+goes through the logged, rate-limited `/download/file` route. The SHA-256 checksum shown
+on the site is computed automatically at startup.

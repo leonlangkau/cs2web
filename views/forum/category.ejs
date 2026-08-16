@@ -22,7 +22,7 @@
       <div class="thread-list">
         <% threads.forEach(function (t) { %>
           <a class="thread-row" href="/forum/t/<%= t.id %>">
-            <div class="thread-flags" aria-hidden="true">
+            <div class="thread-flags">
               <% if (t.pinned) { %><span class="tag tag-pin">PINNED</span><% } %>
               <% if (t.locked) { %><span class="tag tag-lock">LOCKED</span><% } %>
             </div>
@@ -41,10 +41,11 @@
 
       <% if (pages > 1) { %>
         <nav class="pagination" aria-label="Pages">
-          <% for (let p = 1; p <= pages; p++) { %>
-            <% if (p === page) { %><span class="page current"><%= p %></span>
+          <% pageWindow(page, pages).forEach(function (p) { %>
+            <% if (p === '…') { %><span class="page gap" aria-hidden="true">…</span>
+            <% } else if (p === page) { %><span class="page current" aria-current="page"><%= p %></span>
             <% } else { %><a class="page" href="/forum/c/<%= category.slug %>?page=<%= p %>"><%= p %></a><% } %>
-          <% } %>
+          <% }) %>
         </nav>
       <% } %>
     <% } %>

@@ -46,7 +46,7 @@
           </aside>
           <div class="post-body">
             <div class="post-meta">
-              <span class="muted">#<%= i + 1 %> · <%= timeAgo(p.created_at) %></span>
+              <span class="muted">#<%= postOffset + i + 1 %> · <%= timeAgo(p.created_at) %></span>
               <% if (user && user.role === 'admin' && p.id !== firstPostId) { %>
                 <form method="post" action="/admin/posts/<%= p.id %>/delete" class="inline-form"
                       data-confirm="Delete this post?">
@@ -60,6 +60,16 @@
         </article>
       <% }) %>
     </div>
+
+    <% if (pages > 1) { %>
+      <nav class="pagination" aria-label="Post pages">
+        <% pageWindow(page, pages).forEach(function (p) { %>
+          <% if (p === '…') { %><span class="page gap" aria-hidden="true">…</span>
+          <% } else if (p === page) { %><span class="page current" aria-current="page"><%= p %></span>
+          <% } else { %><a class="page" href="/forum/t/<%= thread.id %>?page=<%= p %>"><%= p %></a><% } %>
+        <% }) %>
+      </nav>
+    <% } %>
 
     <% if (thread.locked && (!user || user.role !== 'admin')) { %>
       <p class="muted locked-note">🔒 This thread is locked. New replies are disabled.</p>

@@ -217,6 +217,41 @@ async function main() {
   await res.arrayBuffer();
   ok('download IP was logged', !!db.prepare("SELECT id FROM ip_logs WHERE event = 'download'").get());
 
+  res = await anon.get('/downloads/GoyHub-Setup-1.0.0.zip');
+  ok('static download bypass is closed (404)', res.status === 404);
+
+  // --- Error handling: oversized body must give a styled 413, never a stack trace ---
+  res = await anon.request('POST', '/auth/login', { identifier: 'x', password: 'y'.repeat(300 * 1024) });
+  html = await res.text();
+  ok('oversized body returns styled 413 without stack trace',
+    res.status === 413 && html.includes('Request too large') && !html.includes('ReferenceError') && !html.includes('/home/'));
+
+  // --- Session-bound CSRF: a planted cookie must not pass for a logged-in user ---
+  await user.get('/auth/login');
+  await user.post('/auth/login', { identifier: 'player_one', password: 'supersecret1', next: '/' });
+  user.jar.set('ghcsrf', 'a'.repeat(32)); // attacker-planted value
+  res = await user.request('POST', '/forum/new', {
+    _csrf: 'a'.repeat(32), category: 'general', title: 'planted cookie', body: 'should fail',
+  });
+  ok('planted CSRF cookie rejected for logged-in user (403)', res.status === 403);
+  await user.get('/'); // the mismatch rotated the token; pick up the fresh session-bound one
+  res = await user.post('/forum/new', { category: 'general', title: 'Real token thread', body: 'works' });
+  ok('rotated CSRF token accepted after planted-cookie attempt', res.status === 302);
+
+  // --- Thread post pagination ---
+  const insertPost = db.prepare('INSERT INTO posts (thread_id, user_id, body) VALUES (?, ?, ?)');
+  for (let i = 0; i < 25; i++) insertPost.run(threadId, target.id, `bulk reply ${i}`);
+  res = await user.get(`/forum/t/${threadId}?page=2`);
+  html = await res.text();
+  ok('thread paginates past 20 posts', res.status === 200 && html.includes('bulk reply') && html.includes('aria-current="page"'));
+  res = await user.post(`/forum/t/${threadId}/reply`, { body: 'lands on the last page' });
+  ok('reply redirects to its own page', res.status === 302 && String(res.headers.get('location')).includes('?page=2#post-'));
+
+  // --- No-JS resilience: reveal-hiding is gated on the js class ---
+  res = await anon.get('/');
+  html = await res.text();
+  ok('landing gates animations on JS and server-renders stats', html.includes('/js/boot.js') && !html.includes('>0</span><span class="stat-label">Registered'));
+
   // --- Rate limiting ---
   const hammer = new Client(base);
   await hammer.get('/auth/login');

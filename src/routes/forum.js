@@ -9,6 +9,7 @@ const { limits, tooMany } = require('../limits');
 const router = express.Router();
 
 const THREADS_PER_PAGE = 20;
+const POSTS_PER_PAGE = 20;
 const MAX_TITLE = 120;
 const MAX_BODY = 10000;
 
@@ -71,15 +72,22 @@ router.get('/t/:id', (req, res) => {
 
   db.prepare('UPDATE threads SET views = views + 1 WHERE id = ?').run(id);
 
+  const totalPosts = Number(db.prepare('SELECT COUNT(*) AS n FROM posts WHERE thread_id = ?').get(id).n);
+  const pages = Math.max(1, Math.ceil(totalPosts / POSTS_PER_PAGE));
+  const page = Math.max(1, Math.min(pages, parseInt(req.query.page, 10) || 1));
+
   const posts = db.prepare(
     `SELECT p.*, u.username, u.role AS author_role, u.created_at AS author_since,
         (SELECT COUNT(*) FROM posts x WHERE x.user_id = u.id) AS author_posts
      FROM posts p JOIN users u ON u.id = p.user_id
-     WHERE p.thread_id = ? ORDER BY p.created_at, p.id LIMIT 500`
-  ).all(id);
+     WHERE p.thread_id = ? ORDER BY p.id LIMIT ? OFFSET ?`
+  ).all(id, POSTS_PER_PAGE, (page - 1) * POSTS_PER_PAGE);
 
-  const firstPostId = posts.length ? posts[0].id : null;
-  res.render('forum/thread', { title: thread.title, thread, posts, firstPostId });
+  const firstPostId = Number(db.prepare('SELECT MIN(id) AS m FROM posts WHERE thread_id = ?').get(id).m);
+  res.render('forum/thread', {
+    title: thread.title, thread, posts, firstPostId,
+    page, pages, postOffset: (page - 1) * POSTS_PER_PAGE,
+  });
 });
 
 router.get('/new', requireAuth, (req, res) => {
@@ -144,7 +152,11 @@ router.post('/t/:id/reply', requireAuth, (req, res) => {
     .run(id, req.user.id, body);
   db.prepare("UPDATE threads SET updated_at = datetime('now') WHERE id = ?").run(id);
 
-  res.redirect(`/forum/t/${id}#post-${post.lastInsertRowid}`);
+  // Land the author on the page their new post actually lives on.
+  const total = Number(db.prepare('SELECT COUNT(*) AS n FROM posts WHERE thread_id = ?').get(id).n);
+  const lastPage = Math.max(1, Math.ceil(total / POSTS_PER_PAGE));
+  const pageQuery = lastPage > 1 ? `?page=${lastPage}` : '';
+  res.redirect(`/forum/t/${id}${pageQuery}#post-${post.lastInsertRowid}`);
 });
 
 module.exports = router;

@@ -285,6 +285,62 @@ textarea { resize: vertical; min-height: 90px; }
   color: var(--danger); font-size: 0.95rem;
 }
 
+/* ---------- CAPTCHA ---------- */
+/* Honeypot: off-screen rather than display:none, which trivial bots skip. */
+.honeypot { position: absolute; left: -9999px; width: 1px; height: 1px; overflow: hidden; }
+
+.captcha-box { border: 1px solid var(--border-strong); border-radius: var(--radius); padding: 0.9rem 1rem; background: var(--bg-2); }
+.captcha-status { display: flex; flex-direction: column; gap: 0.5rem; }
+.captcha-trigger {
+  display: inline-flex; align-items: center; gap: 0.6rem; align-self: flex-start;
+  font: inherit; font-weight: 600; cursor: pointer;
+  background: #fff; border: 1px solid var(--border-strong); border-radius: 8px;
+  padding: 0.5rem 0.9rem; color: var(--text); transition: border-color 0.15s ease;
+}
+.captcha-trigger:hover:not(:disabled) { border-color: var(--accent); }
+.captcha-trigger:disabled { cursor: default; opacity: 0.9; }
+.captcha-mark {
+  width: 20px; height: 20px; border-radius: 5px; flex: none;
+  border: 2px solid var(--border-strong); background: #fff;
+  display: inline-block; position: relative;
+}
+.captcha-text { font-size: 0.85rem; }
+.captcha-box[data-state="working"] .captcha-mark {
+  border-color: var(--accent); border-right-color: transparent; border-radius: 50%;
+  animation: captcha-spin 0.7s linear infinite;
+}
+@keyframes captcha-spin { to { transform: rotate(360deg); } }
+.captcha-box[data-state="done"] { border-color: var(--success); background: rgba(15, 122, 69, 0.06); }
+.captcha-box[data-state="done"] .captcha-mark { border-color: var(--success); background: var(--success); }
+.captcha-box[data-state="done"] .captcha-mark::after {
+  content: ""; position: absolute; left: 5px; top: 1px; width: 4px; height: 9px;
+  border: solid #fff; border-width: 0 2px 2px 0; transform: rotate(45deg);
+}
+.captcha-box[data-state="done"] .captcha-text { color: var(--success); }
+.captcha-box[data-state="error"] { border-color: var(--danger); }
+.captcha-box[data-state="error"] .captcha-text { color: var(--danger); }
+.btn:disabled { opacity: 0.55; cursor: not-allowed; transform: none; box-shadow: none; }
+.btn-primary:disabled:hover { background: var(--accent); transform: none; box-shadow: none; }
+
+/* ---------- Terms acceptance gate ---------- */
+.terms-gate {
+  position: fixed; inset: 0; z-index: 200;
+  display: flex; align-items: center; justify-content: center; padding: 1.5rem;
+  background: rgba(10, 18, 38, 0.55);
+  backdrop-filter: blur(3px); -webkit-backdrop-filter: blur(3px);
+}
+.terms-gate-card {
+  background: var(--panel); border: 1px solid var(--border); border-radius: 14px;
+  padding: 2rem; max-width: 540px; width: 100%; box-shadow: 0 24px 60px rgba(10, 18, 38, 0.35);
+  max-height: 90vh; overflow-y: auto;
+}
+.terms-gate-card h2 { font-size: 1.35rem; margin-bottom: 0.6rem; }
+.terms-gate-card p { color: var(--text-soft); font-size: 0.95rem; margin-bottom: 0.9rem; }
+.terms-gate-points { padding-left: 1.2rem; color: var(--text-soft); font-size: 0.92rem; margin-bottom: 1.2rem; }
+.terms-gate-points li { margin: 0.35rem 0; }
+.terms-gate-actions { display: flex; gap: 0.6rem; flex-wrap: wrap; align-items: center; }
+.terms-gate-note { font-size: 0.8rem; color: var(--muted); margin-top: 1rem; margin-bottom: 0; }
+
 .auth-page { display: flex; align-items: center; }
 .auth-card {
   max-width: 430px; background: var(--panel); border: 1px solid var(--border);
@@ -386,6 +442,7 @@ textarea { resize: vertical; min-height: 90px; }
   background: var(--panel); border: 1px solid var(--border-strong); border-radius: 14px;
   padding: 1.6rem 1.9rem; margin: 1.8rem 0 2.5rem; box-shadow: var(--shadow);
 }
+.download-gate { display: flex; gap: 0.6rem; flex-wrap: wrap; }
 .download-page h2 { margin: 2rem 0 0.6rem; font-size: 1.25rem; }
 .code-block {
   background: var(--bg-2); border: 1px solid var(--border); border-radius: 8px;
@@ -490,6 +547,8 @@ tbody tr:last-child td { border-bottom: 0; }
 .tag-logout { background: rgba(91, 104, 132, 0.14); color: var(--muted); }
 .tag-download { background: rgba(47, 111, 240, 0.14); color: var(--accent-deep); }
 .tag-admin_action { background: rgba(138, 90, 0, 0.13); color: var(--warn); }
+.tag-captcha_failed { background: rgba(138, 90, 0, 0.13); color: var(--warn); }
+.tag-terms_accepted { background: rgba(15, 122, 69, 0.12); color: var(--success); }
 
 .filter-bar { display: flex; gap: 0.6rem; align-items: center; margin-bottom: 1.3rem; flex-wrap: wrap; }
 .filter-bar input[type="search"] { max-width: 320px; }

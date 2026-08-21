@@ -6,7 +6,7 @@ const cookieParser = require('cookie-parser');
 
 const { db, cleanupSessions } = require('./db');
 const { pruneAll } = require('./limits');
-const { securityHeaders, loadSession, csrfProtection, flash } = require('./middleware');
+const { securityHeaders, loadSession, csrfProtection, flash, termsGate } = require('./middleware');
 const mainRoutes = require('./routes/main');
 const authRoutes = require('./routes/auth');
 const forumRoutes = require('./routes/forum');
@@ -69,6 +69,8 @@ function createApp() {
   app.locals.flash = null;
   app.locals.csrfToken = '';
   app.locals.path = '';
+  app.locals.needsTermsGate = false;
+  app.locals.termsVersion = '';
 
   app.use(securityHeaders);
   app.use(express.static(path.join(__dirname, '..', 'public'), { maxAge: '1h' }));
@@ -78,6 +80,7 @@ function createApp() {
   app.use(flash);
   app.use(loadSession);
   app.use(csrfProtection);
+  app.use(termsGate);
 
   app.use('/', mainRoutes);
   app.use('/auth', authRoutes);

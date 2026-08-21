@@ -6,7 +6,14 @@ const crypto = require('node:crypto');
 const express = require('express');
 
 const { db } = require('../db');
-const { audit, clientIp } = require('../middleware');
+const { audit, clientIp, requireAuth, acceptTerms, TERMS_VERSION } = require('../middleware');
+const captcha = require('../captcha');
+
+/** Only allow same-site relative redirect targets. */
+function safePath(raw) {
+  if (typeof raw !== 'string' || !raw.startsWith('/') || raw.startsWith('//') || raw.includes('\\')) return '/';
+  return raw;
+}
 const { limits, tooMany } = require('../limits');
 
 const router = express.Router();
@@ -46,6 +53,21 @@ router.get('/', (req, res) => {
   res.render('index', { title: null, stats: siteStats(), recentThreads, downloadMeta });
 });
 
+router.post('/legal/accept', (req, res) => {
+  acceptTerms(req, res);
+  audit(req, 'terms_accepted', {
+    userId: req.user ? req.user.id : null,
+    username: req.user ? req.user.username : null,
+    detail: `version ${TERMS_VERSION}`,
+  });
+  res.redirect(safePath(req.body.next));
+});
+
+router.get('/captcha/challenge', (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  res.json(captcha.issue(clientIp(req)));
+});
+
 router.get('/terms', (req, res) => {
   res.render('legal/terms', { title: 'Terms & Conditions' });
 });
@@ -58,7 +80,9 @@ router.get('/download', (req, res) => {
   res.render('download', { title: 'Download', stats: siteStats(), downloadMeta });
 });
 
-router.get('/download/file', (req, res) => {
+// Members only: requireAuth redirects anonymous visitors to the login page, so the
+// artifact is never served without an account even by direct URL.
+router.get('/download/file', requireAuth, (req, res) => {
   const verdict = limits.download.check(`dl:${clientIp(req)}`);
   if (!verdict.ok) return tooMany(res, verdict.retryAfterSec);
 
@@ -68,8 +92,8 @@ router.get('/download/file', (req, res) => {
     });
   }
   audit(req, 'download', {
-    userId: req.user ? req.user.id : null,
-    username: req.user ? req.user.username : null,
+    userId: req.user.id,
+    username: req.user.username,
     detail: DOWNLOAD_NAME,
   });
   res.download(DOWNLOAD_FILE, DOWNLOAD_NAME);

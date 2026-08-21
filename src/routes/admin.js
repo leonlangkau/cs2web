@@ -11,7 +11,8 @@ router.use(requireAdmin);
 
 const LOGS_PER_PAGE = 50;
 const USERS_PER_PAGE = 25;
-const LOG_EVENTS = ['signup', 'login', 'login_failed', 'login_blocked', 'logout', 'download', 'admin_action'];
+const LOG_EVENTS = ['signup', 'login', 'login_failed', 'login_blocked', 'logout',
+  'download', 'admin_action', 'captcha_failed', 'terms_accepted'];
 
 /** Redirect back to the referring admin page (same-site path only). */
 function backTo(req, fallback) {

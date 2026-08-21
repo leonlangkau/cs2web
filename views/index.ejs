@@ -14,15 +14,24 @@
       in one lightweight app — so you can stop tabbing out and start ranking up.
     </p>
     <div class="hero-cta reveal">
-      <a class="btn btn-primary btn-lg btn-download" href="/download/file" rel="nofollow">
-        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m0 0l-5-5m5 5l5-5M4 19h16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-        Download for Windows
-      </a>
+      <% if (user) { %>
+        <a class="btn btn-primary btn-lg btn-download" href="/download/file" rel="nofollow">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m0 0l-5-5m5 5l5-5M4 19h16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          Download for Windows
+        </a>
+      <% } else { %>
+        <a class="btn btn-primary btn-lg" href="/auth/signup">Create a free account</a>
+      <% } %>
       <a class="btn btn-outline btn-lg" href="/forum">Join the community</a>
     </div>
     <p class="hero-meta reveal">
-      Free · v<%= appVersion %> · <%= downloadMeta.sizeKb %> KB ·
-      <span class="mono">SHA-256 <%= downloadMeta.sha256.slice(0, 12) %>…</span>
+      <% if (user) { %>
+        Free · v<%= appVersion %> · <%= downloadMeta.sizeKb %> KB ·
+        <span class="mono">SHA-256 <%= downloadMeta.sha256.slice(0, 12) %>…</span>
+      <% } else { %>
+        Free · v<%= appVersion %> · Windows 10/11 ·
+        <a href="/auth/login?next=%2Fdownload">Already a member? Log in to download</a>
+      <% } %>
     </p>
   </div>
 
@@ -118,13 +127,23 @@
   <div class="container center">
     <h2 class="section-title reveal">Ready to rank up?</h2>
     <p class="muted reveal">Windows 10/11 · 64-bit · <%= downloadMeta.sizeKb %> KB installer</p>
-    <p class="reveal">
-      <a class="btn btn-primary btn-lg btn-download" href="/download/file" rel="nofollow">
-        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m0 0l-5-5m5 5l5-5M4 19h16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-        Download GoyHub v<%= appVersion %>
-      </a>
-    </p>
-    <p class="fineprint mono reveal">SHA-256: <%= downloadMeta.sha256 %></p>
+    <% if (user) { %>
+      <p class="reveal">
+        <a class="btn btn-primary btn-lg btn-download" href="/download/file" rel="nofollow">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m0 0l-5-5m5 5l5-5M4 19h16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          Download GoyHub v<%= appVersion %>
+        </a>
+      </p>
+      <p class="fineprint mono reveal">SHA-256: <%= downloadMeta.sha256 %></p>
+    <% } else { %>
+      <p class="reveal">
+        <a class="btn btn-primary btn-lg" href="/auth/signup">Sign up to download</a>
+      </p>
+      <p class="fineprint reveal">
+        Downloads are for members only. Already have an account?
+        <a href="/auth/login?next=%2Fdownload">Log in</a>.
+      </p>
+    <% } %>
   </div>
 </section>
 

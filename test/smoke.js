@@ -11,9 +11,28 @@ const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'goyhub-test-'));
 process.env.GOYHUB_DB = path.join(tmpDir, 'test.db');
 process.env.ADMIN_USERNAME = 'admin';
 process.env.ADMIN_PASSWORD = 'admin-test-password-1';
+process.env.CAPTCHA_DIFFICULTY = '10'; // keep the proof of work quick under test
+process.env.CAPTCHA_SECRET = 'test-captcha-secret';
 
+const crypto = require('node:crypto');
 const { createApp } = require('../src/app');
 const { db } = require('../src/db');
+const { leadingZeroBits } = require('../src/captcha');
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/** Fetches a CAPTCHA challenge and mines a valid proof of work for it. */
+async function solveCaptcha(client) {
+  const challenge = await (await client.get('/captcha/challenge')).json();
+  let counter = 0;
+  for (;;) {
+    const digest = crypto.createHash('sha256').update(`${challenge.nonce}:${counter}`).digest('hex');
+    if (leadingZeroBits(digest) >= challenge.difficulty) break;
+    counter += 1;
+  }
+  await sleep(850); // server enforces a minimum elapsed time
+  return { captcha_token: challenge.token, captcha_solution: String(counter) };
+}
 
 /** Minimal cookie-jar HTTP client around fetch. */
 class Client {
@@ -82,7 +101,7 @@ async function main() {
   // --- Public pages ---
   let res = await anon.get('/');
   let html = await res.text();
-  ok('landing page renders', res.status === 200 && html.includes('Download for Windows') && html.includes('hero-canvas'));
+  ok('landing page renders', res.status === 200 && html.includes('Play smarter.') && html.includes('hero-canvas'));
   ok('landing has security headers', String(res.headers.get('content-security-policy')).includes("default-src 'self'"));
 
   res = await anon.get('/forum');
@@ -95,6 +114,33 @@ async function main() {
 
   res = await anon.get('/nope/nothing');
   ok('unknown route is 404', res.status === 404);
+
+  // --- Terms acceptance gate ---
+  const visitor = new Client(base);
+  res = await visitor.get('/');
+  html = await res.text();
+  ok('terms gate shows on first visit', html.includes('class="terms-gate"') && html.includes('I accept'));
+  ok('terms gate names arbitration and anti-tampering',
+    html.includes('binding private arbitration') && html.includes('tamper with, clone, copy'));
+
+  res = await visitor.get('/terms');
+  html = await res.text();
+  ok('terms page itself is readable without the gate', !html.includes('class="terms-gate"'));
+
+  res = await visitor.post('/legal/accept', { next: '/forum' });
+  ok('accepting terms redirects and sets the cookie',
+    res.status === 302 && res.headers.get('location') === '/forum' && !!visitor.jar.get('ghterms'));
+  ok('terms acceptance is logged with a version',
+    !!db.prepare("SELECT id FROM ip_logs WHERE event = 'terms_accepted' AND detail LIKE 'version %'").get());
+
+  res = await visitor.get('/');
+  html = await res.text();
+  ok('terms gate is gone after accepting', !html.includes('class="terms-gate"'));
+
+  const redirector = new Client(base);
+  await redirector.get('/');
+  res = await redirector.post('/legal/accept', { next: '//evil.example' });
+  ok('accept redirect is same-site only', res.headers.get('location') === '/');
 
   // --- Legal pages ---
   const company = require('../src/config/company');
@@ -127,13 +173,48 @@ async function main() {
 
   // --- Signup ---
   await user.get('/auth/signup'); // pick up csrf cookie
-  res = await user.post('/auth/signup', { username: 'ab', email: 'bad', password: 'short', confirm: 'nope' });
+  res = await user.post('/auth/signup', {
+    username: 'ab', email: 'bad', password: 'short', confirm: 'nope', ...(await solveCaptcha(user)),
+  });
   ok('invalid signup is rejected (400)', res.status === 400);
 
+  // --- CAPTCHA gate ---
+  const challenge = await (await user.get('/captcha/challenge')).json();
+  ok('captcha challenge is issued',
+    typeof challenge.token === 'string' && /^[a-f0-9]{32}$/.test(challenge.nonce) && challenge.difficulty >= 8);
+
+  res = await user.post('/auth/signup', {
+    username: 'nocaptcha', email: 'nc@example.com', password: 'supersecret1', confirm: 'supersecret1',
+  });
+  html = await res.text();
+  ok('signup without a captcha solution is rejected',
+    res.status === 400 && html.includes('Human verification failed'));
+  ok('rejected captcha attempt is logged',
+    !!db.prepare("SELECT id FROM ip_logs WHERE event = 'captcha_failed'").get());
+
+  const honeypotSolution = await solveCaptcha(user);
+  res = await user.post('/auth/signup', {
+    username: 'trapped', email: 'trap@example.com', password: 'supersecret1', confirm: 'supersecret1',
+    website: 'http://spam.example', ...honeypotSolution,
+  });
+  ok('filled honeypot is rejected', res.status === 400);
+  ok('honeypot signup created no account', !db.prepare("SELECT id FROM users WHERE username = 'trapped'").get());
+
+  const goodSolution = await solveCaptcha(user);
   res = await user.post('/auth/signup', {
     username: 'player_one', email: 'player1@example.com', password: 'supersecret1', confirm: 'supersecret1',
+    ...goodSolution,
   });
   ok('valid signup redirects and sets session', res.status === 302 && user.jar.has('ghsession'));
+
+  const replayer = new Client(base);
+  await replayer.get('/auth/signup');
+  res = await replayer.post('/auth/signup', {
+    username: 'replay_user', email: 'replay@example.com', password: 'supersecret1', confirm: 'supersecret1',
+    ...goodSolution,
+  });
+  ok('replayed captcha token is rejected',
+    res.status === 400 && !db.prepare("SELECT id FROM users WHERE username = 'replay_user'").get());
 
   const signupLog = db.prepare("SELECT * FROM ip_logs WHERE event = 'signup' AND username = 'player_one'").get();
   ok('signup IP was logged', !!signupLog && signupLog.ip.length > 0 && !!signupLog.user_agent !== null);
@@ -236,14 +317,36 @@ async function main() {
   res = await admin.post('/admin/categories', { name: 'Trade Zone', description: 'Buy and sell skins' });
   ok('admin can create category', res.status === 302 && !!db.prepare("SELECT id FROM categories WHERE slug = 'trade-zone'").get());
 
-  // --- Download ---
+  // --- Download (members only) ---
   res = await anon.get('/download/file');
-  ok('download serves zip', res.status === 200 && String(res.headers.get('content-disposition')).includes('GoyHub-Setup-1.0.0.zip'));
+  ok('anonymous download redirects to login',
+    res.status === 302 && String(res.headers.get('location')).startsWith('/auth/login'));
+  ok('anonymous download is not logged',
+    Number(db.prepare("SELECT COUNT(*) AS n FROM ip_logs WHERE event = 'download'").get().n) === 0);
+
+  res = await admin.get('/download/file');
+  ok('logged-in download serves zip',
+    res.status === 200 && String(res.headers.get('content-disposition')).includes('GoyHub-Setup-1.0.0.zip'));
   await res.arrayBuffer();
-  ok('download IP was logged', !!db.prepare("SELECT id FROM ip_logs WHERE event = 'download'").get());
+  ok('download logged against the account',
+    !!db.prepare("SELECT id FROM ip_logs WHERE event = 'download' AND username = 'admin'").get());
 
   res = await anon.get('/downloads/GoyHub-Setup-1.0.0.zip');
   ok('static download bypass is closed (404)', res.status === 404);
+
+  res = await anon.get('/');
+  html = await res.text();
+  ok('landing hides the download link when logged out',
+    !html.includes('/download/file') && html.includes('Create a free account'));
+
+  res = await admin.get('/');
+  html = await res.text();
+  ok('landing shows the download link when logged in', html.includes('/download/file'));
+
+  res = await anon.get('/download');
+  html = await res.text();
+  ok('download page gates behind sign-up when logged out',
+    res.status === 200 && !html.includes('/download/file') && html.includes('Sign up to download'));
 
   // --- Error handling: oversized body must give a styled 413, never a stack trace ---
   res = await anon.request('POST', '/auth/login', { identifier: 'x', password: 'y'.repeat(300 * 1024) });

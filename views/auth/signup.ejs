@@ -29,6 +29,19 @@
         <span>Confirm password</span>
         <input type="password" name="confirm" required minlength="8" maxlength="128" autocomplete="new-password">
       </label>
+
+      <div class="honeypot" aria-hidden="true">
+        <label>Leave this field empty
+          <input type="text" name="website" tabindex="-1" autocomplete="off">
+        </label>
+      </div>
+      <input type="hidden" name="captcha_token" value="">
+      <input type="hidden" name="captcha_solution" value="">
+      <div class="captcha-box" data-captcha></div>
+      <noscript>
+        <p class="form-errors">Sign-up needs JavaScript for the human-verification step. Please enable it and reload.</p>
+      </noscript>
+
       <button type="submit" class="btn btn-primary btn-block">Sign up</button>
     </form>
     <p class="muted center">Already have an account? <a href="/auth/login">Log in</a></p>
@@ -39,4 +52,5 @@
     </p>
   </div>
 </section>
+<script src="/js/captcha.js" defer></script>
 <%- include('../partials/footer') %>

@@ -49,4 +49,5 @@
     <div class="container"><%= flash.message %></div>
   </div>
 <% } %>
+<% if (needsTermsGate) { %><%- include('termsgate') %><% } %>
 <main id="main">

@@ -9,11 +9,21 @@
       <div>
         <strong>GoyHub-Setup-1.0.0.zip</strong>
         <span class="muted"> · Windows 10/11 (64-bit) · <%= downloadMeta.sizeKb %> KB</span>
+        <% if (!user) { %>
+          <div class="muted">Downloads are available to members. It's free to join.</div>
+        <% } %>
       </div>
-      <a class="btn btn-primary btn-lg btn-download" href="/download/file" rel="nofollow">
-        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m0 0l-5-5m5 5l5-5M4 19h16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-        Download now
-      </a>
+      <% if (user) { %>
+        <a class="btn btn-primary btn-lg btn-download" href="/download/file" rel="nofollow">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m0 0l-5-5m5 5l5-5M4 19h16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          Download now
+        </a>
+      <% } else { %>
+        <span class="download-gate">
+          <a class="btn btn-primary btn-lg" href="/auth/signup">Sign up to download</a>
+          <a class="btn btn-outline btn-lg" href="/auth/login?next=%2Fdownload">Log in</a>
+        </span>
+      <% } %>
     </div>
 
     <h2>Verify your download</h2>

@@ -6,6 +6,7 @@ const { db } = require('../db');
 const { hashPassword, hashPasswordAsync, verifyPasswordAsync } = require('../security');
 const { createSession, destroySession, audit, clientIp } = require('../middleware');
 const { limits, tooMany } = require('../limits');
+const captcha = require('../captcha');
 
 const router = express.Router();
 
@@ -44,6 +45,19 @@ router.post('/signup', async (req, res) => {
   if (!EMAIL_RE.test(email) || email.length > 254) errors.push('Enter a valid email address.');
   if (password.length < 8 || password.length > 128) errors.push('Password must be 8–128 characters.');
   if (password !== confirm) errors.push('Passwords do not match.');
+
+  // Bot gate: proof of work + honeypot + server-side pacing. Checked before the
+  // uniqueness query so a scripted signup can't probe which names are taken.
+  const botCheck = captcha.verify({
+    token: req.body.captcha_token,
+    solution: req.body.captcha_solution,
+    honeypot: req.body.website,
+    ip: clientIp(req),
+  });
+  if (!botCheck.ok) {
+    audit(req, 'captcha_failed', { username: username.slice(0, 60), detail: botCheck.reason });
+    errors.push('Human verification failed. Complete the "I\'m not a bot" check and try again.');
+  }
 
   if (errors.length === 0) {
     const taken = db.prepare('SELECT id FROM users WHERE username = ? OR email = ?').get(username, email);

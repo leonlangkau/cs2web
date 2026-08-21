@@ -149,6 +149,33 @@ function flash(req, res, next) {
   next();
 }
 
+const TERMS_COOKIE = 'ghterms';
+/** Bump when the Terms change materially — everyone is asked to accept again. */
+const TERMS_VERSION = '2026-08-21';
+/** Paths where the gate must not appear, so the documents stay readable. */
+const TERMS_GATE_EXEMPT = new Set(['/terms', '/privacy', '/legal/accept']);
+
+/**
+ * Decides whether the accept-the-terms dialog should be shown on this page.
+ * Purely presentational: it never blocks a request server-side, so the legal
+ * documents and the accept endpoint itself always remain reachable.
+ */
+function termsGate(req, res, next) {
+  res.locals.termsVersion = TERMS_VERSION;
+  res.locals.needsTermsGate = req.method === 'GET'
+    && !TERMS_GATE_EXEMPT.has(req.path)
+    && req.cookies[TERMS_COOKIE] !== TERMS_VERSION;
+  next();
+}
+
+/** Records acceptance in a long-lived cookie. */
+function acceptTerms(req, res) {
+  res.cookie(TERMS_COOKIE, TERMS_VERSION, cookieOptions(req, {
+    maxAge: 365 * 24 * 60 * 60 * 1000,
+    httpOnly: false, // readable by the page so the dialog can stay dismissed
+  }));
+}
+
 function requireAuth(req, res, next) {
   if (!req.user) {
     res.setFlash('error', 'You need to sign in to do that.');
@@ -180,8 +207,8 @@ function audit(req, event, { userId = null, username = null, detail = null } = {
 }
 
 module.exports = {
-  SESSION_COOKIE, CSRF_COOKIE,
-  securityHeaders, loadSession, csrfProtection, flash,
+  SESSION_COOKIE, CSRF_COOKIE, TERMS_COOKIE, TERMS_VERSION,
+  securityHeaders, loadSession, csrfProtection, flash, termsGate, acceptTerms,
   createSession, destroySession, destroyUserSessions,
   requireAuth, requireAdmin, clientIp, audit, cookieOptions,
 };

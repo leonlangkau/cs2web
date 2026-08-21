@@ -96,6 +96,31 @@ async function main() {
   res = await anon.get('/nope/nothing');
   ok('unknown route is 404', res.status === 404);
 
+  // --- Legal pages ---
+  const company = require('../src/config/company');
+  res = await anon.get('/terms');
+  html = await res.text();
+  ok('terms page renders with company + jurisdiction',
+    res.status === 200 && html.includes('Terms &amp; Conditions')
+      && html.includes('Autonomous Island of Anjouan') && html.includes(company.legalName)
+      && html.includes('Governing law'));
+
+  res = await anon.get('/privacy');
+  html = await res.text();
+  ok('privacy page renders and documents IP logging',
+    res.status === 200 && html.includes('Privacy Policy') && html.includes('IP address logging')
+      && html.includes('ghsession') && html.includes('scrypt'));
+  ok('privacy page names the Anjouan controller',
+    html.includes('Autonomous Island of Anjouan') && html.includes(company.registrationNumber));
+
+  res = await anon.get('/');
+  html = await res.text();
+  ok('footer links to both legal pages', html.includes('href="/terms"') && html.includes('href="/privacy"'));
+
+  res = await anon.get('/auth/signup');
+  html = await res.text();
+  ok('signup consents to terms and privacy', html.includes('href="/terms"') && html.includes('href="/privacy"'));
+
   // --- CSRF ---
   res = await anon.request('POST', '/auth/signup', { username: 'csrfless', email: 'c@x.com', password: 'password123', confirm: 'password123' });
   ok('POST without CSRF token is rejected (403)', res.status === 403);

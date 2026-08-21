@@ -109,7 +109,7 @@
       vy: ember ? -(0.2 + Math.random() * 0.5) : (Math.random() - 0.5) * 0.25,
       r: ember ? 1.2 + Math.random() * 1.8 : 0.8 + Math.random() * 1.4,
       ember: ember,
-      alpha: 0.25 + Math.random() * 0.55,
+      alpha: 0.3 + Math.random() * 0.5,
       twinkle: Math.random() * Math.PI * 2,
     };
   }
@@ -141,8 +141,8 @@
         var dy = p.y - q.y;
         var dist2 = dx * dx + dy * dy;
         if (dist2 < LINK_DIST * LINK_DIST) {
-          var a = (1 - Math.sqrt(dist2) / LINK_DIST) * 0.13;
-          ctx.strokeStyle = 'rgba(140, 160, 200,' + a.toFixed(3) + ')';
+          var a = (1 - Math.sqrt(dist2) / LINK_DIST) * 0.22;
+          ctx.strokeStyle = 'rgba(1, 55, 183,' + a.toFixed(3) + ')';
           ctx.beginPath();
           ctx.moveTo(p.x, p.y);
           ctx.lineTo(q.x, q.y);
@@ -188,9 +188,10 @@
       var alpha = (pt.alpha * flicker).toFixed(3);
       ctx.beginPath();
       ctx.arc(pt.x, pt.y, pt.r, 0, Math.PI * 2);
+      // Signal particles carry the brand blue; the linked network sits back in slate.
       ctx.fillStyle = pt.ember
-        ? 'rgba(255, 150, 40,' + alpha + ')'
-        : 'rgba(170, 190, 230,' + alpha + ')';
+        ? 'rgba(1, 55, 183,' + alpha + ')'
+        : 'rgba(92, 116, 158,' + alpha + ')';
       ctx.fill();
     }
 

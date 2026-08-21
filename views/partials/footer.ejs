@@ -33,10 +33,18 @@
         <a href="/auth/login">Log in</a>
       <% } %>
     </nav>
+    <nav aria-label="Legal">
+      <h3>Legal</h3>
+      <a href="/terms">Terms &amp; Conditions</a>
+      <a href="/privacy">Privacy Policy</a>
+    </nav>
   </div>
   <div class="container footer-bottom">
-    <span>© 2026 GoyHub · v<%= appVersion %></span>
-    <span>Fan-made companion app. Not affiliated with Valve Corporation. Counter-Strike and CS2 are trademarks of Valve.</span>
+    <span>© 2026 <%= company.tradingName %> · v<%= appVersion %></span>
+    <span class="footer-legal-line">
+      Operated by <%= company.legalName %>, registered in the <%= company.jurisdiction %>.
+      Fan-made companion app. Not affiliated with Valve Corporation. Counter-Strike and CS2 are trademarks of Valve.
+    </span>
   </div>
 </footer>
 <script src="/js/main.js" defer></script>

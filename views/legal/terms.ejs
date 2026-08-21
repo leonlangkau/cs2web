@@ -1,0 +1,322 @@
+<%- include('../partials/header', { title: title }) %>
+<section class="section legal-page">
+  <div class="container">
+    <div class="page-head">
+      <div>
+        <p class="section-kicker">// LEGAL</p>
+        <h1 class="section-title">Terms &amp; Conditions</h1>
+      </div>
+    </div>
+
+    <div class="legal-layout">
+      <nav class="legal-toc" aria-label="Sections">
+        <h2>On this page</h2>
+        <ol>
+          <li><a href="#s1">1. Who we are</a></li>
+          <li><a href="#s2">2. Accepting these terms</a></li>
+          <li><a href="#s3">3. Eligibility</a></li>
+          <li><a href="#s4">4. Your account</a></li>
+          <li><a href="#s5">5. Licence to use GoyHub</a></li>
+          <li><a href="#s6">6. Acceptable use</a></li>
+          <li><a href="#s7">7. Your content</a></li>
+          <li><a href="#s8">8. Moderation &amp; enforcement</a></li>
+          <li><a href="#s9">9. Relationship with Valve</a></li>
+          <li><a href="#s10">10. Availability &amp; changes</a></li>
+          <li><a href="#s11">11. Disclaimers</a></li>
+          <li><a href="#s12">12. Limitation of liability</a></li>
+          <li><a href="#s13">13. Indemnity</a></li>
+          <li><a href="#s14">14. Suspension &amp; termination</a></li>
+          <li><a href="#s15">15. Changes to these terms</a></li>
+          <li><a href="#s16">16. Governing law</a></li>
+          <li><a href="#s17">17. General</a></li>
+          <li><a href="#s18">18. Contact</a></li>
+        </ol>
+      </nav>
+
+      <div class="legal-body">
+        <p class="legal-updated">Last updated: <%= company.lastUpdated %></p>
+
+        <% if (company.isPlaceholder) { %>
+          <p class="legal-placeholder-note">
+            <strong>Setup required.</strong> This document still contains placeholder company details.
+            Set <span class="mono">COMPANY_LEGAL_NAME</span>, <span class="mono">COMPANY_REG_NUMBER</span> and
+            <span class="mono">COMPANY_ADDRESS</span> (see <span class="mono">src/config/company.js</span>),
+            and have a qualified lawyer review this text before publishing.
+          </p>
+        <% } %>
+
+        <div class="legal-summary">
+          <h2>The short version</h2>
+          <p>This summary is for convenience only — the numbered terms below are what actually apply.</p>
+          <ul>
+            <li>GoyHub is a free companion app and community forum for Counter-Strike 2 players.</li>
+            <li>You need an account to post. Keep your password safe and don't share the account.</li>
+            <li>Don't cheat, harass people, or upload anything illegal. We can remove content and ban accounts.</li>
+            <li>You keep ownership of what you post, but you let us host and display it on the site.</li>
+            <li>The service is provided "as is", with no guarantee of uptime or fitness for any purpose.</li>
+            <li>We are not affiliated with Valve Corporation.</li>
+          </ul>
+        </div>
+
+        <h2 id="s1">1. Who we are</h2>
+        <p>
+          GoyHub (the <strong>"Service"</strong>) is operated by <strong><%= company.legalName %></strong>
+          (<strong>"we"</strong>, <strong>"us"</strong>, <strong>"our"</strong>), a company registered in the
+          <%= company.jurisdiction %> under registration number <%= company.registrationNumber %>, with its
+          registered office at <%= company.addressLine %>, <%= company.city %>, <%= company.jurisdiction %>.
+        </p>
+        <p>
+          The Service consists of this website, the GoyHub community forum, the GoyHub desktop application
+          for Windows, and any related software, downloads, content and support channels we make available.
+        </p>
+
+        <h2 id="s2">2. Accepting these terms</h2>
+        <p>
+          These Terms &amp; Conditions (the <strong>"Terms"</strong>) form a binding agreement between you and
+          us. By accessing the Service, creating an account, or downloading, installing or using the GoyHub
+          application, you confirm that you have read, understood and agree to be bound by these Terms and by
+          our <a href="/privacy">Privacy Policy</a>, which is incorporated into these Terms by reference.
+        </p>
+        <p>If you do not agree to these Terms, you must not use the Service.</p>
+
+        <h2 id="s3">3. Eligibility</h2>
+        <p>
+          You must be at least <%= company.minimumAge %> years old to create a GoyHub account. If the law where
+          you live sets a higher minimum age for consenting to online services or to the processing of your
+          personal data, you must meet that higher age instead.
+        </p>
+        <p>
+          By creating an account you represent that you meet these requirements, that the information you give
+          us is accurate, and that you are not barred from using the Service under any applicable law or under
+          a previous suspension or ban issued by us.
+        </p>
+
+        <h2 id="s4">4. Your account</h2>
+        <p>
+          You need an account to post on the forum and to sign in to the GoyHub application. You are
+          responsible for everything that happens under your account.
+        </p>
+        <ul>
+          <li>Choose a strong, unique password and keep it confidential. We store passwords only as salted scrypt hashes and can never tell you your password.</li>
+          <li>Do not share, sell, rent, transfer or lend your account, and do not let anyone else use it.</li>
+          <li>Do not create an account on behalf of anyone else, or create a new account to evade a ban.</li>
+          <li>Tell us promptly at <a href="mailto:<%= company.contactEmail %>"><%= company.contactEmail %></a> if you believe your account has been accessed without your permission.</li>
+        </ul>
+        <p>
+          We may refuse, reclaim or rename any username that impersonates another person, implies affiliation
+          with us or our staff, or that we consider offensive or misleading.
+        </p>
+
+        <h2 id="s5">5. Licence to use GoyHub</h2>
+        <p>
+          Subject to your compliance with these Terms, we grant you a personal, limited, non-exclusive,
+          non-transferable, non-sublicensable and revocable licence to download and use the GoyHub application
+          and to access the Service for your own, non-commercial use.
+        </p>
+        <p>You must not, and must not attempt to:</p>
+        <ul>
+          <li>copy, sell, rent, sublicense, distribute or otherwise commercially exploit the Service or the application;</li>
+          <li>reverse engineer, decompile or disassemble the application, except to the extent this restriction is prohibited by applicable law;</li>
+          <li>remove, obscure or alter any proprietary notice, branding or attribution;</li>
+          <li>circumvent, disable or interfere with any security, rate-limiting, authentication or access-control feature;</li>
+          <li>use bots, scrapers, crawlers or other automated means to access, harvest or copy any part of the Service, except for well-behaved search engine indexing;</li>
+          <li>place unreasonable load on our infrastructure, or attempt any denial-of-service or intrusion.</li>
+        </ul>
+        <p>
+          All rights not expressly granted to you are reserved by us. The GoyHub name, logo, site design,
+          software and all associated intellectual property remain our property or that of our licensors.
+        </p>
+
+        <h2 id="s6">6. Acceptable use</h2>
+        <p>When using the forum or any other part of the Service, you must not post, upload, link to or share:</p>
+        <ul>
+          <li>cheating software, aimbots, wallhacks, injectors, exploits, or instructions or links for obtaining them;</li>
+          <li>offers to buy, sell, trade, boost or rent game accounts, or to arrange match-fixing or gambling;</li>
+          <li>harassment, threats, hate speech, or content targeting a person or group on the basis of a protected characteristic;</li>
+          <li>sexual content involving minors, or any other content that is unlawful in the jurisdictions where it can be viewed;</li>
+          <li>another person's private information (including real names, addresses, phone numbers or IP addresses) without their consent;</li>
+          <li>malware, phishing links, spam, chain messages, or repetitive promotional content;</li>
+          <li>content that infringes anyone's copyright, trademark, privacy or other rights.</li>
+        </ul>
+        <p>
+          You must also comply with all laws that apply to you, and with the terms of any third-party service
+          you use alongside GoyHub, including Steam and Counter-Strike 2.
+        </p>
+
+        <h2 id="s7">7. Your content</h2>
+        <p>
+          You keep ownership of the threads, posts, configurations and other material you submit to the Service
+          (<strong>"Your Content"</strong>). We do not claim ownership of it.
+        </p>
+        <p>
+          By submitting Your Content, you grant us a worldwide, non-exclusive, royalty-free, transferable and
+          sublicensable licence to host, store, reproduce, adapt for formatting purposes, publish, display and
+          distribute Your Content for the purposes of operating, promoting and improving the Service. This
+          licence lasts as long as Your Content remains on the Service and, for content that others have
+          quoted, replied to or archived, for as long as reasonably necessary afterwards.
+        </p>
+        <p>
+          You represent that you have all rights necessary to grant this licence, and that Your Content does
+          not breach section 6 or any third party's rights. Forum content is <strong>public</strong>: anything
+          you post can be read by anyone with an internet connection and may be indexed by search engines.
+          Do not post anything you would not want to be public and permanent.
+        </p>
+
+        <h2 id="s8">8. Moderation &amp; enforcement</h2>
+        <p>
+          We may, but are not obliged to, monitor the Service. Where we consider it appropriate — including
+          where content or conduct breaches these Terms, exposes us or other users to risk, or is the subject
+          of a credible complaint — we may at our sole discretion and without prior notice:
+        </p>
+        <ul>
+          <li>edit, hide, lock, move or delete any thread, post or other content;</li>
+          <li>issue a warning, restrict posting, suspend or permanently ban an account;</li>
+          <li>revoke access to the application and to any download;</li>
+          <li>retain records of the conduct and the associated technical data described in our <a href="/privacy">Privacy Policy</a>;</li>
+          <li>report conduct to law enforcement or other authorities where we believe it may be unlawful.</li>
+        </ul>
+        <p>
+          Bans are enforced at the account level and may also be enforced against related accounts. We are not
+          required to give reasons, and no refund or compensation is payable in connection with any moderation
+          action.
+        </p>
+
+        <h2 id="s9">9. Relationship with Valve</h2>
+        <p>
+          GoyHub is an independent, fan-made companion product. We are <strong>not affiliated with, endorsed
+          by, sponsored by or associated with Valve Corporation</strong>. "Counter-Strike", "Counter-Strike 2",
+          "CS2" and "Steam" are trademarks of Valve Corporation, used here only to describe compatibility.
+        </p>
+        <p>
+          Your use of Counter-Strike 2 and Steam remains governed by Valve's own agreements. GoyHub does not
+          read or modify game memory and does not inject code into the game. Even so, you are solely
+          responsible for ensuring that your use of any third-party tool complies with Valve's rules, and we
+          accept no responsibility for any action Valve takes against your game account.
+        </p>
+
+        <h2 id="s10">10. Availability &amp; changes</h2>
+        <p>
+          The Service is provided free of charge and on an "as available" basis. We do not guarantee any level
+          of availability, uptime, performance or data retention. We may change, suspend, limit or discontinue
+          the Service or any feature of it, in whole or in part, at any time and without liability to you.
+        </p>
+        <p>
+          We may release updates to the application. Some updates may be required for continued use, and older
+          versions may stop working without notice.
+        </p>
+
+        <h2 id="s11">11. Disclaimers</h2>
+        <p>
+          To the fullest extent permitted by applicable law, the Service and everything provided through it are
+          supplied <strong>"as is" and "as available", without warranties of any kind</strong>, whether express,
+          implied or statutory, including any implied warranties of merchantability, fitness for a particular
+          purpose, title, accuracy and non-infringement.
+        </p>
+        <p>We do not warrant that:</p>
+        <ul>
+          <li>the Service will be uninterrupted, timely, secure or error-free;</li>
+          <li>statistics, ratings, price data, configuration recommendations or performance presets are accurate, complete or suitable for your system;</li>
+          <li>content posted by other users is accurate, lawful or safe to use;</li>
+          <li>any defect will be corrected, or that the Service is free of viruses or other harmful components.</li>
+        </ul>
+        <p>
+          Any configuration, launch option or setting you apply is applied at your own risk. You are
+          responsible for backing up your own game settings and files.
+        </p>
+
+        <h2 id="s12">12. Limitation of liability</h2>
+        <p>
+          To the fullest extent permitted by applicable law, we (together with our directors, officers,
+          employees, contractors and agents) will not be liable for any indirect, incidental, special,
+          consequential, punitive or exemplary damages, nor for any loss of profits, revenue, goodwill, data,
+          game accounts, in-game items or opportunity, however caused and under any theory of liability, even
+          if we have been advised of the possibility of such damages.
+        </p>
+        <p>
+          Our total aggregate liability arising out of or in connection with the Service or these Terms will
+          not exceed the greater of (a) the total amount you have paid us in the twelve months before the event
+          giving rise to the claim, or (b) USD 100.
+        </p>
+        <p>
+          Nothing in these Terms excludes or limits liability that cannot lawfully be excluded or limited,
+          including liability for fraud or fraudulent misrepresentation, or for death or personal injury caused
+          by negligence. Some jurisdictions do not allow certain exclusions, so parts of this section may not
+          apply to you; the remaining parts continue to apply.
+        </p>
+
+        <h2 id="s13">13. Indemnity</h2>
+        <p>
+          You agree to indemnify and hold us harmless from any claim, demand, loss, liability, cost or expense
+          (including reasonable legal fees) arising out of or connected with Your Content, your use of the
+          Service, your breach of these Terms, or your violation of any law or third-party right.
+        </p>
+
+        <h2 id="s14">14. Suspension &amp; termination</h2>
+        <p>
+          You may stop using the Service at any time and may ask us to close your account by contacting
+          <a href="mailto:<%= company.contactEmail %>"><%= company.contactEmail %></a>.
+        </p>
+        <p>
+          We may suspend or terminate your account and access to the Service at any time, with or without
+          notice, including where we believe you have breached these Terms or where continued access poses a
+          risk to us, other users or third parties.
+        </p>
+        <p>
+          On termination, your licence under section 5 ends immediately. Sections 7 (as to content already
+          posted), 11, 12, 13, 16 and 17 survive termination. Content you posted may remain visible on the
+          forum where its removal would disrupt other users' threads; see our
+          <a href="/privacy">Privacy Policy</a> for how we handle data after account closure.
+        </p>
+
+        <h2 id="s15">15. Changes to these terms</h2>
+        <p>
+          We may update these Terms from time to time. When we do, we will change the "last updated" date at
+          the top of this page, and where the changes are material we will make reasonable efforts to notify
+          you through the Service. Changes take effect when published. Your continued use of the Service after
+          that point means you accept the revised Terms.
+        </p>
+
+        <h2 id="s16">16. Governing law &amp; disputes</h2>
+        <p>
+          These Terms and any dispute or claim arising out of or in connection with them (including
+          non-contractual disputes) are governed by the laws of the <%= company.jurisdiction %>, without regard
+          to conflict-of-law rules.
+        </p>
+        <p>
+          The courts of the <%= company.jurisdiction %> have exclusive jurisdiction to settle any such dispute,
+          and you submit to that jurisdiction. If you are a consumer resident elsewhere, this does not deprive
+          you of the protection of any mandatory provisions of the law of your country of residence.
+        </p>
+        <p>
+          Before starting formal proceedings, please contact us at
+          <a href="mailto:<%= company.legalEmail %>"><%= company.legalEmail %></a> so we can try to resolve the
+          matter informally.
+        </p>
+
+        <h2 id="s17">17. General</h2>
+        <ul>
+          <li><strong>Entire agreement.</strong> These Terms and the Privacy Policy are the entire agreement between you and us regarding the Service.</li>
+          <li><strong>Severability.</strong> If any provision is held unenforceable, the rest remains in force and the unenforceable provision is replaced by an enforceable one reflecting the original intent as closely as possible.</li>
+          <li><strong>No waiver.</strong> If we do not enforce a provision, that is not a waiver of our right to do so later.</li>
+          <li><strong>Assignment.</strong> You may not assign or transfer these Terms. We may assign them to an affiliate or in connection with a merger, acquisition or sale of assets.</li>
+          <li><strong>No third-party rights.</strong> No one other than you and us has any right to enforce these Terms.</li>
+          <li><strong>Language.</strong> These Terms are written in English. Any translation is provided for convenience, and the English version prevails.</li>
+        </ul>
+
+        <div class="legal-contact" id="s18">
+          <h2>18. Contact</h2>
+          <p>Questions about these Terms? Get in touch:</p>
+          <address>
+            <strong><%= company.legalName %></strong><br>
+            <%= company.addressLine %><br>
+            <%= company.city %>, <%= company.jurisdiction %><br>
+            Registration number: <%= company.registrationNumber %><br>
+            General: <a href="mailto:<%= company.contactEmail %>"><%= company.contactEmail %></a><br>
+            Legal: <a href="mailto:<%= company.legalEmail %>"><%= company.legalEmail %></a>
+          </address>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+<%- include('../partials/footer') %>

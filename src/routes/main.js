@@ -46,6 +46,14 @@ router.get('/', (req, res) => {
   res.render('index', { title: null, stats: siteStats(), recentThreads, downloadMeta });
 });
 
+router.get('/terms', (req, res) => {
+  res.render('legal/terms', { title: 'Terms & Conditions' });
+});
+
+router.get('/privacy', (req, res) => {
+  res.render('legal/privacy', { title: 'Privacy Policy' });
+});
+
 router.get('/download', (req, res) => {
   res.render('download', { title: 'Download', stats: siteStats(), downloadMeta });
 });

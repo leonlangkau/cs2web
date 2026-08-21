@@ -62,6 +62,7 @@ function createApp() {
   app.locals.pageWindow = pageWindow;
   app.locals.appName = 'GoyHub';
   app.locals.appVersion = require('../package.json').version;
+  app.locals.company = require('./config/company');
   // Defaults so views (incl. the error page) render even when an error occurs
   // before the session/flash/CSRF middleware populated res.locals.
   app.locals.user = null;

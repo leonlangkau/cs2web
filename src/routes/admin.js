@@ -2,7 +2,7 @@
 
 const express = require('express');
 
-const { db } = require('../db');
+const { db, DELETED_USERNAME, deletedUserId } = require('../db');
 const { requireAdmin, destroyUserSessions, audit } = require('../middleware');
 
 const router = express.Router();
@@ -30,8 +30,8 @@ function adminAudit(req, detail) {
 router.get('/', (req, res) => {
   const one = (sql, ...args) => Number(db.prepare(sql).get(...args)?.n || 0);
   const stats = {
-    users: one('SELECT COUNT(*) AS n FROM users'),
-    banned: one('SELECT COUNT(*) AS n FROM users WHERE banned = 1'),
+    users: one('SELECT COUNT(*) AS n FROM users WHERE username != ?', DELETED_USERNAME),
+    banned: one('SELECT COUNT(*) AS n FROM users WHERE banned = 1 AND username != ?', DELETED_USERNAME),
     threads: one('SELECT COUNT(*) AS n FROM threads'),
     posts: one('SELECT COUNT(*) AS n FROM posts'),
     downloads: one("SELECT COUNT(*) AS n FROM ip_logs WHERE event = 'download'"),
@@ -41,8 +41,8 @@ router.get('/', (req, res) => {
   };
   const recentLogs = db.prepare('SELECT * FROM ip_logs ORDER BY id DESC LIMIT 12').all();
   const recentUsers = db.prepare(
-    'SELECT id, username, role, banned, signup_ip, created_at FROM users ORDER BY id DESC LIMIT 8'
-  ).all();
+    'SELECT id, username, role, banned, signup_ip, created_at FROM users WHERE username != ? ORDER BY id DESC LIMIT 8'
+  ).all(DELETED_USERNAME);
   res.render('admin/dashboard', { title: 'Admin · Dashboard', stats, recentLogs, recentUsers });
 });
 
@@ -50,8 +50,14 @@ router.get('/users', (req, res) => {
   const q = String(req.query.q || '').trim().slice(0, 100);
   const page = Math.max(1, Math.min(10000, parseInt(req.query.page, 10) || 1));
 
-  const where = q ? 'WHERE username LIKE ? OR email LIKE ? OR signup_ip LIKE ? OR last_login_ip LIKE ?' : '';
-  const params = q ? Array(4).fill(`%${q}%`) : [];
+  // The [deleted] placeholder is infrastructure, not a member — keep it out of the list.
+  const clauses = ['username != ?'];
+  const params = [DELETED_USERNAME];
+  if (q) {
+    clauses.push('(username LIKE ? OR email LIKE ? OR signup_ip LIKE ? OR last_login_ip LIKE ?)');
+    params.push(...Array(4).fill(`%${q}%`));
+  }
+  const where = `WHERE ${clauses.join(' AND ')}`;
 
   const total = Number(db.prepare(`SELECT COUNT(*) AS n FROM users ${where}`).get(...params).n);
   const pages = Math.max(1, Math.ceil(total / USERS_PER_PAGE));
@@ -119,9 +125,18 @@ router.post('/users/:id/delete', (req, res) => {
     res.setFlash('error', 'You cannot delete yourself.');
     return res.redirect(backTo(req, '/admin/users'));
   }
+  if (user.username === DELETED_USERNAME) {
+    res.setFlash('error', 'That is the reserved placeholder account and cannot be deleted.');
+    return res.redirect(backTo(req, '/admin/users'));
+  }
+  // Reassign rather than cascade: destroying the account must not destroy
+  // conversations other members took part in (see the Privacy Policy, s9).
+  const placeholder = deletedUserId();
+  const threads = db.prepare('UPDATE threads SET user_id = ? WHERE user_id = ?').run(placeholder, user.id);
+  const posts = db.prepare('UPDATE posts SET user_id = ? WHERE user_id = ?').run(placeholder, user.id);
   db.prepare('DELETE FROM users WHERE id = ?').run(user.id);
-  adminAudit(req, `deleted user #${user.id} (${user.username})`);
-  res.setFlash('success', `${user.username} and all their content have been deleted.`);
+  adminAudit(req, `deleted user #${user.id} (${user.username}); reassigned ${threads.changes} threads and ${posts.changes} posts to ${DELETED_USERNAME}`);
+  res.setFlash('success', `${user.username} has been deleted. Their posts remain, attributed to ${DELETED_USERNAME}.`);
   res.redirect(backTo(req, '/admin/users'));
 });
 

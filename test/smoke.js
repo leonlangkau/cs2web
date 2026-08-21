@@ -12,6 +12,7 @@ process.env.GOYHUB_DB = path.join(tmpDir, 'test.db');
 process.env.ADMIN_USERNAME = 'admin';
 process.env.ADMIN_PASSWORD = 'admin-test-password-1';
 process.env.CAPTCHA_DIFFICULTY = '10'; // keep the proof of work quick under test
+process.env.RATE_LIMIT_SIGNUP = '50';  // the suite registers more accounts than a real IP would
 process.env.CAPTCHA_SECRET = 'test-captcha-secret';
 
 const crypto = require('node:crypto');
@@ -312,6 +313,36 @@ async function main() {
   ok('admin cannot ban themself', db.prepare('SELECT banned FROM users WHERE id = ?').get(adminRow.id).banned === 0);
 
   ok('admin actions were audited', Number(db.prepare("SELECT COUNT(*) AS n FROM ip_logs WHERE event = 'admin_action'").get().n) >= 4);
+
+  // --- Deleting a user preserves the conversation (Privacy Policy s9/s11) ---
+  const doomed = new Client(base);
+  await doomed.get('/auth/signup');
+  await doomed.post('/auth/signup', {
+    username: 'doomed_user', email: 'doomed@example.com', password: 'supersecret1', confirm: 'supersecret1',
+    ...(await solveCaptcha(doomed)),
+  });
+  res = await doomed.post('/forum/new', { category: 'general', title: 'Thread by a doomed user', body: 'Please survive me.' });
+  const doomedThreadId = String(res.headers.get('location')).split('/').pop();
+  const doomedId = db.prepare("SELECT id FROM users WHERE username = 'doomed_user'").get().id;
+
+  res = await admin.post(`/admin/users/${doomedId}/delete`);
+  ok('admin can delete a user', res.status === 302 && !db.prepare('SELECT id FROM users WHERE id = ?').get(doomedId));
+  ok('their thread survives the deletion',
+    !!db.prepare('SELECT id FROM threads WHERE id = ?').get(doomedThreadId));
+
+  res = await anon.get(`/forum/t/${doomedThreadId}`);
+  html = await res.text();
+  ok('surviving thread is reattributed to [deleted]',
+    res.status === 200 && html.includes('Please survive me.') && html.includes('[deleted]') && !html.includes('doomed_user'));
+
+  const placeholderId = db.prepare("SELECT id FROM users WHERE username = '[deleted]'").get().id;
+  res = await admin.post(`/admin/users/${placeholderId}/delete`);
+  ok('the [deleted] placeholder cannot itself be deleted',
+    !!db.prepare('SELECT id FROM users WHERE id = ?').get(placeholderId));
+
+  res = await admin.get('/admin/users');
+  html = await res.text();
+  ok('placeholder is hidden from the admin user list', !html.includes('&#39;[deleted]&#39;') && !html.includes('>[deleted]<'));
 
   // --- Category management ---
   res = await admin.post('/admin/categories', { name: 'Trade Zone', description: 'Buy and sell skins' });

@@ -42,7 +42,9 @@
   <div class="container footer-bottom">
     <span>© 2026 <%= company.tradingName %> · v<%= appVersion %></span>
     <span class="footer-legal-line">
-      Operated by <%= company.legalName %>, registered in the <%= company.jurisdiction %>.
+      <%# Fall back to the trading name so an unfilled placeholder never ships site-wide. %>
+      Operated by <%= company.isPlaceholder ? company.tradingName : company.legalName %>,
+      registered in the <%= company.jurisdiction %>.
       Fan-made companion app. Not affiliated with Valve Corporation. Counter-Strike and CS2 are trademarks of Valve.
     </span>
   </div>

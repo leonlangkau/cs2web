@@ -5,7 +5,7 @@ const fs = require('node:fs');
 const crypto = require('node:crypto');
 const express = require('express');
 
-const { db } = require('../db');
+const { db, DELETED_USERNAME } = require('../db');
 const { audit, clientIp, requireAuth, acceptTerms, TERMS_VERSION } = require('../middleware');
 const captcha = require('../captcha');
 
@@ -35,9 +35,9 @@ try {
 }
 
 function siteStats() {
-  const one = (sql) => Number(db.prepare(sql).get()?.n || 0);
+  const one = (sql, ...args) => Number(db.prepare(sql).get(...args)?.n || 0);
   return {
-    users: one('SELECT COUNT(*) AS n FROM users'),
+    users: one('SELECT COUNT(*) AS n FROM users WHERE username != ?', DELETED_USERNAME),
     threads: one('SELECT COUNT(*) AS n FROM threads'),
     posts: one('SELECT COUNT(*) AS n FROM posts'),
     downloads: one("SELECT COUNT(*) AS n FROM ip_logs WHERE event = 'download'"),

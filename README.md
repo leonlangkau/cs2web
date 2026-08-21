@@ -88,6 +88,7 @@ exempt so the documents stay readable before accepting. Bump `TERMS_VERSION` to 
 | `TRUST_PROXY`    | unset              | Set to `true` (or a hop count) behind a proxy so client IPs come from `X-Forwarded-For` |
 | `CAPTCHA_SECRET` | random per boot    | HMAC key for CAPTCHA challenges — **set this in production** or restarts invalidate them |
 | `CAPTCHA_DIFFICULTY` | `16`           | Proof-of-work leading zero bits (8–24). Each +1 doubles the client's work |
+| `RATE_LIMIT_LOGIN` / `RATE_LIMIT_SIGNUP` / `RATE_LIMIT_POST` / `RATE_LIMIT_DOWNLOAD` | `10` / `5` / `6` / `30` | Attempts allowed per window (10 min / hour / minute / hour) |
 | `COMPANY_LEGAL_NAME` / `COMPANY_REG_NUMBER` / `COMPANY_ADDRESS` | placeholders | Registered entity shown on the legal pages |
 
 > Deploy behind HTTPS. Session cookies are marked `Secure` automatically when the

@@ -153,6 +153,29 @@ function seed() {
 
 seed();
 
+/**
+ * Reserved account that inherits the threads and posts of a deleted user.
+ *
+ * Deleting a user would otherwise cascade through threads -> posts and destroy
+ * whole conversations other people were part of. Reassigning to this
+ * placeholder keeps the forum's public record intact — which is also what the
+ * Privacy Policy tells users we do. The bracketed name can never be registered
+ * (the signup pattern allows only [A-Za-z0-9_]) and the row is banned, so it
+ * can never be signed into.
+ */
+const DELETED_USERNAME = '[deleted]';
+
+function deletedUserId() {
+  const existing = db.prepare('SELECT id FROM users WHERE username = ?').get(DELETED_USERNAME);
+  if (existing) return existing.id;
+  const created = db.prepare(
+    'INSERT INTO users (username, email, password_hash, banned) VALUES (?, ?, ?, 1)'
+  ).run(DELETED_USERNAME, 'deleted@goyhub.invalid', hashPassword(newToken(32)));
+  return Number(created.lastInsertRowid);
+}
+
+deletedUserId(); // create on first boot so counts stay stable
+
 /** Remove expired sessions; called at boot and periodically from app.js. */
 function cleanupSessions() {
   db.prepare("DELETE FROM sessions WHERE expires_at <= datetime('now')").run();
@@ -160,4 +183,4 @@ function cleanupSessions() {
 
 cleanupSessions();
 
-module.exports = { db, logEvent, cleanupSessions, DB_PATH };
+module.exports = { db, logEvent, cleanupSessions, DB_PATH, DELETED_USERNAME, deletedUserId };

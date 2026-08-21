@@ -78,7 +78,7 @@
         <p>When you create an account we collect and store:</p>
         <ul>
           <li><strong>Username</strong> — public, shown alongside everything you post.</li>
-          <li><strong>Email address</strong> — not shown publicly; used for account recovery, security notices and service messages.</li>
+          <li><strong>Email address</strong> — not shown publicly. We hold it to identify your account, to verify requests you make about it, and so we can contact you about security or service matters. We do not currently offer an automated password reset: if you lose your password, contact us.</li>
           <li><strong>Password</strong> — stored only as a salted <span class="mono">scrypt</span> hash. We never store, log or transmit your password in plain text and cannot recover it for you.</li>
           <li><strong>Account status</strong> — your role (member or administrator), whether the account is banned, and when it was created.</li>
         </ul>
@@ -91,6 +91,11 @@
           <li><strong>Event type and timestamp</strong> — specifically for account sign-up, successful login, failed login, blocked login attempt on a banned account, logout, file download, and administrator actions.</li>
           <li><strong>Session records</strong> — a hashed session identifier, the IP address and user agent the session was created from, and its creation and expiry times.</li>
           <li><strong>Sign-up IP and most recent login IP</strong>, stored on your account record.</li>
+          <li><strong>The username or email address entered in a failed sign-in attempt</strong> — recorded
+            alongside the IP address and browser even where no such account exists, so that repeated attempts
+            against real accounts can be investigated.</li>
+          <li><strong>Failed human-verification attempts</strong> on the sign-up form, with the reason.</li>
+          <li><strong>Acceptance of these terms</strong> — the date, IP address and version you accepted.</li>
         </ul>
 
         <h3>3.3 Content data</h3>
@@ -157,8 +162,10 @@
         </ul>
         <p>
           These logs are visible to our administrators through an access-controlled admin interface, and every
-          administrator action against an account is itself logged. If the Service runs behind a reverse proxy
-          or content delivery network, the IP we record is the client address that proxy reports.
+          administrator action against an account is itself logged. Where the Service runs behind a reverse
+          proxy or content delivery network <em>and is configured to trust it</em>, the IP we record is the
+          client address that proxy reports; otherwise it is the address of the system that connected to us,
+          which in such a deployment may be the proxy rather than you.
         </p>
 
         <h2 id="p7">7. Public content</h2>
@@ -213,7 +220,7 @@
         <h2 id="p11">11. Your choices &amp; rights</h2>
         <p>You can at any time:</p>
         <ul>
-          <li>view and update the details on your account;</li>
+          <li>ask us to correct or update the details on your account;</li>
           <li>stop using the Service and ask us to close your account;</li>
           <li>delete cookies through your browser;</li>
           <li>ask us for a copy of the personal data we hold about you, ask us to correct it, or ask us to delete it.</li>
@@ -231,9 +238,11 @@
         </p>
         <p>
           Please note two limits. First, we may retain security and IP logs, and records needed to enforce bans
-          or to establish, exercise or defend legal claims, even after an account is deleted. Second, forum
-          posts may remain visible where removing them would break the context of other users' threads; we can
-          instead dissociate them from your username on request.
+          or to establish, exercise or defend legal claims, even after an account is deleted. Second, deleting
+          an account does not delete the threads and replies you posted: removing them would break the
+          conversations other members took part in, so they stay on the forum and are
+          <strong>reattributed to <span class="mono">[deleted]</span></strong>, with your username removed from
+          them. If a specific post needs to come down, ask us and we will consider it on its merits.
         </p>
 
         <h2 id="p12">12. International transfers</h2>

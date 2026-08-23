@@ -1,47 +1,46 @@
 'use strict';
 
 /**
- * Company / legal entity details used by the Terms and Privacy Policy pages.
+ * Company / legal entity details shown on the Terms and Privacy Policy pages.
  *
- * The bracketed values below are PLACEHOLDERS — replace them with your real
- * registered details (or set the matching environment variables) before you
- * publish the site. `isPlaceholder` drives a visible warning banner on the
- * legal pages so an unfinished entity block can't ship unnoticed.
+ * Built from the runtime config rather than read at import time, because
+ * Cloudflare supplies vars per-request via the Worker `env` binding rather than
+ * through process.env.
+ *
+ * The bracketed values are PLACEHOLDERS — replace them (wrangler.toml [vars]
+ * for Cloudflare, or environment variables locally) before publishing.
+ * `isPlaceholder` drives a visible warning banner on the legal pages so an
+ * unfinished entity block cannot ship unnoticed.
  */
 
 const PLACEHOLDER = /^\[.*\]$/;
 
-const company = {
-  /** Registered legal name of the operating entity. */
-  legalName: process.env.COMPANY_LEGAL_NAME || '[Registered Company Name]',
-  /** Public-facing brand name. */
-  tradingName: process.env.COMPANY_TRADING_NAME || 'GoyHub',
-  /** Company / business registration number issued in Anjouan. */
-  registrationNumber: process.env.COMPANY_REG_NUMBER || '[Registration Number]',
-  /** Street address of the registered office. */
-  addressLine: process.env.COMPANY_ADDRESS || '[Registered Office Address]',
-  city: process.env.COMPANY_CITY || 'Mutsamudu',
-  jurisdiction: 'Autonomous Island of Anjouan, Union of the Comoros',
-  country: 'Union of the Comoros',
+function createCompany(env = {}) {
+  const company = {
+    legalName: env.COMPANY_LEGAL_NAME || '[Registered Company Name]',
+    tradingName: env.COMPANY_TRADING_NAME || 'GoyHub',
+    registrationNumber: env.COMPANY_REG_NUMBER || '[Registration Number]',
+    addressLine: env.COMPANY_ADDRESS || '[Registered Office Address]',
+    city: env.COMPANY_CITY || 'Mutsamudu',
+    jurisdiction: 'Autonomous Island of Anjouan, Union of the Comoros',
+    country: 'Union of the Comoros',
 
-  /** Contact addresses. */
-  contactEmail: process.env.COMPANY_CONTACT_EMAIL || 'support@goyhub.com',
-  privacyEmail: process.env.COMPANY_PRIVACY_EMAIL || 'privacy@goyhub.com',
-  legalEmail: process.env.COMPANY_LEGAL_EMAIL || 'legal@goyhub.com',
+    contactEmail: env.COMPANY_CONTACT_EMAIL || 'support@goyhub.com',
+    privacyEmail: env.COMPANY_PRIVACY_EMAIL || 'privacy@goyhub.com',
+    legalEmail: env.COMPANY_LEGAL_EMAIL || 'legal@goyhub.com',
 
-  /** Shown on both legal documents — bump when you revise them. */
-  lastUpdated: process.env.LEGAL_LAST_UPDATED || '21 August 2026',
+    lastUpdated: env.LEGAL_LAST_UPDATED || '21 August 2026',
+    minimumAge: 16,
+  };
 
-  /** Minimum age to hold an account. */
-  minimumAge: 16,
-};
+  company.fullAddress = `${company.addressLine}, ${company.city}, ${company.jurisdiction}`;
+  company.isPlaceholder = [
+    company.legalName,
+    company.registrationNumber,
+    company.addressLine,
+  ].some((value) => PLACEHOLDER.test(value));
 
-company.fullAddress = `${company.addressLine}, ${company.city}, ${company.jurisdiction}`;
+  return company;
+}
 
-company.isPlaceholder = [
-  company.legalName,
-  company.registrationNumber,
-  company.addressLine,
-].some((value) => PLACEHOLDER.test(value));
-
-module.exports = company;
+module.exports = { createCompany };

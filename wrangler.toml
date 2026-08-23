@@ -1,0 +1,70 @@
+# Cloudflare Workers configuration for GoyHub.
+#
+# First-time setup is in README.md ("Deploying to Cloudflare"), including how to
+# create the D1 database and attach a custom domain.
+
+name = "goyhub"
+main = "worker/index.js"
+compatibility_date = "2026-08-01"
+
+# nodejs_compat provides the CommonJS interop the shared src/ modules rely on.
+compatibility_flags = ["nodejs_compat"]
+
+# Static Assets: everything in public/ (CSS, client JS) is served straight from
+# the edge before the Worker runs. The installer deliberately lives in
+# artifacts/, outside this directory, so downloads always go through the
+# audited, rate-limited /download/file route.
+[assets]
+directory = "./public"
+binding = "ASSETS"
+
+# D1 — create with:  npx wrangler d1 create goyhub
+# then paste the returned database_id here.
+[[d1_databases]]
+binding = "DB"
+database_name = "goyhub"
+database_id = "REPLACE_WITH_YOUR_D1_DATABASE_ID"
+
+[vars]
+# Registered entity shown on the legal pages. Replace before publishing.
+COMPANY_LEGAL_NAME = "[Registered Company Name]"
+COMPANY_REG_NUMBER = "[Registration Number]"
+COMPANY_ADDRESS = "[Registered Office Address]"
+COMPANY_CITY = "Mutsamudu"
+COMPANY_CONTACT_EMAIL = "support@goyhub.com"
+COMPANY_PRIVACY_EMAIL = "privacy@goyhub.com"
+COMPANY_LEGAL_EMAIL = "legal@goyhub.com"
+
+# Proof-of-work difficulty in leading zero bits (8–24). Each +1 doubles the
+# client's work. Workers Free allows 10ms CPU per request, so keep PBKDF2
+# iterations modest there.
+CAPTCHA_DIFFICULTY = "16"
+PBKDF2_ITERATIONS = "100000"
+
+# Rate limits: attempts per window (10 min / hour / minute / hour).
+RATE_LIMIT_LOGIN = "10"
+RATE_LIMIT_SIGNUP = "5"
+RATE_LIMIT_POST = "6"
+RATE_LIMIT_DOWNLOAD = "30"
+
+# Secrets — set with `npx wrangler secret put NAME`, never in this file:
+#   CAPTCHA_SECRET   signs CAPTCHA challenges; without it, restarts invalidate them
+#   ADMIN_PASSWORD   password for the seeded admin account on first deploy
+#   ADMIN_USERNAME   optional, defaults to "admin"
+
+# Housekeeping: expire sessions, rate-limit windows and used CAPTCHA nonces.
+[triggers]
+crons = ["0 * * * *"]
+
+# Optional: serve a real, multi-megabyte installer from R2 instead of the copy
+# embedded in the bundle. Create the bucket, upload the zip under its exact
+# filename, then uncomment.
+# [[r2_buckets]]
+# binding = "INSTALLER"
+# bucket_name = "goyhub-installer"
+
+# Custom domain — see README. You can also add this from the dashboard under
+# Workers & Pages → goyhub → Settings → Domains & Routes.
+# [[routes]]
+# pattern = "goyhub.com"
+# custom_domain = true

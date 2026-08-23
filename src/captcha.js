@@ -3,65 +3,45 @@
 /**
  * Self-hosted proof-of-work CAPTCHA.
  *
- * Design note — what this does and does not do:
- *
  * Distorted-text and pick-the-image puzzles are solved by current multimodal
  * models more reliably than by people, so this does not try to out-puzzle a
  * bot. It attacks the ECONOMICS instead: every submission must carry a valid
- * proof of work, which costs real CPU per attempt and is negligible once but
- * expensive across thousands of automated sign-ups. That is layered with a
- * honeypot field, a minimum elapsed time measured on the SERVER clock,
- * single-use challenges bound to the client IP, and the existing per-IP rate
- * limits.
+ * proof of work, which costs real CPU per attempt — negligible once, expensive
+ * across thousands of automated sign-ups. That is layered with a honeypot
+ * field, a minimum elapsed time measured on the SERVER clock, single-use
+ * challenges bound to the client IP, and the per-IP rate limits.
  *
  * A determined attacker driving a real browser can still pass this. It is a
  * cost multiplier and a filter for commodity bots, not an identity proof.
  */
 
-const crypto = require('node:crypto');
+const { hmacHex, sha256hex, timingSafeEqualBytes } = require('./crypto');
+const { newToken } = require('./crypto');
 
-// Persist CAPTCHA_SECRET in production; a generated secret invalidates
-// outstanding challenges whenever the process restarts.
-const SECRET = process.env.CAPTCHA_SECRET || crypto.randomBytes(32).toString('hex');
-
-/** Leading zero BITS the solution hash must have. Each +1 doubles the work. */
-const DIFFICULTY = Math.max(8, Math.min(24, Number(process.env.CAPTCHA_DIFFICULTY) || 16));
-/** How long a challenge stays valid. */
 const TTL_MS = 10 * 60 * 1000;
-/** Floor on how fast a challenge may come back, measured server-side. */
 const MIN_ELAPSED_MS = 800;
+const DEFAULT_DIFFICULTY = 16;
 
-/** Nonces already redeemed, so a solved challenge can't be replayed. */
-const consumed = new Map();
-
-function sha256hex(value) {
-  return crypto.createHash('sha256').update(String(value)).digest('hex');
+function difficultyFor(env = {}) {
+  const raw = Number(env.CAPTCHA_DIFFICULTY);
+  return Number.isFinite(raw) ? Math.max(8, Math.min(24, Math.floor(raw))) : DEFAULT_DIFFICULTY;
 }
 
-function sign(payload) {
-  return crypto.createHmac('sha256', SECRET).update(payload).digest('hex');
+function secretFor(env = {}) {
+  // Without a persisted secret, outstanding challenges break whenever the
+  // process (or Workers isolate) is replaced.
+  return env.CAPTCHA_SECRET || 'goyhub-insecure-development-captcha-secret';
 }
 
-function pruneConsumed() {
-  const now = Date.now();
-  for (const [nonce, expiresAt] of consumed) {
-    if (expiresAt <= now) consumed.delete(nonce);
-  }
-}
-
-/**
- * Mints a challenge bound to the caller's IP.
- * Returns the wire form handed to the browser.
- */
-function issue(ip) {
-  const nonce = crypto.randomBytes(16).toString('hex');
+/** Mints a challenge bound to the caller's IP. */
+async function issue(ip, env = {}) {
+  const nonce = newToken(16);
   const issuedAt = Date.now();
-  const payload = [nonce, issuedAt, DIFFICULTY, sha256hex(ip || 'unknown').slice(0, 16)].join('.');
-  return {
-    token: `${payload}.${sign(payload)}`,
-    nonce,
-    difficulty: DIFFICULTY,
-  };
+  const difficulty = difficultyFor(env);
+  const ipHash = (await sha256hex(ip || 'unknown')).slice(0, 16);
+  const payload = [nonce, issuedAt, difficulty, ipHash].join('.');
+  const signature = await hmacHex(secretFor(env), payload);
+  return { token: `${payload}.${signature}`, nonce, difficulty };
 }
 
 /** Counts leading zero bits of a hex digest. */
@@ -78,13 +58,13 @@ function leadingZeroBits(hex) {
   return bits;
 }
 
+const encoder = new TextEncoder();
+
 /**
  * Validates a submitted solution.
  * Returns { ok: true } or { ok: false, reason } — `reason` is for logs, not users.
  */
-function verify({ token, solution, honeypot, ip }) {
-  pruneConsumed();
-
+async function verify(db, { token, solution, honeypot, ip }, env = {}) {
   // 1. Honeypot: a field hidden from people that naive form bots fill in.
   if (typeof honeypot === 'string' && honeypot.trim() !== '') {
     return { ok: false, reason: 'honeypot filled' };
@@ -103,9 +83,8 @@ function verify({ token, solution, honeypot, ip }) {
   const payload = [nonce, issuedAtRaw, difficultyRaw, ipHash].join('.');
 
   // 2. Signature: the challenge must be one we actually minted.
-  const expected = sign(payload);
-  if (signature.length !== expected.length
-    || !crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expected))) {
+  const expected = await hmacHex(secretFor(env), payload);
+  if (!timingSafeEqualBytes(encoder.encode(signature), encoder.encode(expected))) {
     return { ok: false, reason: 'bad signature' };
   }
 
@@ -121,20 +100,23 @@ function verify({ token, solution, honeypot, ip }) {
   if (elapsed < MIN_ELAPSED_MS) return { ok: false, reason: 'submitted too fast' };
 
   // 4. Bound to the client that requested it.
-  if (ipHash !== sha256hex(ip || 'unknown').slice(0, 16)) {
+  if (ipHash !== (await sha256hex(ip || 'unknown')).slice(0, 16)) {
     return { ok: false, reason: 'challenge issued to another client' };
   }
 
-  // 5. Single use.
-  if (consumed.has(nonce)) return { ok: false, reason: 'challenge already used' };
-
-  // 6. The actual work.
-  if (leadingZeroBits(sha256hex(`${nonce}:${solution}`)) < difficulty) {
+  // 5. The actual work.
+  if (leadingZeroBits(await sha256hex(`${nonce}:${solution}`)) < difficulty) {
     return { ok: false, reason: 'invalid proof of work' };
   }
 
-  consumed.set(nonce, issuedAt + TTL_MS);
+  // 6. Single use — the insert fails if this nonce was already redeemed.
+  const claimed = await db.run(
+    'INSERT INTO captcha_used (nonce, expires_at) VALUES (?, ?) ON CONFLICT(nonce) DO NOTHING',
+    nonce, issuedAt + TTL_MS
+  );
+  if (claimed.changes === 0) return { ok: false, reason: 'challenge already used' };
+
   return { ok: true };
 }
 
-module.exports = { issue, verify, DIFFICULTY, sha256hex, leadingZeroBits, pruneConsumed };
+module.exports = { issue, verify, leadingZeroBits, difficultyFor };

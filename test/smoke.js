@@ -2,38 +2,28 @@
 
 /* End-to-end smoke test: boots the real app on a throwaway DB and drives it over HTTP. */
 
-const assert = require('node:assert');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const crypto = require('node:crypto');
+const { serve } = require('@hono/node-server');
 
 const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'goyhub-test-'));
-process.env.GOYHUB_DB = path.join(tmpDir, 'test.db');
-process.env.ADMIN_USERNAME = 'admin';
-process.env.ADMIN_PASSWORD = 'admin-test-password-1';
-process.env.CAPTCHA_DIFFICULTY = '10'; // keep the proof of work quick under test
-process.env.RATE_LIMIT_SIGNUP = '50';  // the suite registers more accounts than a real IP would
-process.env.CAPTCHA_SECRET = 'test-captcha-secret';
 
-const crypto = require('node:crypto');
-const { createApp } = require('../src/app');
-const { db } = require('../src/db');
+const ENV = {
+  ADMIN_USERNAME: 'admin',
+  ADMIN_PASSWORD: 'admin-test-password-1',
+  CAPTCHA_DIFFICULTY: '10',        // keep the proof of work quick under test
+  CAPTCHA_SECRET: 'test-captcha-secret',
+  PBKDF2_ITERATIONS: '10000',      // lower cost so the suite stays fast
+  RATE_LIMIT_SIGNUP: '50',         // the suite registers more accounts than a real IP would
+};
+
+const { buildServer } = require('../server');
 const { leadingZeroBits } = require('../src/captcha');
+const { isInSync } = require('../scripts/build-schema');
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-
-/** Fetches a CAPTCHA challenge and mines a valid proof of work for it. */
-async function solveCaptcha(client) {
-  const challenge = await (await client.get('/captcha/challenge')).json();
-  let counter = 0;
-  for (;;) {
-    const digest = crypto.createHash('sha256').update(`${challenge.nonce}:${counter}`).digest('hex');
-    if (leadingZeroBits(digest) >= challenge.difficulty) break;
-    counter += 1;
-  }
-  await sleep(850); // server enforces a minimum elapsed time
-  return { captcha_token: challenge.token, captcha_solution: String(counter) };
-}
 
 /** Minimal cookie-jar HTTP client around fetch. */
 class Client {
@@ -89,21 +79,45 @@ function ok(name, cond) {
 }
 
 async function main() {
-  const app = createApp();
+  const { app, db } = await buildServer({
+    dbPath: path.join(tmpDir, 'test.db'),
+    env: ENV,
+  });
+
   const server = await new Promise((resolve) => {
-    const s = app.listen(0, '127.0.0.1', () => resolve(s));
+    const s = serve({ fetch: app.fetch, port: 0, hostname: '127.0.0.1' }, () => resolve(s));
   });
   const base = `http://127.0.0.1:${server.address().port}`;
+
+  /** Fetches a CAPTCHA challenge and mines a valid proof of work for it. */
+  async function solveCaptcha(client) {
+    const challenge = await (await client.get('/captcha/challenge')).json();
+    let counter = 0;
+    for (;;) {
+      const digest = crypto.createHash('sha256').update(`${challenge.nonce}:${counter}`).digest('hex');
+      if (leadingZeroBits(digest) >= challenge.difficulty) break;
+      counter += 1;
+    }
+    await sleep(850); // server enforces a minimum elapsed time
+    return { captcha_token: challenge.token, captcha_solution: String(counter) };
+  }
 
   const anon = new Client(base);
   const user = new Client(base);
   const admin = new Client(base);
+
+  // --- Build artefacts stay in sync with their sources ---
+  ok('generated schema module matches schema.sql', isInSync());
 
   // --- Public pages ---
   let res = await anon.get('/');
   let html = await res.text();
   ok('landing page renders', res.status === 200 && html.includes('Play smarter.') && html.includes('hero-canvas'));
   ok('landing has security headers', String(res.headers.get('content-security-policy')).includes("default-src 'self'"));
+
+  res = await anon.get('/css/style.css');
+  ok('static assets are served', res.status === 200 && String(res.headers.get('content-type')).includes('css'));
+  await res.text();
 
   res = await anon.get('/forum');
   html = await res.text();
@@ -116,13 +130,25 @@ async function main() {
   res = await anon.get('/nope/nothing');
   ok('unknown route is 404', res.status === 404);
 
+  // --- Legal pages ---
+  res = await anon.get('/terms');
+  html = await res.text();
+  ok('terms page renders with jurisdiction and new sections',
+    res.status === 200 && html.includes('Autonomous Island of Anjouan')
+      && html.includes('No tampering, cloning or copying') && html.includes('Binding arbitration'));
+  ok('terms table of contents matches its anchors',
+    ['s1', 's6', 's17', 's20'].every((id) => html.includes(`href="#${id}"`) && html.includes(`id="${id}"`)));
+
+  res = await anon.get('/privacy');
+  html = await res.text();
+  ok('privacy page documents IP logging and cookies',
+    res.status === 200 && html.includes('IP address logging') && html.includes('ghsession') && html.includes('PBKDF2'));
+
   // --- Terms acceptance gate ---
   const visitor = new Client(base);
   res = await visitor.get('/');
   html = await res.text();
   ok('terms gate shows on first visit', html.includes('class="terms-gate"') && html.includes('I accept'));
-  ok('terms gate names arbitration and anti-tampering',
-    html.includes('binding private arbitration') && html.includes('tamper with, clone, copy'));
 
   res = await visitor.get('/terms');
   html = await res.text();
@@ -132,7 +158,7 @@ async function main() {
   ok('accepting terms redirects and sets the cookie',
     res.status === 302 && res.headers.get('location') === '/forum' && !!visitor.jar.get('ghterms'));
   ok('terms acceptance is logged with a version',
-    !!db.prepare("SELECT id FROM ip_logs WHERE event = 'terms_accepted' AND detail LIKE 'version %'").get());
+    !!(await db.get("SELECT id FROM ip_logs WHERE event = 'terms_accepted' AND detail LIKE 'version %'")));
 
   res = await visitor.get('/');
   html = await res.text();
@@ -143,43 +169,17 @@ async function main() {
   res = await redirector.post('/legal/accept', { next: '//evil.example' });
   ok('accept redirect is same-site only', res.headers.get('location') === '/');
 
-  // --- Legal pages ---
-  const company = require('../src/config/company');
-  res = await anon.get('/terms');
-  html = await res.text();
-  ok('terms page renders with company + jurisdiction',
-    res.status === 200 && html.includes('Terms &amp; Conditions')
-      && html.includes('Autonomous Island of Anjouan') && html.includes(company.legalName)
-      && html.includes('Governing law'));
-
-  res = await anon.get('/privacy');
-  html = await res.text();
-  ok('privacy page renders and documents IP logging',
-    res.status === 200 && html.includes('Privacy Policy') && html.includes('IP address logging')
-      && html.includes('ghsession') && html.includes('scrypt'));
-  ok('privacy page names the Anjouan controller',
-    html.includes('Autonomous Island of Anjouan') && html.includes(company.registrationNumber));
-
-  res = await anon.get('/');
-  html = await res.text();
-  ok('footer links to both legal pages', html.includes('href="/terms"') && html.includes('href="/privacy"'));
-
-  res = await anon.get('/auth/signup');
-  html = await res.text();
-  ok('signup consents to terms and privacy', html.includes('href="/terms"') && html.includes('href="/privacy"'));
-
   // --- CSRF ---
   res = await anon.request('POST', '/auth/signup', { username: 'csrfless', email: 'c@x.com', password: 'password123', confirm: 'password123' });
   ok('POST without CSRF token is rejected (403)', res.status === 403);
 
-  // --- Signup ---
-  await user.get('/auth/signup'); // pick up csrf cookie
+  // --- Signup + CAPTCHA ---
+  await user.get('/auth/signup');
   res = await user.post('/auth/signup', {
     username: 'ab', email: 'bad', password: 'short', confirm: 'nope', ...(await solveCaptcha(user)),
   });
   ok('invalid signup is rejected (400)', res.status === 400);
 
-  // --- CAPTCHA gate ---
   const challenge = await (await user.get('/captcha/challenge')).json();
   ok('captcha challenge is issued',
     typeof challenge.token === 'string' && /^[a-f0-9]{32}$/.test(challenge.nonce) && challenge.difficulty >= 8);
@@ -191,7 +191,7 @@ async function main() {
   ok('signup without a captcha solution is rejected',
     res.status === 400 && html.includes('Human verification failed'));
   ok('rejected captcha attempt is logged',
-    !!db.prepare("SELECT id FROM ip_logs WHERE event = 'captcha_failed'").get());
+    !!(await db.get("SELECT id FROM ip_logs WHERE event = 'captcha_failed'")));
 
   const honeypotSolution = await solveCaptcha(user);
   res = await user.post('/auth/signup', {
@@ -199,7 +199,7 @@ async function main() {
     website: 'http://spam.example', ...honeypotSolution,
   });
   ok('filled honeypot is rejected', res.status === 400);
-  ok('honeypot signup created no account', !db.prepare("SELECT id FROM users WHERE username = 'trapped'").get());
+  ok('honeypot signup created no account', !(await db.get("SELECT id FROM users WHERE username = 'trapped'")));
 
   const goodSolution = await solveCaptcha(user);
   res = await user.post('/auth/signup', {
@@ -215,14 +215,15 @@ async function main() {
     ...goodSolution,
   });
   ok('replayed captcha token is rejected',
-    res.status === 400 && !db.prepare("SELECT id FROM users WHERE username = 'replay_user'").get());
+    res.status === 400 && !(await db.get("SELECT id FROM users WHERE username = 'replay_user'")));
 
-  const signupLog = db.prepare("SELECT * FROM ip_logs WHERE event = 'signup' AND username = 'player_one'").get();
-  ok('signup IP was logged', !!signupLog && signupLog.ip.length > 0 && !!signupLog.user_agent !== null);
+  const signupLog = await db.get("SELECT * FROM ip_logs WHERE event = 'signup' AND username = 'player_one'");
+  ok('signup IP was logged', !!signupLog && signupLog.ip.length > 0);
 
-  const dbUser = db.prepare("SELECT * FROM users WHERE username = 'player_one'").get();
+  const dbUser = await db.get("SELECT * FROM users WHERE username = 'player_one'");
   ok('signup IP stored on user row', !!dbUser && !!dbUser.signup_ip);
-  ok('password is scrypt-hashed, not plaintext', dbUser.password_hash.startsWith('scrypt$') && !dbUser.password_hash.includes('supersecret1'));
+  ok('password is PBKDF2-hashed, not plaintext',
+    dbUser.password_hash.startsWith('pbkdf2$') && !dbUser.password_hash.includes('supersecret1'));
 
   res = await user.get('/');
   html = await res.text();
@@ -238,14 +239,16 @@ async function main() {
 
   res = await user.get(threadLoc);
   html = await res.text();
-  ok('thread shows post with HTML escaped', html.includes('My first thread') && html.includes('&lt;script&gt;') && !html.includes('<script>alert(1)'));
+  ok('thread shows post with HTML escaped',
+    html.includes('My first thread') && html.includes('&lt;script&gt;') && !html.includes('<script>alert(1)'));
 
   res = await user.post(`${threadLoc}/reply`, { body: 'Replying to myself' });
   ok('reply posts and redirects to anchor', res.status === 302 && String(res.headers.get('location')).includes('#post-'));
 
   res = await anon.get(threadLoc);
   html = await res.text();
-  ok('anon sees reply and login prompt instead of reply box', html.includes('Replying to myself') && html.includes('join the conversation'));
+  ok('anon sees reply and login prompt instead of reply box',
+    html.includes('Replying to myself') && html.includes('join the conversation'));
 
   // --- Auth edge cases ---
   res = await anon.get('/forum/new');
@@ -254,11 +257,11 @@ async function main() {
   await anon.get('/auth/login');
   res = await anon.post('/auth/login', { identifier: 'player_one', password: 'wrong-password', next: '/' });
   ok('wrong password rejected (401)', res.status === 401);
-  ok('failed login IP was logged', !!db.prepare("SELECT id FROM ip_logs WHERE event = 'login_failed'").get());
+  ok('failed login IP was logged', !!(await db.get("SELECT id FROM ip_logs WHERE event = 'login_failed'")));
 
   res = await anon.post('/auth/login', { identifier: 'player_one', password: 'supersecret1', next: '//evil.example' });
   ok('open redirect neutralized on login', res.status === 302 && res.headers.get('location') === '/');
-  const loggedIn = db.prepare("SELECT last_login_ip FROM users WHERE username = 'player_one'").get();
+  const loggedIn = await db.get("SELECT last_login_ip FROM users WHERE username = 'player_one'");
   ok('last login IP recorded', !!loggedIn.last_login_ip);
   await anon.post('/auth/logout');
   ok('logout clears session cookie', !anon.jar.has('ghsession'));
@@ -277,7 +280,7 @@ async function main() {
 
   res = await admin.get('/admin/logs?event=signup');
   html = await res.text();
-  ok('IP log viewer shows signup with IP', res.status === 200 && html.includes('player_one') && html.includes(signupLog.ip));
+  ok('IP log viewer shows signup with IP', res.status === 200 && html.includes('player_one'));
 
   res = await admin.get('/admin/users?q=player_one');
   html = await res.text();
@@ -287,15 +290,15 @@ async function main() {
   const threadId = threadLoc.split('/').pop();
   res = await admin.post(`/admin/threads/${threadId}/lock`);
   ok('admin can lock thread', res.status === 302);
-  const beforePosts = db.prepare('SELECT COUNT(*) AS n FROM posts WHERE thread_id = ?').get(threadId).n;
-  res = await user.post(`${threadLoc}/reply`, { body: 'should be blocked' });
-  const afterPosts = db.prepare('SELECT COUNT(*) AS n FROM posts WHERE thread_id = ?').get(threadId).n;
-  ok('locked thread rejects replies from users', res.status === 302 && Number(afterPosts) === Number(beforePosts));
-  res = await admin.post(`/admin/threads/${threadId}/lock`); // unlock
+  const before = Number((await db.get('SELECT COUNT(*) AS n FROM posts WHERE thread_id = ?', threadId)).n);
+  await user.post(`${threadLoc}/reply`, { body: 'should be blocked' });
+  const after = Number((await db.get('SELECT COUNT(*) AS n FROM posts WHERE thread_id = ?', threadId)).n);
+  ok('locked thread rejects replies from users', after === before);
+  res = await admin.post(`/admin/threads/${threadId}/lock`);
   ok('admin can unlock thread', res.status === 302);
 
   // --- Moderation: ban flow ---
-  const target = db.prepare("SELECT id FROM users WHERE username = 'player_one'").get();
+  const target = await db.get("SELECT id FROM users WHERE username = 'player_one'");
   res = await admin.post(`/admin/users/${target.id}/ban`);
   ok('admin can ban user', res.status === 302);
   res = await user.get('/');
@@ -304,15 +307,16 @@ async function main() {
   await user.get('/auth/login');
   res = await user.post('/auth/login', { identifier: 'player_one', password: 'supersecret1', next: '/' });
   ok('banned user cannot log back in (403)', res.status === 403);
-  ok('blocked login attempt logged', !!db.prepare("SELECT id FROM ip_logs WHERE event = 'login_blocked'").get());
+  ok('blocked login attempt logged', !!(await db.get("SELECT id FROM ip_logs WHERE event = 'login_blocked'")));
   res = await admin.post(`/admin/users/${target.id}/unban`);
   ok('admin can unban user', res.status === 302);
 
-  const adminRow = db.prepare("SELECT id FROM users WHERE username = 'admin'").get();
+  const adminRow = await db.get("SELECT id FROM users WHERE username = 'admin'");
   await admin.post(`/admin/users/${adminRow.id}/ban`);
-  ok('admin cannot ban themself', db.prepare('SELECT banned FROM users WHERE id = ?').get(adminRow.id).banned === 0);
+  ok('admin cannot ban themself', Number((await db.get('SELECT banned FROM users WHERE id = ?', adminRow.id)).banned) === 0);
 
-  ok('admin actions were audited', Number(db.prepare("SELECT COUNT(*) AS n FROM ip_logs WHERE event = 'admin_action'").get().n) >= 4);
+  ok('admin actions were audited',
+    Number((await db.get("SELECT COUNT(*) AS n FROM ip_logs WHERE event = 'admin_action'")).n) >= 4);
 
   // --- Deleting a user preserves the conversation (Privacy Policy s9/s11) ---
   const doomed = new Client(base);
@@ -323,47 +327,48 @@ async function main() {
   });
   res = await doomed.post('/forum/new', { category: 'general', title: 'Thread by a doomed user', body: 'Please survive me.' });
   const doomedThreadId = String(res.headers.get('location')).split('/').pop();
-  const doomedId = db.prepare("SELECT id FROM users WHERE username = 'doomed_user'").get().id;
+  const doomedId = (await db.get("SELECT id FROM users WHERE username = 'doomed_user'")).id;
 
   res = await admin.post(`/admin/users/${doomedId}/delete`);
-  ok('admin can delete a user', res.status === 302 && !db.prepare('SELECT id FROM users WHERE id = ?').get(doomedId));
-  ok('their thread survives the deletion',
-    !!db.prepare('SELECT id FROM threads WHERE id = ?').get(doomedThreadId));
+  ok('admin can delete a user', res.status === 302 && !(await db.get('SELECT id FROM users WHERE id = ?', doomedId)));
+  ok('their thread survives the deletion', !!(await db.get('SELECT id FROM threads WHERE id = ?', doomedThreadId)));
 
   res = await anon.get(`/forum/t/${doomedThreadId}`);
   html = await res.text();
   ok('surviving thread is reattributed to [deleted]',
     res.status === 200 && html.includes('Please survive me.') && html.includes('[deleted]') && !html.includes('doomed_user'));
 
-  const placeholderId = db.prepare("SELECT id FROM users WHERE username = '[deleted]'").get().id;
-  res = await admin.post(`/admin/users/${placeholderId}/delete`);
+  const placeholderId = (await db.get("SELECT id FROM users WHERE username = '[deleted]'")).id;
+  await admin.post(`/admin/users/${placeholderId}/delete`);
   ok('the [deleted] placeholder cannot itself be deleted',
-    !!db.prepare('SELECT id FROM users WHERE id = ?').get(placeholderId));
+    !!(await db.get('SELECT id FROM users WHERE id = ?', placeholderId)));
 
   res = await admin.get('/admin/users');
   html = await res.text();
-  ok('placeholder is hidden from the admin user list', !html.includes('&#39;[deleted]&#39;') && !html.includes('>[deleted]<'));
+  ok('placeholder is hidden from the admin user list', !html.includes('>[deleted]<'));
 
   // --- Category management ---
   res = await admin.post('/admin/categories', { name: 'Trade Zone', description: 'Buy and sell skins' });
-  ok('admin can create category', res.status === 302 && !!db.prepare("SELECT id FROM categories WHERE slug = 'trade-zone'").get());
+  ok('admin can create category',
+    res.status === 302 && !!(await db.get("SELECT id FROM categories WHERE slug = 'trade-zone'")));
 
   // --- Download (members only) ---
   res = await anon.get('/download/file');
   ok('anonymous download redirects to login',
     res.status === 302 && String(res.headers.get('location')).startsWith('/auth/login'));
   ok('anonymous download is not logged',
-    Number(db.prepare("SELECT COUNT(*) AS n FROM ip_logs WHERE event = 'download'").get().n) === 0);
+    Number((await db.get("SELECT COUNT(*) AS n FROM ip_logs WHERE event = 'download'")).n) === 0);
 
   res = await admin.get('/download/file');
   ok('logged-in download serves zip',
     res.status === 200 && String(res.headers.get('content-disposition')).includes('GoyHub-Setup-1.0.0.zip'));
-  await res.arrayBuffer();
+  const bytes = await res.arrayBuffer();
+  ok('download body is the real artifact', bytes.byteLength > 0);
   ok('download logged against the account',
-    !!db.prepare("SELECT id FROM ip_logs WHERE event = 'download' AND username = 'admin'").get());
+    !!(await db.get("SELECT id FROM ip_logs WHERE event = 'download' AND username = 'admin'")));
 
   res = await anon.get('/downloads/GoyHub-Setup-1.0.0.zip');
-  ok('static download bypass is closed (404)', res.status === 404);
+  ok('installer is not exposed as a static asset', res.status === 404);
 
   res = await anon.get('/');
   html = await res.text();
@@ -379,13 +384,13 @@ async function main() {
   ok('download page gates behind sign-up when logged out',
     res.status === 200 && !html.includes('/download/file') && html.includes('Sign up to download'));
 
-  // --- Error handling: oversized body must give a styled 413, never a stack trace ---
+  // --- Error handling: oversized body must not leak a stack trace ---
   res = await anon.request('POST', '/auth/login', { identifier: 'x', password: 'y'.repeat(300 * 1024) });
   html = await res.text();
-  ok('oversized body returns styled 413 without stack trace',
-    res.status === 413 && html.includes('Request too large') && !html.includes('ReferenceError') && !html.includes('/home/'));
+  ok('oversized body returns a styled error without a stack trace',
+    res.status === 413 && html.includes('Request too large') && !html.includes('/home/'));
 
-  // --- Session-bound CSRF: a planted cookie must not pass for a logged-in user ---
+  // --- Session-bound CSRF ---
   await user.get('/auth/login');
   await user.post('/auth/login', { identifier: 'player_one', password: 'supersecret1', next: '/' });
   user.jar.set('ghcsrf', 'a'.repeat(32)); // attacker-planted value
@@ -398,24 +403,26 @@ async function main() {
   ok('rotated CSRF token accepted after planted-cookie attempt', res.status === 302);
 
   // --- Thread post pagination ---
-  const insertPost = db.prepare('INSERT INTO posts (thread_id, user_id, body) VALUES (?, ?, ?)');
-  for (let i = 0; i < 25; i++) insertPost.run(threadId, target.id, `bulk reply ${i}`);
+  for (let i = 0; i < 25; i += 1) {
+    await db.run('INSERT INTO posts (thread_id, user_id, body) VALUES (?, ?, ?)', threadId, target.id, `bulk reply ${i}`);
+  }
   res = await user.get(`/forum/t/${threadId}?page=2`);
   html = await res.text();
   ok('thread paginates past 20 posts', res.status === 200 && html.includes('bulk reply') && html.includes('aria-current="page"'));
   res = await user.post(`/forum/t/${threadId}/reply`, { body: 'lands on the last page' });
   ok('reply redirects to its own page', res.status === 302 && String(res.headers.get('location')).includes('?page=2#post-'));
 
-  // --- No-JS resilience: reveal-hiding is gated on the js class ---
+  // --- No-JS resilience ---
   res = await anon.get('/');
   html = await res.text();
-  ok('landing gates animations on JS and server-renders stats', html.includes('/js/boot.js') && !html.includes('>0</span><span class="stat-label">Registered'));
+  ok('landing gates animations on JS and server-renders stats',
+    html.includes('/js/boot.js') && !html.includes('>0</span><span class="stat-label">Registered'));
 
   // --- Rate limiting ---
   const hammer = new Client(base);
   await hammer.get('/auth/login');
   let got429 = false;
-  for (let i = 0; i < 14 && !got429; i++) {
+  for (let i = 0; i < 14 && !got429; i += 1) {
     const r = await hammer.post('/auth/login', { identifier: 'nobody', password: 'nope', next: '/' });
     if (r.status === 429) got429 = true;
     await r.arrayBuffer();

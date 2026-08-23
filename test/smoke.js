@@ -108,6 +108,8 @@ async function main() {
 
   // --- Build artefacts stay in sync with their sources ---
   ok('generated schema module matches schema.sql', isInSync());
+  ok('committed Pages bundle matches src/pages-entry.js',
+    require('../scripts/build-functions').isInSync());
 
   // --- Public pages ---
   let res = await anon.get('/');

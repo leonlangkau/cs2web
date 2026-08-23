@@ -4,7 +4,7 @@
   "description": "GoyHub \u2014 CS2 companion app website, community forum, and secured admin backend. Runs on Node or Cloudflare Workers.",
   "main": "server.js",
   "scripts": {
-    "build": "node scripts/build-schema.js && node scripts/build-installer.js",
+    "build": "node scripts/build-schema.js && node scripts/build-installer.js && node scripts/build-functions.js",
     "start": "NODE_ENV=production node --no-warnings server.js",
     "dev": "node --no-warnings --watch server.js",
     "test": "node --no-warnings test/smoke.js",
@@ -24,6 +24,7 @@
     "hono": "^4.13.3"
   },
   "devDependencies": {
+    "esbuild": "0.28.2",
     "wrangler": "^4.125.0"
   }
 }

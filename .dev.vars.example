@@ -1,0 +1,10 @@
+# Local dev secrets for `wrangler pages dev`.
+# Copy this file to `.dev.vars` (gitignored) and fill in your values.
+
+# Signs the proof-of-work CAPTCHA challenges. Any long random string.
+# Generate one: node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+CAPTCHA_SECRET=replace_me_with_a_long_random_string
+
+# Password for the seeded admin account (created on first run).
+ADMIN_PASSWORD=choose-a-strong-password
+# ADMIN_USERNAME=admin   # optional, defaults to "admin"

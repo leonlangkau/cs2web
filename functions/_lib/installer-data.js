@@ -1,0 +1,10 @@
+// GENERATED FROM artifacts/GoyHub-Setup-1.0.0.zip by scripts/build-installer.js — do not edit by hand.
+
+export default {
+  name: "GoyHub-Setup-1.0.0.zip",
+  sha256: "fbcccf038567b7791e2d6246c8bf9d80d69b9e98481aa418221f85757ab7f627",
+  sizeKb: 1,
+  bytes: 396,
+  // Embedded because the artifact is small.
+  base64: "UEsDBBQAAAAIAAyNEF0S+OKUFgEAAKkBAAAKAAAAUkVBRE1FLnR4dIWQMU5DMQyG95zCYyuhvLZslRgQQ0FiarlAXuI2pmliJQ7lMXEITshJSNPuWBks2fn/7/cmTc91hI+lXugF/H7/wNNuBU/pxCZSivDIrB7+LaXePBVozwAHY9Gn4DDDWCk4MFlob6zAPmUQj7C5mp5xLCSo1Rb7pzZrCl/EcCbxfTOjCUCxiAmh6XFOrlp0ME4wpZrBYTlKYmWYb2ZMjIEiwuyIyF2kmBPCngLG1txBg6jsjKAq2Q45VcEynAxF/d74rU3ZUTyEaa6VerlaQxHkArOO033mawWw1LCt8RZnh1JZ4ye2wUrDjg6xkV+jdNZb6otDjdK27jW8mhqt7zc30V1uNynlRbish+GQJl9HHZI1Qf0BUEsBAhQDFAAAAAgADI0QXRL44pQWAQAAqQEAAAoAAAAAAAAAAAAAAIABAAAAAFJFQURNRS50eHRQSwUGAAAAAAEAAQA4AAAAPgEAAAAA",
+};

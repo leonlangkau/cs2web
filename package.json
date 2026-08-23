@@ -1,30 +1,22 @@
 {
   "name": "goyhub-web",
   "version": "1.0.0",
-  "description": "GoyHub \u2014 CS2 companion app website, community forum, and secured admin backend. Runs on Node or Cloudflare Workers.",
-  "main": "server.js",
+  "description": "GoyHub — CS2 companion app site, community forum and secured admin backend. A Cloudflare Pages project (static public/ + one catch-all Pages Function backed by D1).",
+  "type": "module",
+  "private": true,
   "scripts": {
-    "build": "node scripts/build-schema.js && node scripts/build-installer.js && node scripts/build-functions.js",
-    "start": "NODE_ENV=production node --no-warnings server.js",
-    "dev": "node --no-warnings --watch server.js",
-    "test": "node --no-warnings test/smoke.js",
-    "cf:dev": "wrangler dev -c wrangler.workers.toml",
-    "cf:deploy": "wrangler deploy -c wrangler.workers.toml",
-    "cf:db:local": "wrangler d1 execute goyhub --local --file=src/db/schema.sql",
-    "cf:db:remote": "wrangler d1 execute goyhub --remote --file=src/db/schema.sql",
-    "cf:tail": "wrangler tail -c wrangler.workers.toml",
-    "pages:dev": "wrangler pages dev",
-    "pages:deploy": "wrangler pages deploy"
+    "build": "node scripts/build-schema.cjs && node scripts/build-installer.cjs",
+    "dev": "wrangler pages dev",
+    "test": "node --test",
+    "db:local": "wrangler d1 execute goyhub --local --file=schema.sql",
+    "db:remote": "wrangler d1 execute goyhub --remote --file=schema.sql",
+    "deploy": "wrangler pages deploy",
+    "tail": "wrangler pages deployment tail"
   },
   "engines": {
     "node": ">=22.5.0"
   },
-  "dependencies": {
-    "@hono/node-server": "^2.1.1",
-    "hono": "^4.13.3"
-  },
   "devDependencies": {
-    "esbuild": "0.28.2",
     "wrangler": "^4.125.0"
   }
 }

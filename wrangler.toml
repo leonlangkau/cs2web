@@ -1,34 +1,21 @@
-# Cloudflare PAGES configuration for GoyHub.
-#
-# This is the config the Pages Git integration reads on every push. Pages
-# requires `pages_build_output_dir`; it rejects Workers-only keys like `main`.
-# The Workers deployment path lives in wrangler.workers.toml instead.
-#
-# IMPORTANT — in the Pages project settings you must also set:
-#   Build command:            npm run build
-#   Build output directory:   public
-# Without a build command Pages skips dependency installation entirely, and the
-# Functions bundle then fails with "Could not resolve 'hono'".
-#
-# Full walkthrough: DEPLOY.md
-
 name = "goyhub"
-pages_build_output_dir = "./public"
 compatibility_date = "2026-08-01"
-
-# nodejs_compat provides the CommonJS interop the shared src/ modules rely on.
 compatibility_flags = ["nodejs_compat"]
+pages_build_output_dir = "public"
 
-# D1 — create with:  npx wrangler d1 create goyhub
-# then paste the returned database_id here (or bind it in the Pages dashboard
-# under Settings -> Bindings -> D1 database, using the variable name DB).
+# D1 database (bound as DB): users, sessions, forum, IP audit log, rate limits.
+# Create it, apply the schema, then paste the printed database_id below:
+#   npx wrangler d1 create goyhub
+#   npx wrangler d1 execute goyhub --remote --file=schema.sql
+# (You can instead bind it in the Pages dashboard → Settings → Bindings.)
 [[d1_databases]]
 binding = "DB"
 database_name = "goyhub"
 database_id = "REPLACE_WITH_YOUR_D1_DATABASE_ID"
 
 [vars]
-# Registered entity shown on the legal pages. Replace before publishing.
+# Registered entity shown on the legal pages. Replace before publishing —
+# until these are real, both legal pages show a "Setup required" banner.
 COMPANY_LEGAL_NAME = "[Registered Company Name]"
 COMPANY_REG_NUMBER = "[Registration Number]"
 COMPANY_ADDRESS = "[Registered Office Address]"
@@ -37,9 +24,8 @@ COMPANY_CONTACT_EMAIL = "support@goyhub.com"
 COMPANY_PRIVACY_EMAIL = "privacy@goyhub.com"
 COMPANY_LEGAL_EMAIL = "legal@goyhub.com"
 
-# Proof-of-work difficulty in leading zero bits (8-24). Each +1 doubles the
-# client's work. Workers Free allows 10ms CPU per request, so keep PBKDF2
-# iterations modest there.
+# Proof-of-work difficulty in leading zero bits (8–24). Each +1 doubles the
+# client's work. Keep PBKDF2 modest on the free plan (10ms CPU/request).
 CAPTCHA_DIFFICULTY = "16"
 PBKDF2_ITERATIONS = "100000"
 
@@ -49,8 +35,16 @@ RATE_LIMIT_SIGNUP = "5"
 RATE_LIMIT_POST = "6"
 RATE_LIMIT_DOWNLOAD = "30"
 
-# Secrets — set in the Pages dashboard under Settings -> Variables and Secrets,
-# or with `npx wrangler pages secret put NAME`. Never commit them here:
-#   CAPTCHA_SECRET   signs CAPTCHA challenges; without it, restarts invalidate them
-#   ADMIN_PASSWORD   password for the seeded admin account on first deploy
+# Secrets are NOT set here. Add them in the Pages dashboard (Settings →
+# Variables and Secrets) or with `npx wrangler pages secret put NAME`, or in
+# .dev.vars for local dev:
+#   CAPTCHA_SECRET   signs CAPTCHA challenges (required)
+#   ADMIN_PASSWORD   password for the seeded admin account (required)
 #   ADMIN_USERNAME   optional, defaults to "admin"
+
+# Optional: serve a real, multi-megabyte installer from R2 instead of the copy
+# embedded in the Function bundle. Create the bucket, upload the zip under its
+# exact filename, then uncomment. The download route prefers R2 automatically.
+# [[r2_buckets]]
+# binding = "INSTALLER"
+# bucket_name = "goyhub-installer"

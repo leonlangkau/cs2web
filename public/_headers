@@ -1,0 +1,13 @@
+# Cache-Control rules for Cloudflare Pages.
+# Dynamic HTML is served by the catch-all Function (which sets its own
+# no-store/Cache-Control), so only the static assets under public/ are covered here.
+
+# CSS / JS: filenames aren't content-hashed, so revalidate to avoid serving a
+# stale asset to returning visitors (the edge still caches; 304s are cheap).
+/css/*
+  Cache-Control: public, max-age=0, must-revalidate
+/js/*
+  Cache-Control: public, max-age=0, must-revalidate
+
+# Images and the installer artifact aren't here — the zip lives outside public/
+# so it can only be fetched through the audited /download/file route.

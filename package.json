@@ -1,18 +1,20 @@
 {
   "name": "goyhub-web",
   "version": "1.0.0",
-  "description": "GoyHub — CS2 companion app website, community forum, and secured admin backend. Runs on Node or Cloudflare Workers.",
+  "description": "GoyHub \u2014 CS2 companion app website, community forum, and secured admin backend. Runs on Node or Cloudflare Workers.",
   "main": "server.js",
   "scripts": {
     "build": "node scripts/build-schema.js && node scripts/build-installer.js",
     "start": "NODE_ENV=production node --no-warnings server.js",
     "dev": "node --no-warnings --watch server.js",
     "test": "node --no-warnings test/smoke.js",
-    "cf:dev": "wrangler dev",
-    "cf:deploy": "wrangler deploy",
+    "cf:dev": "wrangler dev -c wrangler.workers.toml",
+    "cf:deploy": "wrangler deploy -c wrangler.workers.toml",
     "cf:db:local": "wrangler d1 execute goyhub --local --file=src/db/schema.sql",
     "cf:db:remote": "wrangler d1 execute goyhub --remote --file=src/db/schema.sql",
-    "cf:tail": "wrangler tail"
+    "cf:tail": "wrangler tail -c wrangler.workers.toml",
+    "pages:dev": "wrangler pages dev",
+    "pages:deploy": "wrangler pages deploy"
   },
   "engines": {
     "node": ">=22.5.0"

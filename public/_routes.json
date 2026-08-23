@@ -1,0 +1,6 @@
+{
+  "version": 1,
+  "description": "Everything is dynamic except the static asset directories, which Pages serves directly from the edge without invoking a Function.",
+  "include": ["/*"],
+  "exclude": ["/css/*", "/js/*", "/favicon.ico", "/robots.txt"]
+}

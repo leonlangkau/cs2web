@@ -4,7 +4,11 @@ Full website for the GoyHub CS2 companion app: animated landing page with gated
 download, community forum, account system with IP audit logging, a self-hosted
 proof-of-work CAPTCHA, and a secured admin backend.
 
-**Runs on both Cloudflare Workers and Node** from one codebase — see [DEPLOY.md](DEPLOY.md).
+**Deploys to Cloudflare Pages or Workers, and runs on Node** from one codebase — see [DEPLOY.md](DEPLOY.md).
+
+> Deploying via the Pages Git integration? You **must** set a build command
+> (`npm run build`) in the Pages project settings, or Pages skips `npm install`
+> and the Functions bundle fails with `Could not resolve "hono"`.
 
 ## Stack
 
@@ -103,8 +107,8 @@ the deletion behaviour it describes are all real.
 ## Layout
 
 ```
-worker/index.js         Cloudflare Workers entry
-functions/[[path]].js   Cloudflare Pages Functions entry (alternative)
+functions/[[path]].js   Cloudflare Pages entry (default; wrangler.toml)
+worker/index.js         Cloudflare Workers entry (wrangler.workers.toml)
 server.js               Node entry
 src/app.js              Hono app shared by all three
 src/db/                 schema + node:sqlite and D1 adapters

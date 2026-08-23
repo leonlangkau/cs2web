@@ -4,14 +4,24 @@ compatibility_flags = ["nodejs_compat"]
 pages_build_output_dir = "public"
 
 # D1 database (bound as DB): users, sessions, forum, IP audit log, rate limits.
-# Create it, apply the schema, then paste the printed database_id below:
-#   npx wrangler d1 create goyhub
-#   npx wrangler d1 execute goyhub --remote --file=schema.sql
-# (You can instead bind it in the Pages dashboard → Settings → Bindings.)
-[[d1_databases]]
-binding = "DB"
-database_name = "goyhub"
-database_id = "REPLACE_WITH_YOUR_D1_DATABASE_ID"
+#
+# This block is COMMENTED OUT on purpose so the site deploys before a database
+# exists — a placeholder database_id here makes Pages reject the whole publish
+# ("Invalid database UUID"). Until DB is bound, every page returns a short
+# "not configured yet" message instead of the site.
+#
+# EASIEST: bind D1 in the dashboard (no repush needed) —
+#   1. npx wrangler d1 create goyhub
+#   2. npx wrangler d1 execute goyhub --remote --file=schema.sql
+#   3. Pages → goyhub → Settings → Bindings → Add → D1 database:
+#        Variable name: DB   Database: goyhub
+#   Redeploy (or it applies on the next deploy).
+#
+# OR from the repo: create the DB as above, paste its id below, and uncomment:
+# [[d1_databases]]
+# binding = "DB"
+# database_name = "goyhub"
+# database_id = "the-id-that-d1-create-printed"
 
 [vars]
 # Registered entity shown on the legal pages. Replace before publishing —

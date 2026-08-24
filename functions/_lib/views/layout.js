@@ -41,7 +41,7 @@ function nav(ctx) {
   const link = (href, label, active) =>
     `<a href="${href}" class="${active ? 'active' : ''}">${label}</a>`;
   const authArea = ctx.user
-    ? `<span class="nav-user"><span class="avatar" aria-hidden="true">${esc(ctx.user.username[0].toUpperCase())}</span>${esc(ctx.user.username)}</span>
+    ? `<a class="nav-user" href="/profile" title="Your profile"><span class="avatar" aria-hidden="true">${esc(ctx.user.username[0].toUpperCase())}</span>${esc(ctx.user.username)}</a>
        <form method="post" action="/auth/logout" class="inline-form">
          <input type="hidden" name="_csrf" value="${esc(ctx.csrfToken)}">
          <button type="submit" class="btn btn-ghost btn-sm">Log out</button>
@@ -66,8 +66,8 @@ function nav(ctx) {
 function footer(ctx) {
   const c = ctx.company;
   const accountLinks = ctx.user
-    ? '<a href="/forum/new">New thread</a>'
-    : '<a href="/auth/signup">Sign up</a><a href="/auth/login">Log in</a>';
+    ? '<a href="/profile">Profile</a><a href="/upgrade">Upgrade</a><a href="/forum/new">New thread</a>'
+    : '<a href="/auth/signup">Sign up</a><a href="/auth/login">Log in</a><a href="/upgrade">Upgrade</a>';
   // Fall back to the trading name so an unfilled placeholder never ships site-wide.
   const operator = c.isPlaceholder ? c.tradingName : c.legalName;
 

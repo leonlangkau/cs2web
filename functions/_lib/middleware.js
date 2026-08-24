@@ -2,6 +2,7 @@ import { getCookie, setCookie, deleteCookie } from "./cookies.js";
 import { newToken, sha256hex, safeEqual } from "./crypto.js";
 import { errorPage } from "./views/site.js";
 import { TIER_LABELS, meetsTier, isStaff, isFullAdmin } from "./tiers.js";
+import * as limits from "./limits.js";
 
 const SESSION_COOKIE = 'ghsession';
 const CSRF_COOKIE = 'ghcsrf';
@@ -190,16 +191,70 @@ const ipBanGate = async (c, next) => {
 
   const ip = clientIp(c);
   if (ip && ip !== 'unknown') {
-    const ban = await c.get('db').get('SELECT reason FROM ip_bans WHERE ip = ?', ip);
+    const db = c.get('db');
+    const ban = await db.get('SELECT reason, expires_at FROM ip_bans WHERE ip = ?', ip);
     if (ban) {
-      return c.html(errorPage(c.get('view'), {
-        code: 403, title: 'Access blocked',
-        message: 'This network has been blocked from GoyHub.'
-          + (ban.reason ? ` Reason: ${ban.reason}` : ''),
-      }), 403);
+      // Automatic flood bans carry an expiry; lift them lazily on the first
+      // request after it passes. Admin bans (expires_at NULL) are permanent.
+      if (ban.expires_at !== null && Number(ban.expires_at) <= Date.now()) {
+        await db.run('DELETE FROM ip_bans WHERE ip = ?', ip);
+      } else {
+        return c.html(errorPage(c.get('view'), {
+          code: 403, title: 'Access blocked',
+          message: 'This network has been blocked from GoyHub.'
+            + (ban.reason ? ` Reason: ${ban.reason}` : ''),
+        }), 403);
+      }
     }
   }
   await next();
+};
+
+/**
+ * Application-layer flood control, applied to every dynamic route:
+ *
+ *  - a per-IP burst cap (RATE_LIMIT_BURST requests/minute, default 240 —
+ *    far above human browsing, well below a scripted flood) answered with 429;
+ *  - repeated breaches (RATE_LIMIT_FLOOD per 10 min) escalate to a temporary
+ *    automatic IP ban (AUTO_IP_BAN_MINUTES, default 60) so the offender stops
+ *    costing a database round-trip per request at the gate above.
+ *
+ * Staff are exempt, an existing permanent admin ban is never overwritten by
+ * an auto-ban, and RATE_LIMIT_BURST="0" disables the whole layer. True
+ * volumetric DDoS absorption belongs to the Cloudflare edge in front of this
+ * (WAF, Bot Fight Mode, Under Attack mode) — this layer handles what leaks
+ * through to the application: scripted scraping, signup floods, brute bursts.
+ */
+const floodProtection = async (c, next) => {
+  const cfg = c.get('cfg') || {};
+  if (String(cfg.RATE_LIMIT_BURST || '') === '0') { await next(); return; }
+  if (isStaff(c.get('user'))) { await next(); return; }
+
+  const ip = clientIp(c);
+  if (!ip || ip === 'unknown') { await next(); return; }
+
+  const db = c.get('db');
+  const verdict = await limits.check(db, 'burst', ip, cfg);
+  if (verdict.ok) { await next(); return; }
+
+  const breaches = await limits.check(db, 'flood', ip, cfg);
+  if (!breaches.ok) {
+    const minutes = Number(cfg.AUTO_IP_BAN_MINUTES) > 0 ? Math.floor(Number(cfg.AUTO_IP_BAN_MINUTES)) : 60;
+    // DO NOTHING on conflict: never downgrade an admin's permanent ban to a
+    // temporary one.
+    await db.run(
+      `INSERT INTO ip_bans (ip, reason, banned_by, expires_at) VALUES (?, ?, 'system', ?)
+       ON CONFLICT(ip) DO NOTHING`,
+      ip, 'automatic: request flooding', Date.now() + minutes * 60_000
+    );
+    await audit(c, 'ip_autoban', { detail: `flood auto-ban for ${minutes}m` });
+  }
+
+  c.header('Retry-After', String(verdict.retryAfterSec));
+  return c.html(errorPage(c.get('view'), {
+    code: 429, title: 'Slow down',
+    message: `Too many requests from your network. Try again in about ${verdict.retryAfterSec} seconds.`,
+  }), 429);
 };
 
 /** Sets a one-shot flash message for the next request. */
@@ -215,8 +270,14 @@ function setFlash(c, type, message) {
  * rather than trusted.
  */
 const csrfProtection = async (c, next) => {
-  const db = c.get('db');
   const view = c.get('view');
+
+  // The loader API authenticates with credentials in the request body, not
+  // cookies, so CSRF (a cookie-authority attack) does not apply — and the
+  // loader can't obtain a CSRF cookie/token pair anyway.
+  if (view.path.startsWith('/api/')) { await next(); return; }
+
+  const db = c.get('db');
   const user = c.get('user');
   const sessionCsrfHash = c.get('sessionCsrfHash');
 
@@ -323,7 +384,8 @@ function requireTier(c, minTier) {
   if (!meetsTier(user, minTier)) {
     return c.html(errorPage(c.get('view'), {
       code: 403, title: 'Members only',
-      message: `This area requires ${TIER_LABELS[minTier]} access or higher. Contact an admin to upgrade your account.`,
+      message: `This area requires ${TIER_LABELS[minTier]} access or higher.`,
+      action: { href: '/upgrade', label: 'See upgrade options' },
     }), 403);
   }
   return null;
@@ -331,7 +393,7 @@ function requireTier(c, minTier) {
 
 export {
   SESSION_COOKIE, CSRF_COOKIE, FLASH_COOKIE, TERMS_COOKIE, TERMS_VERSION,
-  securityHeaders, loadContext, csrfProtection, termsGate, ipBanGate,
+  securityHeaders, loadContext, csrfProtection, termsGate, ipBanGate, floodProtection,
   createSession, destroySession, destroyUserSessions,
   acceptTerms, setFlash, formBody, requireAuth, requireAdmin, requireStaff, requireTier,
   clientIp, userAgent, audit, cookieOptions,

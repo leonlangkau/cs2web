@@ -110,6 +110,15 @@ test("admin password stays in sync with the ADMIN_PASSWORD secret across reboots
   await seed(db, { ADMIN_PASSWORD: "rotated-password-2" });
   admin = await db.get("SELECT id, password_hash FROM users WHERE role = 'admin'");
   assert.equal(admin.password_hash, before, "unchanged password is not rewritten");
+
+  // Break-glass: even if the seeded account's tier/role/banned flags drift
+  // (bad manual SQL, a bug, a hostile co-admin), the next boot restores full
+  // admin access for it while ADMIN_PASSWORD is set.
+  await db.run("UPDATE users SET tier = 'user', banned = 1 WHERE id = ?", admin.id);
+  await seed(db, { ADMIN_PASSWORD: "rotated-password-2" });
+  const restored = await db.get("SELECT tier, role, banned FROM users WHERE id = ?", admin.id);
+  assert.deepEqual({ tier: restored.tier, role: restored.role, banned: restored.banned },
+    { tier: "admin", role: "admin", banned: 0 }, "seeded admin tier/ban state restored on boot");
 });
 
 test("public pages, forum, legal, gate, auth, captcha, admin, moderation, download", async () => {
@@ -468,4 +477,253 @@ test("IP bans block every route except for staff, who are exempt", async () => {
   assert.ok(!(await db.get("SELECT * FROM ip_bans WHERE ip = '203.0.113.42'")), "ban row removed");
   res = await bannedReq("/");
   assert.equal(res.status, 200, "unbanned IP can browse again");
+});
+
+test("account switching: login stays reachable while signed in and swaps the session", async () => {
+  const { app, db } = await buildTestApp(ENV);
+  const browser = makeClient(app);
+
+  await browser.get("/auth/signup");
+  await browser.post("/auth/signup", { username: "first_acct", email: "first@example.com", password: "supersecret1", confirm: "supersecret1", ...(await solveCaptcha(browser)) });
+  await db.run("UPDATE users SET tier = 'paid' WHERE username = 'first_acct'");
+  await browser.get("/auth/signup"); // still signed in — signup redirects, that's fine
+
+  // The login page must NOT bounce a signed-in visitor (that made a freshly
+  // promoted second admin look like it couldn't log in at all) — it renders
+  // with a "signed in as" switch notice instead.
+  let res = await browser.get("/auth/login");
+  let html = await res.text();
+  assert.equal(res.status, 200, "login page reachable while signed in");
+  assert.ok(html.includes("currently signed in as") && html.includes("first_acct"), "switch notice names the current account");
+
+  // Logging in as the seeded admin from the same browser swaps the session.
+  res = await browser.post("/auth/login", { identifier: "admin", password: "admin-test-password-1", next: "/admin" });
+  assert.ok(res.status === 302 && res.headers.get("location") === "/admin", "switch login succeeds");
+  html = await (await browser.get("/admin")).text();
+  assert.ok(html.includes("Dashboard"), "browser is now the admin session");
+  const firstId = (await db.get("SELECT id FROM users WHERE username = 'first_acct'")).id;
+  assert.ok(!(await db.get("SELECT id FROM sessions WHERE user_id = ?", firstId)), "old account's session was retired");
+
+  // A FAILED switch attempt must keep the current session intact.
+  res = await browser.post("/auth/login", { identifier: "first_acct", password: "wrong-password", next: "/" });
+  assert.equal(res.status, 401, "bad switch rejected");
+  assert.equal((await browser.get("/admin")).status, 200, "still signed in as admin after the failed switch");
+});
+
+test("profile: view, password change, sign out everywhere", async () => {
+  const { app, db } = await buildTestApp(ENV);
+  const phone = makeClient(app);
+  const laptop = makeClient(app);
+
+  await phone.get("/auth/signup");
+  await phone.post("/auth/signup", { username: "prof_user", email: "prof@example.com", password: "supersecret1", confirm: "supersecret1", ...(await solveCaptcha(phone)) });
+  await laptop.get("/auth/login");
+  await laptop.post("/auth/login", { identifier: "prof_user", password: "supersecret1", next: "/" });
+
+  const anon = makeClient(app);
+  const anonRes = await anon.get("/profile");
+  assert.ok(anonRes.status === 302 && anonRes.headers.get("location").startsWith("/auth/login"), "profile requires sign-in");
+
+  let html = await (await phone.get("/profile")).text();
+  assert.ok(html.includes("prof_user") && html.includes("prof@example.com") && html.includes("Free"),
+    "profile shows identity and tier");
+  assert.ok(html.includes("Loader license") && /[a-f0-9]{64}/.test(html), "profile shows the signed license token");
+  assert.ok(html.includes("/upgrade"), "free account sees the upgrade link");
+
+  // Wrong current password → rejected, nothing changes.
+  let res = await phone.post("/profile/password", { current: "nope", password: "newpassword12", confirm: "newpassword12" });
+  assert.equal(res.status, 302);
+  await phone.get("/profile"); // consume flash
+  const before = (await db.get("SELECT password_hash FROM users WHERE username = 'prof_user'")).password_hash;
+
+  // Correct change: this browser stays signed in, the other device is out.
+  res = await phone.post("/profile/password", { current: "supersecret1", password: "newpassword12", confirm: "newpassword12" });
+  assert.equal(res.status, 302);
+  assert.notEqual((await db.get("SELECT password_hash FROM users WHERE username = 'prof_user'")).password_hash, before, "hash rotated");
+  assert.equal((await phone.get("/profile")).status, 200, "changing browser keeps its session");
+  res = await laptop.get("/profile");
+  assert.ok(res.status === 302 && res.headers.get("location").startsWith("/auth/login"), "other device signed out by password change");
+  await laptop.get("/auth/login");
+  assert.equal((await laptop.post("/auth/login", { identifier: "prof_user", password: "newpassword12", next: "/" })).status, 302, "new password works");
+  assert.equal((await laptop.post("/auth/login", { identifier: "prof_user", password: "supersecret1", next: "/" })).status, 401, "old password dead");
+
+  // Sign out everywhere kills every session including the caller's.
+  res = await laptop.post("/profile/logout-all");
+  assert.ok(res.status === 302 && res.headers.get("location") === "/auth/login", "logout-all redirects to login");
+  const uid = (await db.get("SELECT id FROM users WHERE username = 'prof_user'")).id;
+  assert.ok(!(await db.get("SELECT id FROM sessions WHERE user_id = ?", uid)), "no sessions remain");
+  assert.ok(await db.get("SELECT id FROM ip_logs WHERE event = 'password_changed' AND username = 'prof_user'"), "password change audited");
+});
+
+test("upgrade page: honest 'coming soon' by default, env-driven checkout when configured", async () => {
+  // Default env: no payment config → coming-soon + contact, and no fake pay button.
+  let { app } = await buildTestApp(ENV);
+  let html = await (await makeClient(app).get("/upgrade")).text();
+  assert.ok(html.includes("Upgrade to Paid") && html.includes("being set up") && !html.includes("Pay with crypto</a>"),
+    "unconfigured upgrade page promises nothing it can't do");
+
+  // Configured env: hosted checkout link + manual addresses + price all render.
+  const payEnv = {
+    ...ENV,
+    CRYPTO_PAY_URL: "https://commerce.example/checkout/goyhub",
+    CRYPTO_PAY_ADDRESSES: "BTC:bc1qtestaddress,ETH:0xtestaddress",
+    PAID_PRICE: "$10 / month",
+  };
+  ({ app } = await buildTestApp(payEnv));
+  html = await (await makeClient(app).get("/upgrade")).text();
+  assert.ok(html.includes("https://commerce.example/checkout/goyhub"), "checkout link renders when configured");
+  assert.ok(html.includes("$10 / month"), "price renders");
+
+  // The tier-gate 403 sends people here.
+  const free = makeClient(app);
+  await free.get("/auth/signup");
+  await free.post("/auth/signup", { username: "gated_user", email: "gated@example.com", password: "supersecret1", confirm: "supersecret1", ...(await solveCaptcha(free)) });
+  const gateHtml = await (await free.get("/forum")).text();
+  assert.ok(gateHtml.includes('href="/upgrade"'), "members-only 403 links to the upgrade page");
+});
+
+test("loader API: credential auth returns a verifiable license; verify endpoint reflects live tier", async () => {
+  const { app, db } = await buildTestApp(ENV);
+  const setup = makeClient(app);
+  await setup.get("/auth/signup");
+  await setup.post("/auth/signup", { username: "loader_user", email: "loader@example.com", password: "supersecret1", confirm: "supersecret1", ...(await solveCaptcha(setup)) });
+  await db.run("UPDATE users SET tier = 'paid' WHERE username = 'loader_user'");
+
+  // The loader has no cookies and no CSRF token — a bare JSON POST must work.
+  const api = (path, body) => app.fetch(new Request("http://local" + path, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body),
+  }), ENV);
+
+  let res = await api("/api/loader/auth", { username: "loader_user", password: "wrong" });
+  assert.equal(res.status, 401, "bad credentials rejected");
+  assert.equal((await res.json()).error, "invalid_credentials");
+
+  res = await api("/api/loader/auth", { username: "loader_user", password: "supersecret1" });
+  assert.equal(res.status, 200, "loader auth succeeds");
+  const auth = await res.json();
+  assert.ok(auth.ok && auth.paid && auth.tier === "paid", "auth reports tier and paid flag");
+  assert.ok(await verifyLicense(auth.license, ENV), "returned license verifies against the secret");
+  assert.ok(await db.get("SELECT id FROM ip_logs WHERE event = 'loader_auth' AND username = 'loader_user'"), "loader auth audited");
+
+  // verify endpoint: genuine token → valid with LIVE tier; tampered → invalid.
+  res = await api("/api/loader/verify", { license: auth.license });
+  let verdict = await res.json();
+  assert.ok(verdict.valid && verdict.tier === "paid", "verify confirms a genuine token");
+  res = await api("/api/loader/verify", { license: { ...auth.license, tier: "admin" } });
+  verdict = await res.json();
+  assert.ok(!verdict.valid, "tampered token rejected");
+
+  // Tier downgrade shows up immediately on verify, before the token expires.
+  await db.run("UPDATE users SET tier = 'user' WHERE username = 'loader_user'");
+  res = await api("/api/loader/verify", { license: auth.license });
+  verdict = await res.json();
+  assert.ok(verdict.valid && verdict.tier === "user" && verdict.paid === false, "verify reflects the live (downgraded) tier");
+
+  // Banned account: auth refused even with the right password.
+  await db.run("UPDATE users SET banned = 1 WHERE username = 'loader_user'");
+  res = await api("/api/loader/auth", { username: "loader_user", password: "supersecret1" });
+  assert.equal(res.status, 403, "banned account cannot loader-auth");
+});
+
+test("flood protection: burst cap 429s, repeat offenders get a temporary auto IP ban", async () => {
+  const floodEnv = { ...ENV, RATE_LIMIT_BURST: "5", RATE_LIMIT_FLOOD: "2", AUTO_IP_BAN_MINUTES: "60" };
+  const { app, db } = await buildTestApp(floodEnv);
+  const hit = (ip) => app.fetch(new Request("http://local/", { headers: { "cf-connecting-ip": ip } }), floodEnv);
+
+  for (let i = 0; i < 5; i += 1) {
+    assert.equal((await hit("198.51.100.50")).status, 200, "requests under the burst cap pass");
+  }
+  const over = await hit("198.51.100.50");
+  assert.equal(over.status, 429, "burst cap answered with 429");
+  assert.ok(over.headers.get("retry-after"), "429 carries Retry-After");
+
+  // Keep hammering: after RATE_LIMIT_FLOOD breaches the IP is auto-banned and
+  // the ban gate takes over with a 403.
+  let status = 429;
+  for (let i = 0; i < 6 && status !== 403; i += 1) status = (await hit("198.51.100.50")).status;
+  assert.equal(status, 403, "sustained flooding escalates to an automatic IP ban");
+  const ban = await db.get("SELECT * FROM ip_bans WHERE ip = '198.51.100.50'");
+  assert.ok(ban && ban.banned_by === "system" && Number(ban.expires_at) > Date.now(),
+    "auto ban is temporary and attributed to system");
+  assert.ok(await db.get("SELECT id FROM ip_logs WHERE event = 'ip_autoban'"), "auto ban audited");
+
+  // An expired auto ban lifts lazily on the next request.
+  await db.run("UPDATE ip_bans SET expires_at = ? WHERE ip = '198.51.100.50'", Date.now() - 1000);
+  await db.run("DELETE FROM rate_limits");
+  assert.equal((await hit("198.51.100.50")).status, 200, "expired auto ban lifts on the next request");
+  assert.ok(!(await db.get("SELECT * FROM ip_bans WHERE ip = '198.51.100.50'")), "expired ban row removed");
+
+  // A different IP is unaffected throughout, and RATE_LIMIT_BURST="0" disables the layer.
+  assert.equal((await hit("198.51.100.51")).status, 200, "other IPs unaffected");
+  const offEnv = { ...ENV, RATE_LIMIT_BURST: "0" };
+  const { app: offApp } = await buildTestApp(offEnv);
+  for (let i = 0; i < 8; i += 1) {
+    const r = await offApp.fetch(new Request("http://local/", { headers: { "cf-connecting-ip": "198.51.100.60" } }), offEnv);
+    assert.equal(r.status, 200, "burst layer disabled with RATE_LIMIT_BURST=0");
+  }
+});
+
+test("signup surge breaker pauses registration when site-wide signups spike", async () => {
+  const surgeEnv = { ...ENV, SIGNUP_SURGE_LIMIT: "2" };
+  const { app, db } = await buildTestApp(surgeEnv);
+
+  for (let i = 1; i <= 2; i += 1) {
+    const c = makeClient(app);
+    await c.get("/auth/signup");
+    const res = await c.post("/auth/signup", {
+      username: `surge_user_${i}`, email: `surge${i}@example.com`,
+      password: "supersecret1", confirm: "supersecret1", ...(await solveCaptcha(c)),
+    });
+    assert.equal(res.status, 302, `signup ${i} under the surge limit succeeds`);
+  }
+
+  const blocked = makeClient(app);
+  await blocked.get("/auth/signup");
+  const res = await blocked.post("/auth/signup", {
+    username: "surge_user_3", email: "surge3@example.com",
+    password: "supersecret1", confirm: "supersecret1", ...(await solveCaptcha(blocked)),
+  });
+  const html = await res.text();
+  assert.ok(res.status === 429 && html.includes("briefly paused"), "surge breaker pauses signups with an honest message");
+  assert.ok(!(await db.get("SELECT id FROM users WHERE username = 'surge_user_3'")), "no account created during the pause");
+  assert.ok(await db.get("SELECT id FROM ip_logs WHERE event = 'signup_surge_blocked'"), "surge block audited");
+});
+
+test("admin IP privacy: admins' addresses are hidden from other staff in the panel", async () => {
+  const { app, db } = await buildTestApp(ENV);
+  const admin = makeClient(app);
+  const dev = makeClient(app);
+
+  await admin.get("/auth/login");
+  await admin.post("/auth/login", { identifier: "admin", password: "admin-test-password-1", next: "/" });
+
+  await dev.get("/auth/signup");
+  await dev.post("/auth/signup", { username: "dev_staff", email: "dev@example.com", password: "supersecret1", confirm: "supersecret1", ...(await solveCaptcha(dev)) });
+  const devId = (await db.get("SELECT id FROM users WHERE username = 'dev_staff'")).id;
+  await admin.get("/admin/users");
+  await admin.post(`/admin/users/${devId}/tier`, { tier: "developer" });
+  await dev.get("/auth/login");
+  await dev.post("/auth/login", { identifier: "dev_staff", password: "supersecret1", next: "/" });
+
+  // Give the admin account a visible IP trail.
+  await db.run("UPDATE users SET signup_ip = '198.51.100.7', last_login_ip = '198.51.100.7' WHERE username = 'admin'");
+
+  // A developer-tier staffer sees (hidden) for the admin everywhere...
+  for (const path of ["/admin/users", "/admin/logs", "/admin"]) {
+    const html = await (await dev.get(path)).text();
+    assert.ok(!html.includes("198.51.100.7"), `admin IP not exposed on ${path}`);
+  }
+  const usersHtml = await (await dev.get("/admin/users")).text();
+  assert.ok(usersHtml.includes("(hidden)"), "masked cells say (hidden)");
+
+  // ...while the admin still sees their own address.
+  const ownHtml = await (await admin.get("/admin/users")).text();
+  assert.ok(ownHtml.includes("198.51.100.7"), "admins still see their own IP");
+
+  // Non-admin staff IPs stay visible to staff — only admin-tier rows are masked.
+  await db.run("UPDATE users SET signup_ip = '203.0.113.99' WHERE username = 'dev_staff'");
+  const adminView = await (await admin.get("/admin/users")).text();
+  assert.ok(adminView.includes("203.0.113.99"), "staff (non-admin) IPs remain visible");
 });

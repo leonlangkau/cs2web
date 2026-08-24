@@ -16,6 +16,8 @@ const DEFAULTS = {
   post: { limit: 6, windowMs: 60 * 1000 },            // per user
   download: { limit: 30, windowMs: 60 * 60 * 1000 },  // per IP
   shout: { limit: 12, windowMs: 60 * 1000 },          // per user
+  burst: { limit: 240, windowMs: 60 * 1000 },         // per IP, ALL dynamic routes (flood control)
+  flood: { limit: 5, windowMs: 10 * 60 * 1000 },      // per IP, burst BREACHES before auto-ban
 };
 
 const ENV_KEYS = {
@@ -24,6 +26,8 @@ const ENV_KEYS = {
   post: 'RATE_LIMIT_POST',
   download: 'RATE_LIMIT_DOWNLOAD',
   shout: 'RATE_LIMIT_SHOUT',
+  burst: 'RATE_LIMIT_BURST',
+  flood: 'RATE_LIMIT_FLOOD',
 };
 
 function limitFor(name, env = {}) {

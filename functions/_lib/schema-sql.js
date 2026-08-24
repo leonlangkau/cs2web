@@ -106,10 +106,14 @@ CREATE INDEX IF NOT EXISTS idx_captcha_used_expires ON captcha_used(expires_at);
 
 -- IP-level bans: blocks every route (except for staff, so nobody can lock
 -- themselves out) regardless of which account, or no account, is behind it.
+-- expires_at (ms since epoch) is set on automatic flood bans so a shared/NAT
+-- address recovers on its own; NULL = permanent (admin-issued). Existing
+-- databases get the column via the guarded ALTER TABLE in bootstrap.js.
 CREATE TABLE IF NOT EXISTS ip_bans (
   ip         TEXT PRIMARY KEY,
   reason     TEXT,
   banned_by  TEXT,
+  expires_at INTEGER,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 `;

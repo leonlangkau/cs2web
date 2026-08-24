@@ -30,6 +30,33 @@ async function siteStats(db) {
   };
 }
 
+/**
+ * Payment configuration, entirely env-driven so checkout can be switched on
+ * later without a code change:
+ *   CRYPTO_PAY_URL       hosted checkout link (e.g. a Coinbase Commerce /
+ *                        NOWPayments page) — shown as the primary button
+ *   CRYPTO_PAY_ADDRESSES manual fallback, "BTC:bc1...,ETH:0x...,LTC:ltc1..."
+ *   PAID_PRICE           display string, e.g. "$10 / month"
+ * With none set, the upgrade page shows an honest "coming soon" + contact.
+ */
+function paymentConfig(env = {}) {
+  const addresses = String(env.CRYPTO_PAY_ADDRESSES || '')
+    .split(',')
+    .map((pair) => {
+      const i = pair.indexOf(':');
+      if (i < 1) return null;
+      const coin = pair.slice(0, i).trim().toUpperCase().slice(0, 12);
+      const address = pair.slice(i + 1).trim().slice(0, 128);
+      return coin && address ? { coin, address } : null;
+    })
+    .filter(Boolean);
+  return {
+    url: String(env.CRYPTO_PAY_URL || '').trim(),
+    addresses,
+    price: String(env.PAID_PRICE || '').trim(),
+  };
+}
+
 function tooMany(c, retryAfterSec) {
   c.header('Retry-After', String(retryAfterSec));
   return c.html(views.errorPage(c.get('view'), {
@@ -79,6 +106,10 @@ function register(app) {
   });
 
   app.get('/download', (c) => c.html(views.downloadPage(c.get('view'), { downloadMeta: DOWNLOAD_META })));
+
+  app.get('/upgrade', (c) => c.html(views.upgradePage(c.get('view'), {
+    pay: paymentConfig(c.get('cfg')),
+  })));
 
   // Paid members only: anonymous visitors are sent to log in, and a signed-in
   // Free account gets a clear "upgrade" message — the artifact is never
@@ -141,4 +172,4 @@ async function loadInstaller(c) {
   return null;
 }
 
-export { register, siteStats, tooMany, safePath, DOWNLOAD_META };
+export { register, siteStats, tooMany, safePath, paymentConfig, DOWNLOAD_META };

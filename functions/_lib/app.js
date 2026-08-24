@@ -9,11 +9,13 @@
  * req.param/req.header/req.parseBody), so the route and middleware code did not
  * change when Hono was dropped for a zero-dependency deploy.
  */
-import { securityHeaders, loadContext, csrfProtection, termsGate, ipBanGate } from "./middleware.js";
+import { securityHeaders, loadContext, csrfProtection, termsGate, ipBanGate, floodProtection } from "./middleware.js";
 import { errorPage } from "./views/site.js";
 import { createCompany } from "./company.js";
 import { register as registerMain } from "./routes-main.js";
 import { register as registerAuth } from "./routes-auth.js";
+import { register as registerProfile } from "./routes-profile.js";
+import { register as registerApi } from "./routes-api.js";
 import { register as registerForum } from "./routes-forum.js";
 import { register as registerAdmin } from "./routes-admin.js";
 
@@ -194,11 +196,14 @@ function createApp({ resolveDb, env = {} }) {
 
   app.use("*", loadContext);
   app.use("*", ipBanGate);
+  app.use("*", floodProtection);
   app.use("*", csrfProtection);
   app.use("*", termsGate);
 
   registerMain(app);
   registerAuth(app);
+  registerProfile(app);
+  registerApi(app);
   registerForum(app);
   registerAdmin(app);
 

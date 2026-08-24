@@ -188,6 +188,7 @@ img, svg { max-width: 100%; }
 .nav-links a.active { color: var(--accent); border-bottom-color: var(--accent); }
 .nav-auth { display: flex; align-items: center; gap: 0.6rem; }
 .nav-user { display: inline-flex; align-items: center; gap: 0.5rem; color: var(--text); font-weight: 600; font-size: 0.95rem; }
+a.nav-user:hover { color: var(--accent); }
 .inline-form { display: inline; }
 
 .theme-toggle {
@@ -414,6 +415,32 @@ textarea { resize: vertical; min-height: 90px; }
 .terms-gate-points li { margin: 0.35rem 0; }
 .terms-gate-actions { display: flex; gap: 0.6rem; flex-wrap: wrap; align-items: center; }
 .terms-gate-note { font-size: 0.8rem; color: var(--muted); margin-top: 1rem; margin-bottom: 0; }
+
+/* ---------- Profile & upgrade pages ---------- */
+.profile-card { padding: 1.6rem 1.8rem; margin-bottom: 1.4rem; overflow: visible; }
+.profile-card h2 { font-size: 1.15rem; margin-bottom: 0.8rem; }
+.profile-identity { display: flex; align-items: center; gap: 1rem; margin-bottom: 1.2rem; }
+.profile-name { font-size: 1.3rem; font-weight: 800; display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
+.profile-facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 0.9rem; margin-bottom: 0.6rem; }
+.profile-facts dt { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); }
+.profile-facts dd { margin: 0; font-weight: 600; }
+.license-block { word-break: break-all; white-space: pre-wrap; }
+.upgrade-benefits { padding-left: 1.3rem; }
+.upgrade-benefits li { margin: 0.45rem 0; color: var(--text-soft); }
+.upgrade-price { font-size: 1.3rem; margin-top: 1rem; }
+.upgrade-note { border-radius: var(--radius); padding: 0.8rem 1.1rem; margin-bottom: 1.4rem; border: 1px solid rgba(15, 122, 69, 0.25); }
+.pay-addresses { display: flex; flex-direction: column; gap: 0.6rem; margin-top: 1rem; }
+.pay-address { display: flex; gap: 0.8rem; align-items: baseline; background: var(--bg-2); border: 1px solid var(--border); border-radius: 8px; padding: 0.7rem 1rem; overflow-wrap: anywhere; }
+.pay-coin { font-weight: 800; min-width: 3.5rem; color: var(--accent); }
+.error-actions { display: flex; gap: 0.7rem; justify-content: center; flex-wrap: wrap; }
+
+/* Account-switch notice on the login page */
+.switch-note {
+  background: var(--accent-soft); border: 1px solid var(--border); border-left: 3px solid var(--accent);
+  border-radius: var(--radius); padding: 0.9rem 1.1rem; margin-bottom: 1.2rem;
+  font-size: 0.92rem; color: var(--text-soft);
+}
+.switch-note .inline-form { display: block; margin-top: 0.5rem; }
 
 .auth-page { display: flex; align-items: center; }
 .auth-card {
@@ -655,6 +682,11 @@ tbody tr.row-banned:hover td { background: #f8e7e9; }
 .tag-admin_action { background: #f0eade; color: var(--warn); }
 .tag-captcha_failed { background: #f0eade; color: var(--warn); }
 .tag-terms_accepted { background: #e2efe9; color: var(--success); }
+.tag-password_changed { background: #e1e7f6; color: var(--accent); }
+.tag-loader_auth { background: #e2ebfd; color: var(--accent-deep); }
+.tag-loader_auth_failed { background: #f7e3e5; color: var(--danger); }
+.tag-ip_autoban { background: #f4d5d8; color: var(--danger); }
+.tag-signup_surge_blocked { background: #f0eade; color: var(--warn); }
 [data-theme="dark"] .tag-signup,
 [data-theme="dark"] .tag-terms_accepted { background: rgba(62, 203, 130, 0.16); color: var(--success); }
 [data-theme="dark"] .tag-login { background: var(--accent-soft); color: var(--accent); }
@@ -664,6 +696,11 @@ tbody tr.row-banned:hover td { background: #f8e7e9; }
 [data-theme="dark"] .tag-download { background: var(--accent-soft); color: var(--accent); }
 [data-theme="dark"] .tag-admin_action,
 [data-theme="dark"] .tag-captcha_failed { background: rgba(224, 168, 60, 0.18); color: var(--warn); }
+[data-theme="dark"] .tag-password_changed { background: var(--accent-soft); color: var(--accent); }
+[data-theme="dark"] .tag-loader_auth { background: var(--accent-soft); color: var(--accent); }
+[data-theme="dark"] .tag-loader_auth_failed,
+[data-theme="dark"] .tag-ip_autoban { background: rgba(255, 107, 122, 0.16); color: var(--danger); }
+[data-theme="dark"] .tag-signup_surge_blocked { background: rgba(224, 168, 60, 0.18); color: var(--warn); }
 
 .filter-bar { display: flex; gap: 0.6rem; align-items: center; margin-bottom: 1.3rem; flex-wrap: wrap; }
 .filter-bar input[type="search"] { max-width: 320px; }

@@ -6,8 +6,40 @@ import { TIERS, TIER_LABELS } from "./tiers.js";
 
 const LOGS_PER_PAGE = 50;
 const USERS_PER_PAGE = 25;
-const LOG_EVENTS = ['signup', 'login', 'login_failed', 'login_blocked', 'logout',
-  'download', 'admin_action', 'captcha_failed', 'terms_accepted'];
+const LOG_EVENTS = ['signup', 'login', 'login_failed', 'login_blocked', 'logout', 'download',
+  'admin_action', 'captcha_failed', 'terms_accepted', 'password_changed', 'loader_auth', 'loader_auth_failed',
+  'ip_autoban', 'signup_surge_blocked'];
+
+const IP_HIDDEN = '(hidden)';
+
+/**
+ * Admin accounts' IP addresses are not shown to OTHER staff — only that
+ * admin themself sees their own. Lower-tier staff (developer/trial_admin)
+ * being able to read the owner's home IP out of the panel is an unnecessary
+ * exposure. Returns helpers that mask user rows and log rows in place.
+ */
+async function adminIpMask(c) {
+  const viewer = c.get('user');
+  const admins = await c.get('db').all("SELECT id, username FROM users WHERE tier = 'admin'");
+  const adminIds = new Set(admins.map((a) => a.id));
+  const adminNames = new Set(admins.map((a) => String(a.username).toLowerCase()));
+
+  const maskUser = (u) => {
+    if (u.tier === 'admin' && u.id !== viewer.id) {
+      return { ...u, signup_ip: IP_HIDDEN, last_login_ip: IP_HIDDEN, ipHidden: true };
+    }
+    return u;
+  };
+  const maskLog = (l) => {
+    const isAdminRow = (l.user_id !== null && adminIds.has(l.user_id))
+      || (l.username && adminNames.has(String(l.username).toLowerCase()));
+    if (isAdminRow && l.user_id !== viewer.id) {
+      return { ...l, ip: IP_HIDDEN, user_agent: IP_HIDDEN, ipHidden: true };
+    }
+    return l;
+  };
+  return { maskUser, maskLog };
+}
 
 function intParam(value, fallback = 1) {
   const n = parseInt(value, 10);
@@ -60,11 +92,12 @@ function register(app) {
       failedLogins24h: await one("SELECT COUNT(*) AS n FROM ip_logs WHERE event = 'login_failed' AND created_at > datetime('now', '-1 day')"),
       ipBans: await one('SELECT COUNT(*) AS n FROM ip_bans'),
     };
-    const recentLogs = await db.all('SELECT * FROM ip_logs ORDER BY id DESC LIMIT 12');
-    const recentUsers = await db.all(
+    const { maskUser, maskLog } = await adminIpMask(c);
+    const recentLogs = (await db.all('SELECT * FROM ip_logs ORDER BY id DESC LIMIT 12')).map(maskLog);
+    const recentUsers = (await db.all(
       'SELECT id, username, tier, banned, signup_ip, created_at FROM users WHERE username != ? ORDER BY id DESC LIMIT 8',
       DELETED_USERNAME
-    );
+    )).map(maskUser);
     return c.html(views.dashboard(c.get('view'), { stats, recentLogs, recentUsers }));
   });
 
@@ -86,12 +119,13 @@ function register(app) {
     const pages = Math.max(1, Math.ceil(total / USERS_PER_PAGE));
     const page = Math.max(1, Math.min(pages, intParam(url.searchParams.get('page'))));
 
-    const users = await db.all(
+    const { maskUser } = await adminIpMask(c);
+    const users = (await db.all(
       `SELECT id, username, email, tier, banned, signup_ip, last_login_ip, last_login_at, created_at,
           (SELECT COUNT(*) FROM posts p WHERE p.user_id = users.id) AS post_count
        FROM users ${where} ORDER BY id DESC LIMIT ? OFFSET ?`,
       ...params, USERS_PER_PAGE, (page - 1) * USERS_PER_PAGE
-    );
+    )).map(maskUser);
 
     return c.html(views.users(c.get('view'), { users, q, page, pages, total, tiers: TIERS, tierLabels: TIER_LABELS }));
   });
@@ -190,10 +224,11 @@ function register(app) {
     const pages = Math.max(1, Math.ceil(total / LOGS_PER_PAGE));
     const page = Math.max(1, Math.min(pages, intParam(url.searchParams.get('page'))));
 
-    const logs = await db.all(
+    const { maskLog } = await adminIpMask(c);
+    const logs = (await db.all(
       `SELECT * FROM ip_logs ${where} ORDER BY id DESC LIMIT ? OFFSET ?`,
       ...params, LOGS_PER_PAGE, (page - 1) * LOGS_PER_PAGE
-    );
+    )).map(maskLog);
     const ipBans = await db.all('SELECT * FROM ip_bans ORDER BY created_at DESC LIMIT 100');
 
     return c.html(views.logs(c.get('view'), { logs, q, event, events: LOG_EVENTS, page, pages, total, ipBans }));

@@ -26,6 +26,13 @@ async function ensureTierColumn(db) {
   await db.run("UPDATE users SET tier = 'admin' WHERE role = 'admin'");
 }
 
+/** Same guarded-ALTER pattern for ip_bans.expires_at (added for auto flood bans). */
+async function ensureIpBanExpiryColumn(db) {
+  const columns = await db.all('PRAGMA table_info(ip_bans)');
+  if (columns.some((c) => c.name === 'expires_at')) return;
+  await db.run('ALTER TABLE ip_bans ADD COLUMN expires_at INTEGER');
+}
+
 /** Runs the DDL once per process/isolate. */
 const schemaReady = new WeakMap();
 
@@ -34,6 +41,7 @@ function ensureSchema(db) {
     schemaReady.set(db, (async () => {
       await db.exec(SCHEMA);
       await ensureTierColumn(db);
+      await ensureIpBanExpiryColumn(db);
     })());
   }
   return schemaReady.get(db);
@@ -76,15 +84,20 @@ async function seed(db, env = {}) {
 
   const username = env.ADMIN_USERNAME || 'admin';
   let generatedPassword = null;
+  // The lookup accepts tier OR legacy role so the break-glass below still
+  // finds the account even if one of the two columns drifted. It does NOT
+  // match an ordinary user row with that name: the default 'admin' is a
+  // reserved signup name, so the row can only have been created here.
   const seededAdmin = await db.get(
-    "SELECT id, password_hash FROM users WHERE username = ? AND role = 'admin'", username
+    "SELECT id, password_hash FROM users WHERE username = ? AND (role = 'admin' OR tier = 'admin')",
+    username
   );
 
   if (!seededAdmin) {
     // Someone may have already promoted a different account to admin (or
     // renamed/deleted the seed one) — only create a new one if no admin
     // exists at all, so this never produces two seeded admins.
-    const anyAdmin = await db.get("SELECT id FROM users WHERE role = 'admin' LIMIT 1");
+    const anyAdmin = await db.get("SELECT id FROM users WHERE tier = 'admin' OR role = 'admin' LIMIT 1");
     if (!anyAdmin) {
       let password = env.ADMIN_PASSWORD;
       if (!password) {
@@ -99,11 +112,12 @@ async function seed(db, env = {}) {
       );
     }
   } else if (env.ADMIN_PASSWORD) {
-    // The ADMIN_PASSWORD secret is the source of truth for the seeded admin:
-    // keep its password in sync with it on every boot. Without this, rotating
+    // Break-glass guarantee: while the ADMIN_PASSWORD secret is set, the
+    // account named ADMIN_USERNAME is kept signed-in-able with exactly that
+    // password and full admin tier, re-checked on every cold start. Rotating
     // the secret (or setting it late, after the account was first created
-    // with no password / a locally-generated one) would silently never take
-    // effect and lock the operator out.
+    // with a generated password) takes effect on the next request — no
+    // database surgery, no redeploy-ordering traps.
     const matches = await verifyPassword(env.ADMIN_PASSWORD, seededAdmin.password_hash);
     if (!matches) {
       await db.run(
@@ -111,6 +125,10 @@ async function seed(db, env = {}) {
         await hashPassword(env.ADMIN_PASSWORD), seededAdmin.id
       );
     }
+    await db.run(
+      "UPDATE users SET tier = 'admin', role = 'admin', banned = 0 WHERE id = ? AND (tier != 'admin' OR role != 'admin' OR banned != 0)",
+      seededAdmin.id
+    );
   }
 
   const hasCategories = await db.get('SELECT id FROM categories LIMIT 1');
@@ -139,12 +157,13 @@ async function seed(db, env = {}) {
   return { generatedPassword };
 }
 
-/** Housekeeping: expired sessions, rate-limit windows and used CAPTCHA nonces. */
+/** Housekeeping: expired sessions, rate-limit windows, CAPTCHA nonces and auto IP bans. */
 async function cleanup(db) {
   const now = Date.now();
   await db.run("DELETE FROM sessions WHERE expires_at <= datetime('now')");
   await db.run('DELETE FROM rate_limits WHERE reset_at <= ?', now);
   await db.run('DELETE FROM captcha_used WHERE expires_at <= ?', now);
+  await db.run('DELETE FROM ip_bans WHERE expires_at IS NOT NULL AND expires_at <= ?', now);
 }
 
 export { ensureSchema, seed, cleanup, deletedUserId, DELETED_USERNAME };

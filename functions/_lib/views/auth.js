@@ -7,11 +7,20 @@ function errorList(errors) {
 }
 
 function login(ctx, { errors = [], values = {}, next = '/' } = {}) {
+  const switchNote = ctx.user
+    ? `<div class="switch-note">You are currently signed in as <strong>${esc(ctx.user.username)}</strong>.
+        Logging in below switches this browser to the other account.
+        <form method="post" action="/auth/logout" class="inline-form">
+          <input type="hidden" name="_csrf" value="${esc(ctx.csrfToken)}">
+          <button type="submit" class="btn btn-ghost btn-sm">Or just log out</button>
+        </form></div>`
+    : '';
   const body = `
 <section class="section auth-page">
   <div class="container auth-card">
     <h1>Welcome back</h1>
     <p class="muted">Log in to post on the forum and sync your setup.</p>
+    ${switchNote}
     ${errorList(errors)}
     <form method="post" action="/auth/login" class="stack">
       <input type="hidden" name="_csrf" value="${esc(ctx.csrfToken)}">

@@ -34,6 +34,27 @@ RATE_LIMIT_POST = "6"
 RATE_LIMIT_DOWNLOAD = "30"
 RATE_LIMIT_SHOUT = "12"
 
+# Flood / mass-account protection (application layer — Cloudflare's own WAF,
+# Bot Fight Mode and Under Attack mode remain the first line for real DDoS).
+#   RATE_LIMIT_BURST     per-IP requests/minute across ALL dynamic routes ("0" disables)
+#   RATE_LIMIT_FLOOD     burst breaches per 10 min before a temporary auto IP ban
+#   AUTO_IP_BAN_MINUTES  how long an automatic flood ban lasts
+#   SIGNUP_SURGE_LIMIT   site-wide signups per 10 min before registration pauses ("0" disables)
+RATE_LIMIT_BURST = "240"
+RATE_LIMIT_FLOOD = "5"
+AUTO_IP_BAN_MINUTES = "60"
+SIGNUP_SURGE_LIMIT = "30"
+
+# Crypto payments (the /upgrade page). All optional — with none set the page
+# shows an honest "payments coming soon" note with the support contact.
+#   CRYPTO_PAY_URL        hosted checkout link (Coinbase Commerce, NOWPayments,
+#                         BTCPay, …) once you set one up — shown as the pay button
+#   CRYPTO_PAY_ADDRESSES  manual fallback, e.g. "BTC:bc1qxy...,ETH:0xab...,LTC:ltc1..."
+#   PAID_PRICE            display string, e.g. "$10 / month"
+# CRYPTO_PAY_URL = ""
+# CRYPTO_PAY_ADDRESSES = ""
+# PAID_PRICE = ""
+
 # Secrets are NOT set here. Add them in the Pages dashboard (Settings →
 # Variables and Secrets) or with `npx wrangler pages secret put NAME`, or in
 # .dev.vars for local dev:

@@ -152,27 +152,32 @@ function logs(ctx, { logs: rows, q, event, events, page: current, pages, total, 
             <td class="muted">${esc(l.id)}</td>
             <td><span class="tag tag-event tag-${esc(l.event)}">${esc(l.event)}</span></td>
             <td>${esc(l.username || '—')}</td>
-            <td class="mono"><a href="/admin/logs?q=${encodeURIComponent(l.ip)}">${esc(l.ip)}</a></td>
+            <td class="mono">${l.ipHidden
+              ? `<span class="muted" title="Admin accounts' IPs are hidden from other staff">${esc(l.ip)}</span>`
+              : `<a href="/admin/logs?q=${encodeURIComponent(l.ip)}">${esc(l.ip)}</a>`}</td>
             <td class="muted detail-cell">${esc(l.detail || '—')}</td>
-            <td class="muted ua-cell" title="${esc(l.user_agent || '')}">${esc(String(l.user_agent || '—').slice(0, 60))}</td>
+            <td class="muted ua-cell" title="${esc(l.ipHidden ? '' : l.user_agent || '')}">${esc(String(l.user_agent || '—').slice(0, 60))}</td>
             <td class="muted nowrap">${esc(l.created_at)} UTC</td>
-            <td class="actions-cell"><form method="post" action="/admin/ip-bans" class="inline-form"
+            <td class="actions-cell">${l.ipHidden ? '' : `<form method="post" action="/admin/ip-bans" class="inline-form"
                   data-confirm="Ban ${esc(l.ip)} from GoyHub entirely?">${csrf}
                 <input type="hidden" name="ip" value="${esc(l.ip)}">
-                <button class="btn btn-warn btn-xs" type="submit">Ban IP</button></form></td></tr>`)}
+                <button class="btn btn-warn btn-xs" type="submit">Ban IP</button></form>`}</td></tr>`)}
       </tbody></table></div></div>
     ${pagination(current, pages, (p) => `/admin/logs?page=${p}&event=${encodeURIComponent(event)}&q=${encodeURIComponent(q)}`)}
 
     <div class="panel panel-spaced">
       <div class="panel-head"><h2>IP bans</h2></div>
       <div class="table-wrap"><table>
-        <thead><tr><th>IP</th><th>Reason</th><th>Banned by</th><th>Since</th><th></th></tr></thead>
+        <thead><tr><th>IP</th><th>Reason</th><th>Banned by</th><th>Type</th><th>Since</th><th></th></tr></thead>
         <tbody>${ipBans.length === 0
-          ? '<tr><td colspan="5" class="muted center">No IPs currently banned.</td></tr>'
+          ? '<tr><td colspan="6" class="muted center">No IPs currently banned.</td></tr>'
           : map(ipBans, (b) => `<tr>
               <td class="mono">${esc(b.ip)}</td>
               <td class="muted detail-cell">${esc(b.reason || '—')}</td>
               <td class="muted">${esc(b.banned_by || '—')}</td>
+              <td class="muted nowrap">${b.expires_at
+                ? `auto · lifts in ${esc(Math.max(1, Math.ceil((Number(b.expires_at) - Date.now()) / 60000)))}m`
+                : 'permanent'}</td>
               <td class="muted nowrap">${esc(timeAgo(b.created_at))}</td>
               <td class="actions-cell">${banForm(b.ip)}</td></tr>`)}
         </tbody></table></div>

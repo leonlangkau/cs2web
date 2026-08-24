@@ -40,6 +40,23 @@ function register(app) {
     const verdict = await limits.check(db, 'signup', clientIp(c), c.get('cfg'));
     if (!verdict.ok) return tooMany(c, verdict.retryAfterSec);
 
+    // Site-wide surge breaker against DISTRIBUTED mass-account attacks that
+    // stay under the per-IP limit: if signups across all IPs spike far above
+    // organic volume, pause registration briefly instead of eating the flood.
+    const surgeLimit = Number(c.get('cfg').SIGNUP_SURGE_LIMIT ?? 30);
+    if (surgeLimit > 0) {
+      const recent = await db.get(
+        "SELECT COUNT(*) AS n FROM ip_logs WHERE event = 'signup' AND created_at > datetime('now', '-10 minutes')"
+      );
+      if (Number(recent.n) >= surgeLimit) {
+        await audit(c, 'signup_surge_blocked', { detail: `${recent.n} signups in 10m >= ${surgeLimit}` });
+        return c.html(views.signup(c.get('view'), {
+          errors: ['Sign-ups are briefly paused because of unusually high traffic. Please try again in a few minutes.'],
+          values: {},
+        }), 429);
+      }
+    }
+
     const body = await formBody(c);
     const username = String(body.username || '').trim();
     const email = String(body.email || '').trim();
@@ -91,14 +108,16 @@ function register(app) {
     return c.redirect('/', 302);
   });
 
+  // Unlike signup, login stays reachable while signed in: it acts as an
+  // account switcher. Silently bouncing to "/" here made a second admin
+  // account look like it couldn't log in at all when tested from a browser
+  // that still held the first admin's session.
   app.get('/auth/login', (c) => {
-    if (c.get('user')) return c.redirect('/', 302);
     const next = safeNext(new URL(c.req.url).searchParams.get('next'));
     return c.html(views.login(c.get('view'), { errors: [], values: {}, next }));
   });
 
   app.post('/auth/login', async (c) => {
-    if (c.get('user')) return c.redirect('/', 302);
     const db = c.get('db');
 
     const verdict = await limits.check(db, 'login', clientIp(c), c.get('cfg'));
@@ -138,6 +157,9 @@ function register(app) {
     }
 
     await limits.forgive(db, 'login', clientIp(c));
+    // Account switch: retire the previous account's session before minting
+    // the new one, so no browser ever holds two live sessions.
+    if (c.get('user')) await destroySession(c);
     await db.run(
       "UPDATE users SET last_login_ip = ?, last_login_at = datetime('now') WHERE id = ?",
       clientIp(c), user.id

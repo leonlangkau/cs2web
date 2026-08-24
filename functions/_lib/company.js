@@ -27,7 +27,7 @@ function createCompany(env = {}) {
     privacyEmail: env.COMPANY_PRIVACY_EMAIL || 'privacy@goyhub.com',
     legalEmail: env.COMPANY_LEGAL_EMAIL || 'legal@goyhub.com',
 
-    lastUpdated: env.LEGAL_LAST_UPDATED || '21 August 2026',
+    lastUpdated: env.LEGAL_LAST_UPDATED || '24 August 2026',
     minimumAge: 16,
   };
 

@@ -1,6 +1,6 @@
-# GoyHub — CS2 Companion Website
+# AimHub - CS2 Companion Website
 
-Full website for the GoyHub CS2 companion app: animated landing page with gated
+Full website for the AimHub CS2 companion app: animated landing page with gated
 download, community forum, account system with IP audit logging, a self-hosted
 proof-of-work CAPTCHA, and a secured admin backend.
 
@@ -42,8 +42,9 @@ Copy `.dev.vars.example` to `.dev.vars` and set `CAPTCHA_SECRET` and
 ## Features
 
 ### Website
-- Animated hero: particle canvas, gradient headline, floating HUD cards, scroll reveals
-- Spinning Star of David brand mark, white + `#0137B7`
+- Split hero with an animated reticle brand visual (one-shot settle + pointer
+  parallax), scroll reveals, count-up stats
+- Two-triangle "rank up" brand mark, white + `#0137B7`, Space Grotesk display type
 - Download is **members only** — the button is hidden when logged out *and* the
   route requires a session, so the URL can't be shared around
 - The installer lives outside `public/`, so every download goes through the
@@ -137,4 +138,4 @@ code actually does.
 `npm test` fails if they drift.
 
 - `functions/_lib/schema-sql.js` from `schema.sql`
-- `functions/_lib/installer-data.js` from `artifacts/GoyHub-Setup-1.0.0.zip`
+- `functions/_lib/installer-data.js` from `artifacts/AimHub-Setup-1.0.0.zip`

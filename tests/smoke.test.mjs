@@ -134,7 +134,7 @@ test("public pages, forum, legal, gate, auth, captcha, admin, moderation, downlo
   let res = await anon.get("/");
   let html = await res.text();
   assert.equal(res.status, 200);
-  assert.ok(html.includes("Play smarter.") && html.includes("hero-canvas"), "landing renders");
+  assert.ok(html.includes("Play smarter.") && html.includes("hero-visual"), "landing renders");
   assert.ok(String(res.headers.get("content-security-policy")).includes("default-src 'self'"), "CSP header");
 
   // The forum is a Paid-tier benefit — anonymous visitors are gated out
@@ -143,7 +143,7 @@ test("public pages, forum, legal, gate, auth, captcha, admin, moderation, downlo
   assert.ok(res.status === 302 && res.headers.get("location").startsWith("/auth/login"), "anon forum access gated");
   assert.ok(await db.get("SELECT id FROM categories WHERE slug = 'announcements'")
     && await db.get("SELECT id FROM categories WHERE slug = 'general'"), "seeded categories exist");
-  assert.ok(await db.get("SELECT id FROM threads WHERE title LIKE 'Welcome to the GoyHub%'"), "seeded welcome thread exists");
+  assert.ok(await db.get("SELECT id FROM threads WHERE title LIKE 'Welcome to the AimHub%'"), "seeded welcome thread exists");
 
   assert.equal((await anon.get("/nope/nothing")).status, 404, "unknown route 404s");
 
@@ -220,7 +220,7 @@ test("public pages, forum, legal, gate, auth, captcha, admin, moderation, downlo
   html = await (await user.get("/forum")).text();
   assert.ok(html.includes("Announcements") && html.includes("General Discussion"), "forum renders for a paid member");
   html = await (await user.get("/forum/t/1")).text();
-  assert.ok(html.includes("Welcome to the GoyHub community forum!"), "seeded welcome thread renders");
+  assert.ok(html.includes("Welcome to the AimHub community forum!"), "seeded welcome thread renders");
 
   // Forum posting with XSS escaping
   res = await user.post("/forum/new", { category: "general", title: "My first thread", body: "Hi <script>alert(1)</script>" });
@@ -290,7 +290,7 @@ test("public pages, forum, legal, gate, auth, captcha, admin, moderation, downlo
   const disp = String(res.headers.get("content-disposition"));
   assert.ok(res.status === 200 && buf.byteLength > 0 && disp.includes(".zip"), "member download");
   // Filename is scrambled per-download: real base kept, random token injected.
-  assert.ok(/filename="GoyHub-Setup-1\.0\.0-[a-f0-9]{8}\.zip"/.test(disp), "download filename is scrambled");
+  assert.ok(/filename="AimHub-Setup-1\.0\.0-[a-f0-9]{8}\.zip"/.test(disp), "download filename is scrambled");
   const res2 = await admin.get("/download/file");
   await res2.arrayBuffer();
   assert.notEqual(res.headers.get("content-disposition"), res2.headers.get("content-disposition"),
@@ -827,7 +827,7 @@ test("account extras: email change, per-session revoke, self-serve deletion", as
   await phone.post("/profile/email", { email: "new@example.com", password: "wrong" });
   assert.equal((await db.get("SELECT email FROM users WHERE username = 'extra_user'")).email, "extra@example.com", "wrong password keeps old email");
   await phone.get("/profile");
-  await phone.post("/profile/email", { email: "admin@goyhub.local", password: "supersecret1" });
+  await phone.post("/profile/email", { email: "admin@aimhub.local", password: "supersecret1" });
   assert.equal((await db.get("SELECT email FROM users WHERE username = 'extra_user'")).email, "extra@example.com", "taken email rejected");
   await phone.get("/profile");
   await phone.post("/profile/email", { email: "new@example.com", password: "supersecret1" });
@@ -948,7 +948,7 @@ test("vanity UIDs: goyim=0 goy=1 omelette=2, reserved block, signups start at 10
   await adminC.get("/auth/login");
   await adminC.post("/auth/login", { identifier: "admin", password: "admin-test-password-1", next: "/" });
   const html = await (await adminC.get("/forum/t/1")).text();
-  assert.ok(html.includes("Welcome to the GoyHub") && html.includes("UID 3"), "welcome thread survived relocation with UID shown");
+  assert.ok(html.includes("Welcome to the AimHub") && html.includes("UID 3"), "welcome thread survived relocation with UID shown");
 });
 
 test("admin tools: set password, set UID (relocation keeps sessions/content), paid expiry", async () => {
@@ -1015,7 +1015,7 @@ test("admin tools: set password, set UID (relocation keeps sessions/content), pa
 });
 
 test("email: verification flow + posting gate, password reset, disposable domains, obfuscation", async () => {
-  const EMAIL_ENV = { ...ENV, EMAIL_PROVIDER: "test", EMAIL_FROM: "no-reply@goyhub.test" };
+  const EMAIL_ENV = { ...ENV, EMAIL_PROVIDER: "test", EMAIL_FROM: "no-reply@aimhub.test" };
   globalThis.__testEmails = [];
   const { app, db } = await buildTestApp(EMAIL_ENV);
   const emailClient = () => {
@@ -1147,7 +1147,7 @@ test("forum: title rename, category edit, shout delete + 3/min limit, /buy alias
 
   // Category edit: admin only; slug stays stable.
   const cat = await db.get("SELECT * FROM categories WHERE slug = 'general'");
-  res = await admin.post(`/admin/categories/${cat.id}/edit`, { name: "General Chat", description: "All things GoyHub." });
+  res = await admin.post(`/admin/categories/${cat.id}/edit`, { name: "General Chat", description: "All things AimHub." });
   assert.equal(res.status, 302);
   const after = await db.get("SELECT * FROM categories WHERE id = ?", cat.id);
   assert.ok(after.name === "General Chat" && after.slug === "general", "name changed, slug stable");
@@ -1189,9 +1189,9 @@ test("turnstile: optional layer verifies server-side and fails closed", async ()
 });
 
 test("download filename scrambler keeps base+ext, injects a unique token", () => {
-  const a = scrambledFilename("GoyHub-Setup-1.0.0.zip");
-  const b = scrambledFilename("GoyHub-Setup-1.0.0.zip");
-  assert.ok(/^GoyHub-Setup-1\.0\.0-[a-f0-9]{8}\.zip$/.test(a), "shape preserved with token");
+  const a = scrambledFilename("AimHub-Setup-1.0.0.zip");
+  const b = scrambledFilename("AimHub-Setup-1.0.0.zip");
+  assert.ok(/^AimHub-Setup-1\.0\.0-[a-f0-9]{8}\.zip$/.test(a), "shape preserved with token");
   assert.notEqual(a, b, "two calls differ");
   assert.equal(scrambledFilename("noext").slice(0, 6), "noext-", "extensionless names still get a token");
 });
@@ -1207,8 +1207,8 @@ test("smtp client: correct SMTPS conversation for Cloudflare's Email Service rel
   };
   await smtpConversation(transport, {
     username: "api_token", password: "cf_secret_token",
-    from: "no-reply@goyhub.com", fromName: "GoyHub",
-    to: "member@example.com", subject: "Verify your GoyHub email",
+    from: "no-reply@goyhub.com", fromName: "AimHub",
+    to: "member@example.com", subject: "Verify your AimHub email",
     text: "Hello — verify here.\n.starts with a dot\n",
   });
   const all = wire.join("");
@@ -1218,7 +1218,7 @@ test("smtp client: correct SMTPS conversation for Cloudflare's Email Service rel
     "SASL PLAIN is NUL-separated user/token");
   assert.ok(all.includes("MAIL FROM:<no-reply@goyhub.com>\r\n"), "MAIL FROM");
   assert.ok(all.includes("RCPT TO:<member@example.com>\r\n"), "RCPT TO");
-  assert.ok(all.includes("Subject: Verify your GoyHub email"), "subject header");
+  assert.ok(all.includes("Subject: Verify your AimHub email"), "subject header");
   assert.ok(all.includes("Content-Transfer-Encoding: base64"), "UTF-8-safe body encoding");
   assert.ok(/\r\n\.\r\nQUIT/.test(all), "terminating dot then QUIT");
 

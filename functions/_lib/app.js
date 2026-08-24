@@ -1,7 +1,7 @@
 /**
  * Tiny request router — the whole app in one Pages Function.
  *
- * Five Star Repairs puts a file per route under functions/; GoyHub has ~30
+ * Five Star Repairs puts a file per route under functions/; AimHub has ~30
  * routes that all share one middleware chain (sessions, CSRF, the terms gate),
  * so a single catch-all Function with an internal router keeps that chain in one
  * place. This module provides just the Hono-shaped surface the routes use
@@ -26,7 +26,7 @@ function fallbackView() {
   return {
     user: null, path: "/", flash: null, csrfToken: "",
     needsTermsGate: false, termsVersion: "", company: createCompany({}),
-    appName: "GoyHub", appVersion: APP_VERSION,
+    appName: "AimHub", appVersion: APP_VERSION,
   };
 }
 

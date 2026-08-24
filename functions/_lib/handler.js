@@ -15,14 +15,14 @@ let bootstrapped = null;
 
 function setupPage() {
   const html = `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1"><title>GoyHub — setup</title>
+<meta name="viewport" content="width=device-width, initial-scale=1"><title>AimHub setup</title>
 <style>body{font-family:"Segoe UI",system-ui,sans-serif;background:#f4f7fc;color:#0a1226;
 display:flex;min-height:100vh;margin:0;align-items:center;justify-content:center;padding:1.5rem}
 .card{background:#fff;border:1px solid #dde5f2;border-radius:14px;padding:2.2rem;max-width:540px;
 box-shadow:0 12px 32px rgba(10,18,38,.08)}h1{color:#0137b7;margin:0 0 .6rem}code{background:#eef3fb;
 padding:.15rem .4rem;border-radius:5px;font-size:.9em}ol{line-height:1.7;color:#263149}</style></head>
 <body><div class="card"><h1>Almost there</h1>
-<p>GoyHub deployed successfully, but its database isn't connected yet.</p>
+<p>AimHub deployed successfully, but its database isn't connected yet.</p>
 <ol>
 <li>Create a D1 database named <code>goyhub</code>.</li>
 <li>Bind it to this Pages project as <code>DB</code> (Settings → Bindings), or paste its id into <code>wrangler.toml</code>.</li>

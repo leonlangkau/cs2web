@@ -68,7 +68,7 @@ SIGNUP_SURGE_LIMIT = "30"
 # Email stays cleanly disabled until that secret exists.
 EMAIL_PROVIDER = "cloudflare"
 EMAIL_FROM = "welcome@noreply.repairs.digital"
-EMAIL_FROM_NAME = "GoyHub"
+EMAIL_FROM_NAME = "AimHub"
 # EMAIL_SMTP_HOST = "smtp.mx.cloudflare.net"   # default
 # EMAIL_SMTP_PORT = "465"                      # default
 # With email configured, forum posting requires a verified address

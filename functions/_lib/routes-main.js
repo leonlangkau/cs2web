@@ -14,7 +14,7 @@ import { newToken } from "./crypto.js";
  * Per-download filename so the served attachment is never a predictable,
  * cacheable, shareable URL-to-name mapping. Keeps the real base name and
  * extension (installers must stay double-clickable) but injects a random,
- * per-request token: GoyHub-Setup-1.0.0.zip -> GoyHub-Setup-1.0.0-a1b2c3d4.zip
+ * per-request token: AimHub-Setup-1.0.0.zip -> AimHub-Setup-1.0.0-a1b2c3d4.zip
  */
 function scrambledFilename(name) {
   const token = newToken(4); // 8 hex chars

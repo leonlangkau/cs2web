@@ -1,6 +1,6 @@
 // GENERATED FROM schema.sql by scripts/build-schema.js — do not edit by hand.
 
-export default `-- GoyHub schema. Shared by the node:sqlite adapter and Cloudflare D1.
+export default `-- AimHub schema. Shared by the node:sqlite adapter and Cloudflare D1.
 -- D1 applies this through \`wrangler d1 execute --file\`; the Node adapter runs it at boot.
 
 -- \`role\` ('user'/'admin') is legacy and kept only so an already-deployed

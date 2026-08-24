@@ -16,7 +16,7 @@ function render(ctx, { title, kicker, sections, updated }) {
   const placeholderNote = c.isPlaceholder ? `<p class="legal-placeholder-note">
     <strong>Setup required.</strong> This document still contains placeholder company details.
     Set <span class="mono">COMPANY_LEGAL_NAME</span>, <span class="mono">COMPANY_REG_NUMBER</span> and
-    <span class="mono">COMPANY_ADDRESS</span> (see <span class="mono">src/config/company.js</span>),
+    <span class="mono">COMPANY_ADDRESS</span> (see <span class="mono">functions/_lib/company.js</span>),
     and have a qualified lawyer review this text before publishing.</p>` : '';
 
   const bodySections = map(sections, (s, i) => {
@@ -31,8 +31,7 @@ function render(ctx, { title, kicker, sections, updated }) {
 <section class="section legal-page">
   <div class="container">
     <div class="page-head"><div>
-      <p class="section-kicker">${esc(kicker)}</p>
-      <h1 class="section-title">${esc(title)}</h1>
+            <h1 class="section-title">${esc(title)}</h1>
     </div></div>
     <div class="legal-layout">
       ${toc}
@@ -75,11 +74,11 @@ function terms(ctx) {
 
   const sections = [
     { id: 's1', title: 'Who we are', html: `
-      <p>GoyHub (the <strong>"Service"</strong>) is operated by <strong>${esc(c.legalName)}</strong>
+      <p>AimHub (the <strong>"Service"</strong>) is operated by <strong>${esc(c.legalName)}</strong>
       (<strong>"we"</strong>, <strong>"us"</strong>, <strong>"our"</strong>), a company registered in the
       ${j} under registration number ${esc(c.registrationNumber)}, with its registered office at
       ${esc(c.addressLine)}, ${esc(c.city)}, ${j}.</p>
-      <p>The Service consists of this website, the GoyHub community forum, the GoyHub desktop application
+      <p>The Service consists of this website, the AimHub community forum, the AimHub desktop application
       for Windows, and any related software, downloads, content and support channels we make available.</p>` },
 
     { id: 's2', title: 'Accepting these terms', html: `
@@ -87,8 +86,8 @@ function terms(ctx) {
       us. You accept them by any of the following, whichever happens first:</p>
       <ul>
         <li>selecting <strong>"I accept"</strong> in the notice shown when you first open the Service;</li>
-        <li>creating a GoyHub account;</li>
-        <li>downloading, installing or using the GoyHub application; or</li>
+        <li>creating a AimHub account;</li>
+        <li>downloading, installing or using the AimHub application; or</li>
         <li>otherwise continuing to use the Service.</li>
       </ul>
       <p>Our <a href="/privacy">Privacy Policy</a> is incorporated into these Terms by reference. We record
@@ -96,7 +95,7 @@ function terms(ctx) {
       Terms, you must not use the Service.</p>` },
 
     { id: 's3', title: 'Eligibility', html: `
-      <p>You must be at least ${esc(c.minimumAge)} years old to create a GoyHub account. If the law where you
+      <p>You must be at least ${esc(c.minimumAge)} years old to create a AimHub account. If the law where you
       live sets a higher minimum age for consenting to online services or to the processing of your personal
       data, you must meet that higher age instead.</p>
       <p>By creating an account you represent that you meet these requirements, that the information you give
@@ -116,12 +115,12 @@ function terms(ctx) {
       <p>We may refuse, reclaim or rename any username that impersonates another person, implies affiliation
       with us or our staff, or that we consider offensive or misleading.</p>` },
 
-    { id: 's5', title: 'Licence to use GoyHub', html: `
-      <p>The Service and the GoyHub application are <strong>licensed to you, not sold</strong>. Subject to your
+    { id: 's5', title: 'Licence to use AimHub', html: `
+      <p>The Service and the AimHub application are <strong>licensed to you, not sold</strong>. Subject to your
       compliance with these Terms, we grant you a personal, limited, non-exclusive, non-transferable,
-      non-sublicensable and revocable licence to download and use one copy of the GoyHub application on
+      non-sublicensable and revocable licence to download and use one copy of the AimHub application on
       devices you control, and to access the Service, in each case for your own personal, non-commercial use.</p>
-      <p>All rights not expressly granted to you are reserved by us. The GoyHub name, logo, site design,
+      <p>All rights not expressly granted to you are reserved by us. The AimHub name, logo, site design,
       source code, compiled binaries, database schema, written content and all associated intellectual
       property remain our property or that of our licensors.</p>` },
 
@@ -142,7 +141,7 @@ function terms(ctx) {
         <li>reverse engineer, decompile, disassemble or otherwise attempt to derive the source code, algorithms, file formats or protocols of the application, <strong>except</strong> to the extent that this restriction is expressly prohibited by applicable law and only after you have asked us in writing for the information you need;</li>
         <li>circumvent, disable, remove or interfere with any licensing, authentication, access-control, rate-limiting, human-verification, integrity-check or security feature;</li>
         <li>remove, obscure, alter or falsify any copyright notice, trademark, watermark, version identifier or attribution;</li>
-        <li>distribute a modified, repackaged, cracked, patched or otherwise altered build of the application, or present any such build as genuine GoyHub software;</li>
+        <li>distribute a modified, repackaged, cracked, patched or otherwise altered build of the application, or present any such build as genuine AimHub software;</li>
         <li>tamper with, forge or replay requests to our servers or APIs, or interfere with the integrity or performance of the Service;</li>
         <li>probe, scan or test the vulnerability of any of our systems, or breach or circumvent any security or authentication measure, other than under a written authorisation from us.</li>
       </ul>
@@ -167,7 +166,7 @@ function terms(ctx) {
         <li>content that infringes anyone's copyright, trademark, privacy or other rights.</li>
       </ul>
       <p>You must also comply with all laws that apply to you, and with the terms of any third-party service
-      you use alongside GoyHub, including Steam and Counter-Strike 2.</p>` },
+      you use alongside AimHub, including Steam and Counter-Strike 2.</p>` },
 
     { id: 's8', title: 'Your content', html: `
       <p>You keep ownership of the threads, posts, configurations and other material you submit to the Service
@@ -198,10 +197,10 @@ function terms(ctx) {
       action.</p>` },
 
     { id: 's10', title: 'Relationship with Valve', html: `
-      <p>GoyHub is an independent, fan-made companion product. We are <strong>not affiliated with, endorsed by,
+      <p>AimHub is an independent, fan-made companion product. We are <strong>not affiliated with, endorsed by,
       sponsored by or associated with Valve Corporation</strong>. "Counter-Strike", "Counter-Strike 2", "CS2"
       and "Steam" are trademarks of Valve Corporation, used here only to describe compatibility.</p>
-      <p>Your use of Counter-Strike 2 and Steam remains governed by Valve's own agreements. GoyHub does not
+      <p>Your use of Counter-Strike 2 and Steam remains governed by Valve's own agreements. AimHub does not
       read or modify game memory and does not inject code into the game. Even so, you are solely responsible
       for ensuring that your use of any third-party tool complies with Valve's rules, and we accept no
       responsibility for any action Valve takes against your game account.</p>` },
@@ -338,7 +337,7 @@ function terms(ctx) {
   ];
 
   sections.summary = summaryBlock([
-    'GoyHub is a free companion app and community forum for Counter-Strike 2 players.',
+    'AimHub is a free companion app and community forum for Counter-Strike 2 players.',
     'You need an account to post and to download. Keep your password safe and don\'t share the account.',
     '<strong>You may not tamper with, clone, copy, decompile or redistribute our software.</strong>',
     'Don\'t cheat, harass people, or upload anything illegal. We can remove content and ban accounts.',
@@ -363,13 +362,13 @@ function privacy(ctx) {
 
   const sections = [
     { id: 'p1', title: 'Who we are', html: `
-      <p>GoyHub is operated by <strong>${esc(c.legalName)}</strong> (<strong>"we"</strong>, <strong>"us"</strong>,
+      <p>AimHub is operated by <strong>${esc(c.legalName)}</strong> (<strong>"we"</strong>, <strong>"us"</strong>,
       <strong>"our"</strong>), registered in the ${j} under registration number ${esc(c.registrationNumber)},
       with its registered office at ${esc(c.addressLine)}, ${esc(c.city)}, ${j}. We are the controller of the
       personal data described in this policy.</p>` },
 
     { id: 'p2', title: 'Scope', html: `
-      <p>This Privacy Policy explains what personal data we collect through the GoyHub website, community forum
+      <p>This Privacy Policy explains what personal data we collect through the AimHub website, community forum
       and desktop application (together, the <strong>"Service"</strong>), why we collect it, who we share it
       with, and what choices you have. It forms part of our <a href="/terms">Terms &amp; Conditions</a>.</p>
       <p>By using the Service you acknowledge the practices described here.</p>` },
@@ -399,7 +398,7 @@ function privacy(ctx) {
       <p>The threads, replies, configurations, crosshair codes and other material you submit, together with
       associated metadata such as timestamps, view counts and the category you posted in.</p>
       <h3>3.4 Application data</h3>
-      <p>Where you sign in to the GoyHub desktop application, we may collect the technical data above together
+      <p>Where you sign in to the AimHub desktop application, we may collect the technical data above together
       with information the application needs to function — such as your linked game profile identifier, match
       statistics it retrieves on your behalf, saved configuration profiles, application version, and diagnostic
       and crash information.</p>
@@ -435,7 +434,7 @@ function privacy(ctx) {
       improving the Service), your consent where we ask for it, and compliance with legal obligations.</p>` },
 
     { id: 'p6', title: 'IP address logging', html: `
-      <p>Because GoyHub is a free service with an open sign-up, IP logging is central to how we keep it usable.
+      <p>Because AimHub is a free service with an open sign-up, IP logging is central to how we keep it usable.
       We record the IP address and browser of each sign-up, login attempt, logout and download, and we retain
       those records so that our administrators can:</p>
       <ul>

@@ -85,7 +85,7 @@ function register(app) {
       return c.redirect('/profile', 302);
     }
     if (isDisposableEmail(email, c.get('cfg'))) {
-      setFlash(c, 'error', 'Disposable email addresses cannot be used — use a real inbox.');
+      setFlash(c, 'error', 'Disposable email addresses cannot be used. Use a real inbox.');
       return c.redirect('/profile', 302);
     }
     const taken = await db.get('SELECT id FROM users WHERE email = ? AND id != ?', email, user.id);
@@ -98,7 +98,7 @@ function register(app) {
     await audit(c, 'email_changed', { userId: user.id, username: user.username, detail: `${row.email} -> ${email}` });
     await sendVerificationEmail(c, { id: user.id, username: user.username, email });
     setFlash(c, 'success', isEmailConfigured(c.get('cfg'))
-      ? 'Email updated — check your inbox for a new verification link.'
+      ? 'Email updated. Check your inbox for a new verification link.'
       : 'Email updated.');
     return c.redirect('/profile', 302);
   });
@@ -123,7 +123,7 @@ function register(app) {
       await destroySession(c);
       return c.redirect('/auth/login', 302);
     }
-    setFlash(c, 'success', 'Session revoked — that device is signed out.');
+    setFlash(c, 'success', 'Session revoked. That device is signed out.');
     return c.redirect('/profile', 302);
   });
 
@@ -181,7 +181,7 @@ function register(app) {
       return c.redirect('/profile', 302);
     }
     if (password.length < 8 || password.length > 128) {
-      setFlash(c, 'error', 'New password must be 8–128 characters.');
+      setFlash(c, 'error', 'New password must be 8-128 characters.');
       return c.redirect('/profile', 302);
     }
     if (password !== confirm) {

@@ -9,7 +9,7 @@ function head(ctx, heading) {
   const tab = (href, label, active) => `<a href="${href}" class="${active ? 'active' : ''}">${label}</a>`;
   const p = ctx.path;
   return `<div class="page-head">
-    <div><p class="section-kicker">// ADMIN BACKEND</p><h1 class="section-title">${esc(heading)}</h1></div>
+    <div><h1 class="section-title">${esc(heading)}</h1></div>
   </div>
   <nav class="admin-tabs" aria-label="Admin sections">
     ${tab('/admin', 'Dashboard', p === '/admin')}
@@ -22,7 +22,7 @@ function head(ctx, heading) {
 
 const logRow = (l) => `<tr>
   <td><span class="tag tag-event tag-${esc(l.event)}">${esc(l.event)}</span></td>
-  <td>${esc(l.username || '—')}</td>
+  <td>${esc(l.username || '-')}</td>
   <td class="mono">${esc(l.ip)}</td>
   <td class="muted">${esc(timeAgo(l.created_at))}</td></tr>`;
 
@@ -38,7 +38,7 @@ function dashboard(ctx, { stats, recentLogs, recentUsers }) {
           <input type="hidden" name="_csrf" value="${esc(ctx.csrfToken)}">
           <label><span>Message</span>
             <input type="text" name="announcement" maxlength="500" value="${esc(ctx.announcement || '')}"
-                   placeholder="e.g. v1.1 is out — restart GoyHub to update!"></label>
+                   placeholder="e.g. v1.1 is out, restart AimHub to update!"></label>
           <button class="btn btn-primary btn-sm" type="submit">${ctx.announcement ? 'Update' : 'Publish'}</button>
         </form>
       </div>` : '';
@@ -73,7 +73,7 @@ function dashboard(ctx, { stats, recentLogs, recentUsers }) {
           <tbody>${map(recentUsers, (u) => `<tr>
             <td>${esc(u.username)}${tierTag(u.tier)}
               ${u.banned ? '<span class="tag tag-banned">BANNED</span>' : ''}</td>
-            <td class="mono">${esc(u.signup_ip || '—')}</td>
+            <td class="mono">${esc(u.signup_ip || '-')}</td>
             <td class="muted">${esc(timeAgo(u.created_at))}</td></tr>`)}
           </tbody></table></div>
       </div>
@@ -90,7 +90,7 @@ function users(ctx, { users: rows, q, page: current, pages, total, tiers, tierLa
   const DAY = 86_400_000;
 
   const subCell = (u) => {
-    if (u.tier !== 'paid') return '<span class="muted">—</span>';
+    if (u.tier !== 'paid') return '<span class="muted">-</span>';
     let state;
     if (u.paid_until === null || u.paid_until === undefined) {
       state = '<strong>Lifetime</strong>';
@@ -124,7 +124,7 @@ function users(ctx, { users: rows, q, page: current, pages, total, tiers, tierLa
           ${map(tiers, (t) => `<option value="${esc(t)}" ${u.tier === t ? 'selected' : ''}>${esc(tierLabels[t] || t)}</option>`)}
         </select>
         <input type="number" name="paid_days" min="1" max="3650" placeholder="days"
-               title="Paid duration in days — leave empty for lifetime (Paid tier only)" class="paid-days-input">
+               title="Paid duration in days; leave empty for lifetime (Paid tier only)" class="paid-days-input">
         <button class="btn btn-ghost btn-xs" type="submit">Set tier</button></form>
       <form method="post" action="/admin/users/${esc(u.id)}/password" class="inline-form"
             data-confirm="Set a new password for ${esc(u.username)}? Their sessions will be signed out.">${csrf}
@@ -133,7 +133,7 @@ function users(ctx, { users: rows, q, page: current, pages, total, tiers, tierLa
         <button class="btn btn-warn btn-xs" type="submit">Set password</button></form>
       <form method="post" action="/admin/users/${esc(u.id)}/uid" class="inline-form"
             data-confirm="Move ${esc(u.username)} to the entered UID?">${csrf}
-        <input type="number" name="uid" min="0" max="1001" required placeholder="UID 0–1001"
+        <input type="number" name="uid" min="0" max="1001" required placeholder="UID 0-1001"
                aria-label="New UID for ${esc(u.username)}">
         <button class="btn btn-ghost btn-xs" type="submit">Set UID</button></form>
       <form method="post" action="/admin/users/${esc(u.id)}/delete" class="inline-form"
@@ -177,8 +177,8 @@ function users(ctx, { users: rows, q, page: current, pages, total, tiers, tierLa
           <div class="muted"><span class="uid-badge${u.id <= 1001 ? ' uid-reserved' : ''}">UID ${esc(u.id)}</span>
             · joined ${esc(timeAgo(u.created_at))}</div>
           <div class="muted">${esc(u.email)} ${u.email_verified_at ? '✓' : '<span title="email unverified">✗</span>'}</div></td>
-        <td><div class="mono">${esc(u.signup_ip || '—')}</div>
-          <div class="mono muted">${esc(u.last_login_ip || '—')}</div>
+        <td><div class="mono">${esc(u.signup_ip || '-')}</div>
+          <div class="mono muted">${esc(u.last_login_ip || '-')}</div>
           <div class="muted">${esc(timeAgo(u.last_login_at))}</div></td>
         <td class="sub-cell">${subCell(u)}</td>
         <td class="actions-cell">${actions(u)}</td></tr>`)}
@@ -217,15 +217,15 @@ function logs(ctx, { logs: rows, q, event, events, page: current, pages, total, 
         : map(rows, (l) => `<tr>
             <td class="muted">${esc(l.id)}</td>
             <td><span class="tag tag-event tag-${esc(l.event)}">${esc(l.event)}</span></td>
-            <td>${esc(l.username || '—')}</td>
+            <td>${esc(l.username || '-')}</td>
             <td class="mono">${l.ipHidden
               ? `<span class="muted" title="Admin accounts' IPs are hidden from other staff">${esc(l.ip)}</span>`
               : `<a href="/admin/logs?q=${encodeURIComponent(l.ip)}">${esc(l.ip)}</a>`}</td>
-            <td class="muted detail-cell">${esc(l.detail || '—')}</td>
-            <td class="muted ua-cell" title="${esc(l.ipHidden ? '' : l.user_agent || '')}">${esc(String(l.user_agent || '—').slice(0, 60))}</td>
+            <td class="muted detail-cell">${esc(l.detail || '-')}</td>
+            <td class="muted ua-cell" title="${esc(l.ipHidden ? '' : l.user_agent || '')}">${esc(String(l.user_agent || '-').slice(0, 60))}</td>
             <td class="muted nowrap">${esc(l.created_at)} UTC</td>
             <td class="actions-cell">${l.ipHidden ? '' : `<form method="post" action="/admin/ip-bans" class="inline-form"
-                  data-confirm="Ban ${esc(l.ip)} from GoyHub entirely?">${csrf}
+                  data-confirm="Ban ${esc(l.ip)} from AimHub entirely?">${csrf}
                 <input type="hidden" name="ip" value="${esc(l.ip)}">
                 <button class="btn btn-warn btn-xs" type="submit">Ban IP</button></form>`}</td></tr>`)}
       </tbody></table></div></div>
@@ -239,8 +239,8 @@ function logs(ctx, { logs: rows, q, event, events, page: current, pages, total, 
           ? '<tr><td colspan="6" class="muted center">No IPs currently banned.</td></tr>'
           : map(ipBans, (b) => `<tr>
               <td class="mono">${esc(b.ip)}</td>
-              <td class="muted detail-cell">${esc(b.reason || '—')}</td>
-              <td class="muted">${esc(b.banned_by || '—')}</td>
+              <td class="muted detail-cell">${esc(b.reason || '-')}</td>
+              <td class="muted">${esc(b.banned_by || '-')}</td>
               <td class="muted nowrap">${b.expires_at
                 ? `auto · lifts in ${esc(Math.max(1, Math.ceil((Number(b.expires_at) - Date.now()) / 60000)))}m`
                 : 'permanent'}</td>
@@ -266,7 +266,7 @@ function reports(ctx, { reports: rows }) {
       ? '<span class="muted">(post has been deleted)</span>'
       : `<a href="/forum/t/${esc(r.thread_id)}#post-${esc(r.post_id)}">${esc(r.thread_title || 'thread')}</a>
          <div class="muted detail-cell" title="${esc(String(r.post_body).slice(0, 500))}">${esc(String(r.post_body).slice(0, 100))}${String(r.post_body).length > 100 ? '…' : ''}</div>
-         <div class="muted">by ${esc(r.author || '—')}</div>`;
+         <div class="muted">by ${esc(r.author || '-')}</div>`;
     const actions = r.status === 'open'
       ? `<form method="post" action="/admin/reports/${esc(r.id)}/resolve" class="inline-form">${csrf}
            <button class="btn btn-ghost btn-xs" type="submit">Resolve</button></form>
@@ -274,7 +274,7 @@ function reports(ctx, { reports: rows }) {
           ? `<form method="post" action="/admin/posts/${esc(r.post_id)}/delete" class="inline-form"
                 data-confirm="Delete the reported post?">${csrf}
               <button class="btn btn-danger btn-xs" type="submit">Delete post</button></form>` : ''}`
-      : `<span class="muted">by ${esc(r.resolved_by || '—')} · ${esc(timeAgo(r.resolved_at))}</span>`;
+      : `<span class="muted">by ${esc(r.resolved_by || '-')} · ${esc(timeAgo(r.resolved_at))}</span>`;
     return `<tr class="${r.status === 'open' ? '' : 'row-resolved'}">
       <td class="muted">${esc(r.id)}</td>
       <td><span class="tag ${r.status === 'open' ? 'tag-report-open' : 'tag-report-resolved'}">${esc(r.status.toUpperCase())}</span></td>
@@ -289,7 +289,7 @@ function reports(ctx, { reports: rows }) {
 <div class="section admin-page">
   <div class="container">
     ${head(ctx, 'Reports')}
-    <p class="muted">Member reports on forum posts. Resolve once handled — deleting the reported post
+    <p class="muted">Member reports on forum posts. Resolve once handled. Deleting the reported post
       does not auto-resolve the report, so the paper trail stays intact.</p>
     <div class="panel"><div class="table-wrap"><table>
       <thead><tr><th>#</th><th>Status</th><th>Reported post</th><th>Reason</th><th>Reporter</th><th>When</th><th>Actions</th></tr></thead>

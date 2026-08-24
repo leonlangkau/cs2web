@@ -1,6 +1,6 @@
-# Deploying GoyHub to Cloudflare Pages
+# Deploying AimHub to Cloudflare Pages
 
-GoyHub is a **Cloudflare Pages project**, structured exactly like a static site:
+AimHub is a **Cloudflare Pages project**, structured exactly like a static site:
 `public/` is the build output directory, and one catch-all **Pages Function**
 (`functions/[[path]].js`) handles the dynamic routes, backed by **D1**.
 
@@ -126,7 +126,7 @@ too big (the bundle caps at ~1 MB free / 10 MB paid), so use R2:
 
 ```bash
 npx wrangler r2 bucket create goyhub-installer
-npx wrangler r2 object put goyhub-installer/GoyHub-Setup-1.0.0.zip --file=./installer.zip
+npx wrangler r2 object put goyhub-installer/AimHub-Setup-1.0.0.zip --file=./installer.zip
 ```
 
 Uncomment the `[[r2_buckets]]` block in `wrangler.toml` (or add the binding in

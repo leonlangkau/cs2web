@@ -96,7 +96,7 @@ async function relocateUserId(db, fromId, toId) {
      SELECT ?, ?, ?, password_hash, role, tier, banned,
             email_verified_at, paid_until, signup_ip, last_login_ip, last_login_at, created_at
      FROM users WHERE id = ?`,
-    toId, tempName, `${tempName}@goyhub.invalid`, fromId
+    toId, tempName, `${tempName}@aimhub.invalid`, fromId
   );
   for (const [table, column] of USER_REF_COLUMNS) {
     await db.run(`UPDATE ${table} SET ${column} = ? WHERE ${column} = ?`, toId, fromId);
@@ -142,7 +142,7 @@ async function ensureVanityUids(db) {
       // Random password — an admin assigns a real one from the Users tab.
       await db.run(
         'INSERT INTO users (id, username, email, password_hash, tier) VALUES (?, ?, ?, ?, ?)',
-        uid, name, `${name}@goyhub.local`, await hashPassword(newToken(24)), 'user'
+        uid, name, `${name}@aimhub.local`, await hashPassword(newToken(24)), 'user'
       );
     }
   }
@@ -184,26 +184,26 @@ async function deletedUserId(db) {
   if (existing) return existing.id;
   const created = await db.run(
     'INSERT INTO users (username, email, password_hash, banned) VALUES (?, ?, ?, 1)',
-    DELETED_USERNAME, 'deleted@goyhub.invalid', await hashPassword(newToken(32))
+    DELETED_USERNAME, 'deleted@aimhub.invalid', await hashPassword(newToken(32))
   );
   return created.lastInsertRowid;
 }
 
 const CATEGORIES = [
-  ['Announcements', 'announcements', 'Official news, changelogs and release notes from the GoyHub team.', 0],
-  ['General Discussion', 'general', 'Talk about GoyHub, CS2 and everything in between.', 1],
+  ['Announcements', 'announcements', 'Official news, changelogs and release notes from the AimHub team.', 0],
+  ['General Discussion', 'general', 'Talk about AimHub, CS2 and everything in between.', 1],
   ['Support & Bug Reports', 'support', 'Something broken? Get help from the team and the community.', 2],
   ['Configs & Setups', 'configs', 'Share crosshairs, video settings, autoexecs and launch options.', 3],
   ['Off-Topic', 'off-topic', 'Anything that is not CS2. Keep it friendly.', 4],
 ];
 
-const WELCOME_BODY = 'Welcome to the official GoyHub forum!\n\n'
+const WELCOME_BODY = 'Welcome to the official AimHub forum!\n\n'
   + 'This is the place to discuss the app, share your CS2 configs, report bugs and hang out with the community.\n\n'
   + 'House rules:\n'
   + '1. Be respectful. No harassment, hate speech or personal attacks.\n'
   + '2. No cheating software, exploits or account trading — instant ban.\n'
   + '3. Keep threads in the right category so people can find them.\n'
-  + '4. Use Support & Bug Reports for issues — include your GoyHub version and logs.\n\n'
+  + '4. Use Support & Bug Reports for issues, and include your AimHub version and logs.\n\n'
   + 'GL & HF!';
 
 /**
@@ -240,7 +240,7 @@ async function seed(db, env = {}) {
       }
       await db.run(
         "INSERT INTO users (username, email, password_hash, role, tier) VALUES (?, ?, ?, 'admin', 'admin')",
-        username, env.ADMIN_EMAIL || 'admin@goyhub.local', await hashPassword(password)
+        username, env.ADMIN_EMAIL || 'admin@aimhub.local', await hashPassword(password)
       );
     }
   } else if (env.ADMIN_PASSWORD) {
@@ -279,7 +279,7 @@ async function seed(db, env = {}) {
     if (firstAdmin && announcements) {
       const thread = await db.run(
         'INSERT INTO threads (category_id, user_id, title, pinned) VALUES (?, ?, ?, 1)',
-        announcements.id, firstAdmin.id, 'Welcome to the GoyHub community forum!'
+        announcements.id, firstAdmin.id, 'Welcome to the AimHub community forum!'
       );
       await db.run(
         'INSERT INTO posts (thread_id, user_id, body) VALUES (?, ?, ?)',

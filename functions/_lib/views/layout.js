@@ -1,13 +1,14 @@
 import { esc } from "./util.js";
 import { isStaff, meetsTier } from "../tiers.js";
 
+// Two stacked triangles: an outlined peak with a solid core, the "rank up" mark.
 const BRAND_MARK = `<svg class="brand-mark" viewBox="0 0 32 32" aria-hidden="true">
-  <path d="M16 4L26.4 22H5.6z" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linejoin="round"/>
-  <path d="M16 28L5.6 10h20.8z" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linejoin="round"/>
+  <path d="M16 4L28 26H4z" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linejoin="round"/>
+  <path d="M16 14.2l5.1 8.8H10.9z" fill="currentColor"/>
 </svg>`;
 
 // White backing plate so the blue mark stays visible in dark browser tab strips.
-const FAVICON = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23ffffff'/%3E%3Cpath d='M16 5L25.5 21.5H6.5z' fill='none' stroke='%230137B7' stroke-width='2.6' stroke-linejoin='round'/%3E%3Cpath d='M16 27L6.5 10.5h19z' fill='none' stroke='%230137B7' stroke-width='2.6' stroke-linejoin='round'/%3E%3C/svg%3E";
+const FAVICON = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23ffffff'/%3E%3Cpath d='M16 5L27 25H5z' fill='none' stroke='%230137B7' stroke-width='2.6' stroke-linejoin='round'/%3E%3Cpath d='M16 14.5l4.7 8H11.3z' fill='%230137B7'/%3E%3C/svg%3E";
 
 function termsGate(ctx) {
   return `<div class="terms-gate" role="dialog" aria-modal="true" aria-labelledby="terms-gate-title">
@@ -17,7 +18,7 @@ function termsGate(ctx) {
       <a href="/terms">Terms &amp; Conditions</a> and <a href="/privacy">Privacy Policy</a>.</p>
     <ul class="terms-gate-points">
       <li>You may not tamper with, clone, copy, decompile or redistribute our software.</li>
-      <li>Disputes are resolved by <strong>binding private arbitration</strong>, individually — not in court and not as a class action.</li>
+      <li>Disputes are resolved by <strong>binding private arbitration</strong>, individually, not in court and not as a class action.</li>
       <li>We log the IP address and browser of sign-ups, logins and downloads for security.</li>
     </ul>
     <form method="post" action="/legal/accept" class="terms-gate-actions">
@@ -51,7 +52,7 @@ function nav(ctx) {
 
   return `<header class="site-nav" id="site-nav">
   <div class="container nav-inner">
-    <a class="brand" href="/" aria-label="${esc(ctx.appName)} home">${BRAND_MARK}<span>Goy<em>Hub</em></span></a>
+    <a class="brand" href="/" aria-label="${esc(ctx.appName)} home">${BRAND_MARK}<span>Aim<em>Hub</em></span></a>
     <nav class="nav-links" aria-label="Main">
       ${link('/', 'Home', ctx.path === '/')}
       ${link('/forum', 'Forum', ctx.path.startsWith('/forum'))}
@@ -75,7 +76,7 @@ function footer(ctx) {
   return `<footer class="site-footer">
   <div class="container footer-grid">
     <div>
-      <a class="brand brand-footer" href="/">${BRAND_MARK}<span>Goy<em>Hub</em></span></a>
+      <a class="brand brand-footer" href="/">${BRAND_MARK}<span>Aim<em>Hub</em></span></a>
       <p class="footer-blurb">The all-in-one CS2 companion. Track your stats, manage your configs, and play at your peak.</p>
     </div>
     <nav aria-label="Product"><h3>Product</h3>
@@ -101,11 +102,11 @@ function footer(ctx) {
  * `body` is trusted markup produced by a view; data inside it must already be escaped.
  */
 function page(ctx, { title, body, bodyClass = '', scripts = [] } = {}) {
-  const fullTitle = title ? `${title} · ${ctx.appName}` : `${ctx.appName} — The Ultimate CS2 Companion`;
+  const fullTitle = title ? `${title} · ${ctx.appName}` : `${ctx.appName} · The CS2 Companion`;
   const announcement = ctx.announcement
     ? `<div class="announcement" id="announcement" role="status">
         <div class="container announcement-inner">
-          <span>📣 ${esc(ctx.announcement)}</span>
+          <span>${esc(ctx.announcement)}</span>
           <button type="button" class="announcement-dismiss" id="announcement-dismiss" aria-label="Dismiss announcement">✕</button>
         </div>
       </div>`
@@ -121,7 +122,7 @@ function page(ctx, { title, body, bodyClass = '', scripts = [] } = {}) {
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${esc(fullTitle)}</title>
-<meta name="description" content="GoyHub is the all-in-one CS2 companion app: match stats, crosshair &amp; config manager, skin tracker and performance presets. Free download.">
+<meta name="description" content="AimHub is the all-in-one CS2 companion app: match stats, crosshair &amp; config manager, skin tracker and performance presets for Counter-Strike 2.">
 <link rel="icon" href="${FAVICON}">
 <meta name="theme-color" content="#0137B7">
 <link rel="stylesheet" href="/css/style.css">

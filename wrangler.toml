@@ -56,17 +56,21 @@ SIGNUP_SURGE_LIMIT = "30"
 # CRYPTO_PAY_ADDRESSES = ""
 # PAID_PRICE = ""
 
-# Outbound email (password reset + verification). Preferred: Cloudflare's own
-# Email Service SMTPS relay (smtp.mx.cloudflare.net:465, spoken natively via
-# cloudflare:sockets). HTTP API providers are supported as alternatives.
-# Set the secrets in the Pages dashboard:
-#   EMAIL_PROVIDER   "cloudflare" | "resend" | "sendgrid" | "mailchannels"  (unset = disabled)
-#   EMAIL_API_KEY    for "cloudflare": an API token with the
-#                    "Email Sending: Edit" permission; otherwise the
-#                    provider's API key (secret!)
-#   EMAIL_FROM       verified sender on your Email Service / provider domain
-#   EMAIL_FROM_NAME  optional display name (default "GoyHub")
-#   EMAIL_SMTP_HOST / EMAIL_SMTP_PORT  cloudflare overrides (defaults shown above)
+# Outbound email (password reset + verification) via Cloudflare's Email
+# Service SMTPS relay (smtp.mx.cloudflare.net:465, spoken natively over
+# cloudflare:sockets). Alternatives: "resend" | "sendgrid" | "mailchannels".
+#
+# The ONE value that must NOT live in this file is EMAIL_API_KEY (the API
+# token with the "Email Sending: Edit" permission) — committing a live
+# credential to Git hands mail-sending to anyone who ever sees the repo.
+# Add it in the Pages dashboard (Settings → Variables and Secrets, type
+# Secret), exactly like ADMIN_PASSWORD and CAPTCHA_SECRET already are.
+# Email stays cleanly disabled until that secret exists.
+EMAIL_PROVIDER = "cloudflare"
+EMAIL_FROM = "welcome@noreply.repairs.digital"
+EMAIL_FROM_NAME = "GoyHub"
+# EMAIL_SMTP_HOST = "smtp.mx.cloudflare.net"   # default
+# EMAIL_SMTP_PORT = "465"                      # default
 # With email configured, forum posting requires a verified address
 # (REQUIRE_VERIFIED_EMAIL = "0" turns that gate off).
 # DISPOSABLE_EMAIL_DOMAINS = ""   # extra comma-separated throwaway domains to block

@@ -513,7 +513,9 @@ textarea { resize: vertical; min-height: 90px; }
 .sidebar-thread .muted { font-size: 0.8rem; }
 
 .shoutbox { margin-top: 1.4rem; padding-top: 1.2rem; border-top: 1px solid var(--border); }
-.shoutbox h2 { font-size: 1rem; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); margin-bottom: 0.9rem; }
+.shoutbox-head { display: flex; align-items: center; justify-content: space-between; gap: 0.6rem; margin-bottom: 0.9rem; }
+.shoutbox-head h2 { margin-bottom: 0; }
+.shoutbox h2 { font-size: 1rem; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
 .shout-list { display: flex; flex-direction: column; gap: 0.5rem; height: 260px; overflow-y: auto; margin-bottom: 0.9rem; }
 .shout-row { position: relative; display: flex; flex-direction: column; flex-shrink: 0; font-size: 0.85rem; padding: 0.45rem 1.6rem 0.45rem 0.6rem; border-radius: 7px; background: var(--bg-2); }
 .shout-del-form { position: absolute; top: 0.3rem; right: 0.4rem; }
@@ -772,8 +774,10 @@ tbody tr.row-banned:hover td { background: #f8e7e9; }
 .tag-post_reported { background: #f0eade; color: var(--warn); }
 .tag-email_changed { background: #e1e7f6; color: var(--accent); }
 .tag-account_deleted { background: #e8eaee; color: var(--muted); }
+.tag-shout_deleted { background: #e8eaee; color: var(--muted); }
 [data-theme="dark"] .tag-email_changed { background: var(--accent-soft); color: var(--accent); }
-[data-theme="dark"] .tag-account_deleted { background: var(--panel-2); color: var(--muted); }
+[data-theme="dark"] .tag-account_deleted,
+[data-theme="dark"] .tag-shout_deleted { background: var(--panel-2); color: var(--muted); }
 .tag-report-open { background: #f4d5d8; color: var(--danger); }
 .tag-report-resolved { background: #e2efe9; color: var(--success); }
 [data-theme="dark"] .tag-post_reported { background: rgba(224, 168, 60, 0.18); color: var(--warn); }
@@ -799,6 +803,8 @@ tbody tr.row-banned:hover td { background: #f8e7e9; }
 .filter-bar input[type="search"] { max-width: 320px; }
 .filter-bar select { width: auto; }
 .filter-bar .muted { margin-left: auto; font-size: 0.88rem; }
+.filter-check { display: flex; align-items: center; gap: 0.35rem; font-size: 0.88rem; color: var(--muted); cursor: pointer; white-space: nowrap; }
+.filter-check input { width: auto; }
 
 /* ---------- Error page ---------- */
 .error-page { padding: 6rem 0; }

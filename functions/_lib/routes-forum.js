@@ -391,7 +391,25 @@ function register(app) {
     return c.html(views.memberProfile(c.get('view'), { member, stats, recentThreads, recentPosts }));
   });
 
-  // Staff moderation for the shoutbox.
+  // Staff moderation for the shoutbox. Logged under their own 'shout_deleted'
+  // event (not 'admin_action') so routine shoutbox cleanup doesn't drown out
+  // real moderation actions in the IP log — see the "Important only" filter.
+  // Purge is registered before the :id route so "purge" isn't swallowed as
+  // an :id value by the router's first-match-wins ordering.
+  app.post('/forum/shouts/purge', async (c) => {
+    const gate = requireAuth(c);
+    if (gate) return gate;
+    if (!isStaff(c.get('user'))) return notFound(c);
+    const db = c.get('db');
+    const { changes } = await db.run('DELETE FROM shouts');
+    await audit(c, 'shout_deleted', {
+      userId: c.get('user').id, username: c.get('user').username,
+      detail: `purged the shoutbox (${changes} shout${changes === 1 ? '' : 's'})`,
+    });
+    setFlash(c, 'success', 'Shoutbox purged.');
+    return c.redirect('/forum', 302);
+  });
+
   app.post('/forum/shouts/:id/delete', async (c) => {
     const gate = requireAuth(c);
     if (gate) return gate;
@@ -401,7 +419,7 @@ function register(app) {
     const shout = id > 0 ? await db.get('SELECT * FROM shouts WHERE id = ?', id) : null;
     if (!shout) return notFound(c);
     await db.run('DELETE FROM shouts WHERE id = ?', id);
-    await audit(c, 'admin_action', {
+    await audit(c, 'shout_deleted', {
       userId: c.get('user').id, username: c.get('user').username,
       detail: `deleted shout #${id} ("${String(shout.body).slice(0, 60)}")`,
     });

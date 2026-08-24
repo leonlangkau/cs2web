@@ -1,8 +1,9 @@
 import * as views from "./views/forum.js";
 import * as site from "./views/site.js";
 import * as limits from "./limits.js";
-import { requireAuth, requireTier, formBody, setFlash, clientIp } from "./middleware.js";
+import { requireAuth, requireTier, formBody, setFlash, clientIp, audit } from "./middleware.js";
 import { isStaff } from "./tiers.js";
+import { canEditPost, EDIT_WINDOW_MS } from "./post-rules.js";
 import { tooMany } from "./routes-main.js";
 
 const THREADS_PER_PAGE = 20;
@@ -11,6 +12,8 @@ const MAX_TITLE = 120;
 const MAX_BODY = 10000;
 const SHOUT_MAX = 200;
 const SHOUTS_PER_LOAD = 30;
+const SEARCH_RESULTS = 50;
+const REPORT_MAX = 500;
 
 function notFound(c) {
   return c.html(site.errorPage(c.get('view'), {
@@ -238,6 +241,131 @@ function register(app) {
     await db.run('DELETE FROM posts WHERE id = ?', id);
     setFlash(c, 'success', 'Post deleted.');
     return c.redirect(`/forum/t/${post.thread_id}`, 302);
+  });
+
+  // Post editing: the author within EDIT_WINDOW_MS, or staff at any time.
+  // Edits are marked on the post so a thread can't be silently rewritten.
+  app.get('/forum/posts/:id/edit', async (c) => {
+    const gate = requireAuth(c);
+    if (gate) return gate;
+    const db = c.get('db');
+    const id = intParam(c.req.param('id'), 0);
+    const post = id > 0 ? await db.get('SELECT * FROM posts WHERE id = ?', id) : null;
+    if (!post || !canEditPost(c.get('user'), post)) return notFound(c);
+    const thread = await db.get('SELECT id, title FROM threads WHERE id = ?', post.thread_id);
+    return c.html(views.editPost(c.get('view'), { post, thread, errors: [] }));
+  });
+
+  app.post('/forum/posts/:id/edit', async (c) => {
+    const gate = requireAuth(c);
+    if (gate) return gate;
+    const db = c.get('db');
+    const user = c.get('user');
+    const id = intParam(c.req.param('id'), 0);
+    const post = id > 0 ? await db.get('SELECT * FROM posts WHERE id = ?', id) : null;
+    if (!post || !canEditPost(user, post)) return notFound(c);
+
+    const body = await formBody(c);
+    const text = String(body.body || '').trim();
+    if (text.length < 1 || text.length > MAX_BODY) {
+      const thread = await db.get('SELECT id, title FROM threads WHERE id = ?', post.thread_id);
+      return c.html(views.editPost(c.get('view'), {
+        post: { ...post, body: text }, thread,
+        errors: [`Post must be 1–${MAX_BODY} characters.`],
+      }), 400);
+    }
+
+    await db.run(
+      "UPDATE posts SET body = ?, edited_at = datetime('now'), edited_by = ? WHERE id = ?",
+      text, user.username, id
+    );
+    setFlash(c, 'success', 'Post updated.');
+    return c.redirect(`/forum/t/${post.thread_id}#post-${id}`, 302);
+  });
+
+  // Member reports feed the admin panel's moderation queue.
+  app.post('/forum/posts/:id/report', async (c) => {
+    const gate = requireAuth(c);
+    if (gate) return gate;
+    const db = c.get('db');
+    const user = c.get('user');
+    const id = intParam(c.req.param('id'), 0);
+    const post = id > 0 ? await db.get('SELECT * FROM posts WHERE id = ?', id) : null;
+    if (!post) return notFound(c);
+
+    const verdict = await limits.check(db, 'report', String(user.id), c.get('cfg'));
+    if (!verdict.ok) return tooMany(c, verdict.retryAfterSec);
+
+    const body = await formBody(c);
+    const reason = String(body.reason || '').trim().replace(/\s+/g, ' ').slice(0, REPORT_MAX);
+    if (reason.length < 3) {
+      setFlash(c, 'error', 'Add a short reason so moderators know what to look at.');
+      return c.redirect(`/forum/t/${post.thread_id}#post-${id}`, 302);
+    }
+
+    const dupe = await db.get(
+      "SELECT id FROM reports WHERE post_id = ? AND reporter_id = ? AND status = 'open'", id, user.id
+    );
+    if (!dupe) {
+      await db.run(
+        'INSERT INTO reports (post_id, reporter_id, reason) VALUES (?, ?, ?)', id, user.id, reason
+      );
+      await audit(c, 'post_reported', { userId: user.id, username: user.username, detail: `post #${id}: ${reason.slice(0, 120)}` });
+    }
+    setFlash(c, 'success', 'Thanks — the moderators will take a look.');
+    return c.redirect(`/forum/t/${post.thread_id}#post-${id}`, 302);
+  });
+
+  // Simple LIKE search over thread titles and post bodies. Fine at this
+  // scale; swap for FTS5 if the forum grows past tens of thousands of posts.
+  app.get('/forum/search', async (c) => {
+    const db = c.get('db');
+    const q = String(new URL(c.req.url).searchParams.get('q') || '').trim().slice(0, 100);
+    let threads = [];
+    let posts = [];
+    if (q.length >= 2) {
+      const like = `%${q.replace(/[%_]/g, '')}%`;
+      threads = await db.all(
+        `SELECT t.id, t.title, t.updated_at, u.username, c.name AS category
+         FROM threads t JOIN users u ON u.id = t.user_id JOIN categories c ON c.id = t.category_id
+         WHERE t.title LIKE ? ORDER BY t.updated_at DESC LIMIT ?`, like, SEARCH_RESULTS
+      );
+      posts = await db.all(
+        `SELECT p.id, p.thread_id, p.body, p.created_at, u.username, t.title AS thread_title
+         FROM posts p JOIN users u ON u.id = p.user_id JOIN threads t ON t.id = p.thread_id
+         WHERE p.body LIKE ? ORDER BY p.id DESC LIMIT ?`, like, SEARCH_RESULTS
+      );
+    }
+    return c.html(views.searchResults(c.get('view'), { q, threads, posts }));
+  });
+
+  // Public (well, members-only like the rest of the forum) member profiles.
+  app.get('/u/:username', async (c) => {
+    const gate = requireTier(c, 'paid');
+    if (gate) return gate;
+    const db = c.get('db');
+    const username = String(c.req.param('username') || '').slice(0, 30);
+    const member = await db.get(
+      'SELECT id, username, tier, banned, created_at FROM users WHERE username = ?', username
+    );
+    if (!member || member.username === '[deleted]') return notFound(c);
+
+    const one = async (sql, ...args) => Number((await db.get(sql, ...args))?.n || 0);
+    const stats = {
+      threads: await one('SELECT COUNT(*) AS n FROM threads WHERE user_id = ?', member.id),
+      posts: await one('SELECT COUNT(*) AS n FROM posts WHERE user_id = ?', member.id),
+    };
+    const recentThreads = await db.all(
+      `SELECT t.id, t.title, t.updated_at, c.name AS category
+       FROM threads t JOIN categories c ON c.id = t.category_id
+       WHERE t.user_id = ? ORDER BY t.updated_at DESC LIMIT 8`, member.id
+    );
+    const recentPosts = await db.all(
+      `SELECT p.id, p.thread_id, p.body, p.created_at, t.title AS thread_title
+       FROM posts p JOIN threads t ON t.id = p.thread_id
+       WHERE p.user_id = ? ORDER BY p.id DESC LIMIT 8`, member.id
+    );
+    return c.html(views.memberProfile(c.get('view'), { member, stats, recentThreads, recentPosts }));
   });
 
   // Shoutbox: a short-lived, JS-polled chat strip on the forum index. The GET

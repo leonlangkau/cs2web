@@ -33,6 +33,7 @@ RATE_LIMIT_SIGNUP = "5"
 RATE_LIMIT_POST = "6"
 RATE_LIMIT_DOWNLOAD = "30"
 RATE_LIMIT_SHOUT = "12"
+RATE_LIMIT_REPORT = "5"
 
 # Flood / mass-account protection (application layer — Cloudflare's own WAF,
 # Bot Fight Mode and Under Attack mode remain the first line for real DDoS).

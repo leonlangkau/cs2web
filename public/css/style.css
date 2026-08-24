@@ -535,6 +535,20 @@ textarea { resize: vertical; min-height: 90px; }
 /* thread view */
 .thread-heading { display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; }
 .thread-actions { display: flex; gap: 0.4rem; flex-wrap: wrap; }
+.forum-head-actions { display: flex; gap: 0.7rem; align-items: center; flex-wrap: wrap; }
+.forum-search { display: flex; gap: 0.4rem; }
+.forum-search input { width: 220px; padding: 0.45rem 0.8rem; font-size: 0.9rem; }
+.search-group { font-size: 1.1rem; margin: 1.6rem 0 0.8rem; }
+.member-link { color: inherit; font-weight: inherit; }
+.member-link:hover { color: var(--accent); }
+.post-actions { display: inline-flex; gap: 0.35rem; align-items: center; }
+.post-edited { font-size: 0.8rem; }
+.report-box { margin-top: 0.8rem; font-size: 0.85rem; }
+.report-box summary { cursor: pointer; color: var(--muted); width: fit-content; }
+.report-box summary:hover { color: var(--warn); }
+.report-form { display: flex; gap: 0.4rem; margin-top: 0.5rem; flex-wrap: wrap; }
+.report-form input { flex: 1; min-width: 220px; padding: 0.45rem 0.7rem; font-size: 0.87rem; }
+.form-row { display: flex; gap: 0.7rem; align-items: center; flex-wrap: wrap; }
 .post-list { display: flex; flex-direction: column; gap: 1rem; margin-bottom: 2rem; }
 .post {
   display: grid; grid-template-columns: 170px 1fr;
@@ -687,6 +701,13 @@ tbody tr.row-banned:hover td { background: #f8e7e9; }
 .tag-loader_auth_failed { background: #f7e3e5; color: var(--danger); }
 .tag-ip_autoban { background: #f4d5d8; color: var(--danger); }
 .tag-signup_surge_blocked { background: #f0eade; color: var(--warn); }
+.tag-post_reported { background: #f0eade; color: var(--warn); }
+.tag-report-open { background: #f4d5d8; color: var(--danger); }
+.tag-report-resolved { background: #e2efe9; color: var(--success); }
+[data-theme="dark"] .tag-post_reported { background: rgba(224, 168, 60, 0.18); color: var(--warn); }
+[data-theme="dark"] .tag-report-open { background: rgba(255, 107, 122, 0.16); color: var(--danger); }
+[data-theme="dark"] .tag-report-resolved { background: rgba(62, 203, 130, 0.16); color: var(--success); }
+.row-resolved td { opacity: 0.65; }
 [data-theme="dark"] .tag-signup,
 [data-theme="dark"] .tag-terms_accepted { background: rgba(62, 203, 130, 0.16); color: var(--success); }
 [data-theme="dark"] .tag-login { background: var(--accent-soft); color: var(--accent); }

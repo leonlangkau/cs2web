@@ -8,7 +8,7 @@ const LOGS_PER_PAGE = 50;
 const USERS_PER_PAGE = 25;
 const LOG_EVENTS = ['signup', 'login', 'login_failed', 'login_blocked', 'logout', 'download',
   'admin_action', 'captcha_failed', 'terms_accepted', 'password_changed', 'loader_auth', 'loader_auth_failed',
-  'ip_autoban', 'signup_surge_blocked'];
+  'ip_autoban', 'signup_surge_blocked', 'post_reported'];
 
 const IP_HIDDEN = '(hidden)';
 
@@ -91,6 +91,7 @@ function register(app) {
       signups24h: await one("SELECT COUNT(*) AS n FROM ip_logs WHERE event = 'signup' AND created_at > datetime('now', '-1 day')"),
       failedLogins24h: await one("SELECT COUNT(*) AS n FROM ip_logs WHERE event = 'login_failed' AND created_at > datetime('now', '-1 day')"),
       ipBans: await one('SELECT COUNT(*) AS n FROM ip_bans'),
+      openReports: await one("SELECT COUNT(*) AS n FROM reports WHERE status = 'open'"),
     };
     const { maskUser, maskLog } = await adminIpMask(c);
     const recentLogs = (await db.all('SELECT * FROM ip_logs ORDER BY id DESC LIMIT 12')).map(maskLog);
@@ -264,6 +265,39 @@ function register(app) {
     await adminAudit(c, `unbanned IP ${ip}`);
     setFlash(c, 'success', `${ip} has been unbanned.`);
     return c.redirect(backTo(c, '/admin/logs'), 302);
+  });
+
+  // Report queue: member reports on posts, open first. Staff-level like the
+  // rest of moderation.
+  app.get('/admin/reports', async (c) => {
+    const db = c.get('db');
+    const reports = await db.all(
+      `SELECT r.*, u.username AS reporter,
+          p.body AS post_body, p.thread_id, p.user_id AS author_id,
+          a.username AS author, t.title AS thread_title
+       FROM reports r
+       JOIN users u ON u.id = r.reporter_id
+       LEFT JOIN posts p ON p.id = r.post_id
+       LEFT JOIN users a ON a.id = p.user_id
+       LEFT JOIN threads t ON t.id = p.thread_id
+       ORDER BY CASE r.status WHEN 'open' THEN 0 ELSE 1 END, r.id DESC
+       LIMIT 100`
+    );
+    return c.html(views.reports(c.get('view'), { reports }));
+  });
+
+  app.post('/admin/reports/:id/resolve', async (c) => {
+    const db = c.get('db');
+    const id = intParam(c.req.param('id'), 0);
+    const report = id > 0 ? await db.get('SELECT * FROM reports WHERE id = ?', id) : null;
+    if (!report) return notFound(c, 'No such report.');
+    await db.run(
+      "UPDATE reports SET status = 'resolved', resolved_by = ?, resolved_at = datetime('now') WHERE id = ?",
+      c.get('user').username, id
+    );
+    await adminAudit(c, `resolved report #${id}`);
+    setFlash(c, 'success', 'Report resolved.');
+    return c.redirect(backTo(c, '/admin/reports'), 302);
   });
 
   app.get('/admin/forum', async (c) => {

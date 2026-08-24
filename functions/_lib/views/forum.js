@@ -1,11 +1,15 @@
 import { page } from "./layout.js";
 import { esc, timeAgo, map, pagination } from "./util.js";
-import { isStaff, STAFF_TIERS } from "../tiers.js";
+import { isStaff, STAFF_TIERS, TIER_LABELS, normalizeTier } from "../tiers.js";
+import { canEditPost } from "../post-rules.js";
 
 function errorList(errors) {
   if (!errors || errors.length === 0) return '';
   return `<div class="form-errors" role="alert"><ul>${map(errors, (e) => `<li>${esc(e)}</li>`)}</ul></div>`;
 }
+
+/** Linked username for anywhere a member is named. */
+const memberLink = (username) => `<a class="member-link" href="/u/${encodeURIComponent(username)}">${esc(username)}</a>`;
 
 const shoutRow = (s) => `<div class="shout-row" data-id="${esc(s.id)}">
   <span class="shout-user">${esc(s.username)}${STAFF_TIERS.has(s.author_tier) ? ' <span class="tag tag-admin">STAFF</span>' : ''}</span>
@@ -44,7 +48,14 @@ function index(ctx, { categories, recent, shouts }) {
   <div class="container">
     <div class="page-head">
       <div><p class="section-kicker">// COMMUNITY</p><h1 class="section-title">Forum</h1></div>
-      ${newBtn}
+      <div class="forum-head-actions">
+        <form method="get" action="/forum/search" class="forum-search" role="search">
+          <input type="search" name="q" minlength="2" maxlength="100" required
+                 placeholder="Search the forum…" aria-label="Search the forum">
+          <button class="btn btn-outline btn-sm" type="submit">Search</button>
+        </form>
+        ${newBtn}
+      </div>
     </div>
     <div class="forum-layout">
       <div class="category-list">
@@ -132,19 +143,36 @@ function thread(ctx, { thread: t, posts, firstPostId, page: current, pages, post
 
   const postList = map(posts, (p, i) => {
     const canDelete = (staff || (ctx.user && ctx.user.id === p.user_id)) && p.id !== firstPostId;
+    const canEdit = canEditPost(ctx.user, p);
+    const canReport = ctx.user && ctx.user.id !== p.user_id;
+    const edited = p.edited_at
+      ? `<span class="muted post-edited" title="edited by ${esc(p.edited_by || 'unknown')}">· edited ${esc(timeAgo(p.edited_at))}${p.edited_by && p.edited_by !== p.username ? ` by ${esc(p.edited_by)}` : ''}</span>`
+      : '';
+    const reportForm = canReport ? `<details class="report-box">
+          <summary class="muted">Report</summary>
+          <form method="post" action="/forum/posts/${esc(p.id)}/report" class="report-form">${csrf}
+            <input type="text" name="reason" required minlength="3" maxlength="500"
+                   placeholder="What's wrong with this post?" aria-label="Report reason">
+            <button class="btn btn-warn btn-xs" type="submit">Send report</button>
+          </form>
+        </details>` : '';
     return `<article class="post" id="post-${esc(p.id)}">
     <aside class="post-author">
       <span class="avatar avatar-lg" aria-hidden="true">${esc(String(p.username || '?')[0].toUpperCase())}</span>
-      <span class="post-username">${esc(p.username)}${STAFF_TIERS.has(p.author_tier) ? ' <span class="tag tag-admin">STAFF</span>' : ''}</span>
+      <span class="post-username">${memberLink(p.username)}${STAFF_TIERS.has(p.author_tier) ? ' <span class="tag tag-admin">STAFF</span>' : ''}</span>
       <span class="muted">joined ${esc(timeAgo(p.author_since))}</span>
       <span class="muted">${esc(p.author_posts)} posts</span>
     </aside>
     <div class="post-body">
       <div class="post-meta">
-        <span class="muted">#${esc(postOffset + i + 1)} · ${esc(timeAgo(p.created_at))}</span>
-        ${canDelete ? `<form method="post" action="/forum/posts/${esc(p.id)}/delete" class="inline-form" data-confirm="Delete this post?">${csrf}<button class="btn btn-danger btn-xs" type="submit">Delete</button></form>` : ''}
+        <span class="muted">#${esc(postOffset + i + 1)} · ${esc(timeAgo(p.created_at))} ${edited}</span>
+        <span class="post-actions">
+          ${canEdit ? `<a class="btn btn-ghost btn-xs" href="/forum/posts/${esc(p.id)}/edit">Edit</a>` : ''}
+          ${canDelete ? `<form method="post" action="/forum/posts/${esc(p.id)}/delete" class="inline-form" data-confirm="Delete this post?">${csrf}<button class="btn btn-danger btn-xs" type="submit">Delete</button></form>` : ''}
+        </span>
       </div>
       <div class="post-text">${esc(p.body)}</div>
+      ${reportForm}
     </div>
   </article>`;
   });
@@ -179,7 +207,7 @@ function thread(ctx, { thread: t, posts, firstPostId, page: current, pages, post
           ${t.locked ? '<span class="tag tag-lock">LOCKED</span>' : ''}
           ${esc(t.title)}
         </h1>
-        <p class="muted">Started by ${esc(t.username)} · ${esc(timeAgo(t.created_at))} · ${esc(t.views)} views</p>
+        <p class="muted">Started by ${memberLink(t.username)} · ${esc(timeAgo(t.created_at))} · ${esc(t.views)} views</p>
       </div>
       ${threadActions}
     </div>
@@ -220,4 +248,119 @@ function newThread(ctx, { categories, errors = [], values = {} }) {
   return page(ctx, { title: 'New thread', body });
 }
 
-export { index, category, thread, newThread };
+function editPost(ctx, { post, thread, errors = [] }) {
+  const body = `
+<div class="section forum-page">
+  <div class="container narrow">
+    <nav class="breadcrumbs" aria-label="Breadcrumb">
+      <a href="/forum">Forum</a> <span aria-hidden="true">/</span>
+      <a href="/forum/t/${esc(thread.id)}">${esc(thread.title)}</a>
+      <span aria-hidden="true">/</span> <span>Edit post</span>
+    </nav>
+    <h1 class="section-title">Edit post</h1>
+    <p class="muted">Edits are marked on the post with who edited it and when.</p>
+    ${errorList(errors)}
+    <form method="post" action="/forum/posts/${esc(post.id)}/edit" class="stack">
+      <input type="hidden" name="_csrf" value="${esc(ctx.csrfToken)}">
+      <label><span>Post</span>
+        <textarea name="body" rows="10" required maxlength="10000">${esc(post.body)}</textarea></label>
+      <div class="form-row">
+        <button class="btn btn-primary" type="submit">Save changes</button>
+        <a class="btn btn-ghost" href="/forum/t/${esc(thread.id)}#post-${esc(post.id)}">Cancel</a>
+      </div>
+    </form>
+  </div>
+</div>`;
+  return page(ctx, { title: 'Edit post', body });
+}
+
+function searchResults(ctx, { q, threads, posts }) {
+  const excerpt = (text, needle) => {
+    const hay = String(text);
+    const idx = hay.toLowerCase().indexOf(String(needle).toLowerCase());
+    const start = Math.max(0, idx - 60);
+    const slice = hay.slice(start, start + 180);
+    return `${start > 0 ? '…' : ''}${slice}${start + 180 < hay.length ? '…' : ''}`;
+  };
+
+  const results = q.length < 2
+    ? '<p class="muted empty-state">Type at least two characters to search.</p>'
+    : (threads.length === 0 && posts.length === 0)
+      ? `<p class="muted empty-state">No results for “${esc(q)}”.</p>`
+      : `${threads.length ? `<h2 class="search-group">Threads (${esc(threads.length)})</h2>
+          <div class="thread-list">${map(threads, (t) => `<a class="thread-row" href="/forum/t/${esc(t.id)}">
+            <div class="thread-main">
+              <span class="thread-title">${esc(t.title)}</span>
+              <span class="muted">${esc(t.category)} · by ${esc(t.username)} · ${esc(timeAgo(t.updated_at))}</span>
+            </div></a>`)}</div>` : ''}
+        ${posts.length ? `<h2 class="search-group">Posts (${esc(posts.length)})</h2>
+          <div class="thread-list">${map(posts, (p) => `<a class="thread-row" href="/forum/t/${esc(p.thread_id)}#post-${esc(p.id)}">
+            <div class="thread-main">
+              <span class="thread-title">${esc(p.thread_title)}</span>
+              <span class="muted">${esc(excerpt(p.body, q))}</span>
+              <span class="muted">by ${esc(p.username)} · ${esc(timeAgo(p.created_at))}</span>
+            </div></a>`)}</div>` : ''}`;
+
+  const body = `
+<div class="section forum-page">
+  <div class="container">
+    <nav class="breadcrumbs" aria-label="Breadcrumb">
+      <a href="/forum">Forum</a> <span aria-hidden="true">/</span> <span>Search</span>
+    </nav>
+    <h1 class="section-title">Search</h1>
+    <form method="get" action="/forum/search" class="filter-bar" role="search">
+      <input type="search" name="q" value="${esc(q)}" minlength="2" maxlength="100" required
+             placeholder="Search threads and posts…" aria-label="Search the forum" autofocus>
+      <button class="btn btn-outline" type="submit">Search</button>
+    </form>
+    ${results}
+  </div>
+</div>`;
+  return page(ctx, { title: q ? `Search: ${q}` : 'Search', body });
+}
+
+function memberProfile(ctx, { member, stats, recentThreads, recentPosts }) {
+  const tier = normalizeTier(member.tier);
+  const body = `
+<div class="section forum-page">
+  <div class="container narrow">
+    <nav class="breadcrumbs" aria-label="Breadcrumb">
+      <a href="/forum">Forum</a> <span aria-hidden="true">/</span> <span>Members</span>
+      <span aria-hidden="true">/</span> <span>${esc(member.username)}</span>
+    </nav>
+    <div class="panel profile-card">
+      <div class="profile-identity">
+        <span class="avatar avatar-lg" aria-hidden="true">${esc(member.username[0].toUpperCase())}</span>
+        <div>
+          <div class="profile-name">${esc(member.username)}
+            <span class="tag tag-tier tag-tier-${esc(tier)}">${esc(TIER_LABELS[tier])}</span>
+            ${member.banned ? '<span class="tag tag-banned">BANNED</span>' : ''}</div>
+          <div class="muted">Member since ${esc(timeAgo(member.created_at))}</div>
+        </div>
+      </div>
+      <dl class="profile-facts">
+        <div><dt>Threads</dt><dd>${esc(stats.threads)}</dd></div>
+        <div><dt>Posts</dt><dd>${esc(stats.posts)}</dd></div>
+      </dl>
+    </div>
+    <div class="panel profile-card">
+      <h2>Recent threads</h2>
+      ${recentThreads.length === 0 ? '<p class="muted">No threads yet.</p>'
+        : map(recentThreads, (t) => `<a class="sidebar-thread" href="/forum/t/${esc(t.id)}">
+            <span class="sidebar-title">${esc(t.title)}</span>
+            <span class="muted">${esc(t.category)} · ${esc(timeAgo(t.updated_at))}</span></a>`)}
+    </div>
+    <div class="panel profile-card">
+      <h2>Recent posts</h2>
+      ${recentPosts.length === 0 ? '<p class="muted">No posts yet.</p>'
+        : map(recentPosts, (p) => `<a class="sidebar-thread" href="/forum/t/${esc(p.thread_id)}#post-${esc(p.id)}">
+            <span class="sidebar-title">${esc(p.thread_title)}</span>
+            <span class="muted">${esc(String(p.body).slice(0, 120))}${String(p.body).length > 120 ? '…' : ''}</span>
+            <span class="muted">${esc(timeAgo(p.created_at))}</span></a>`)}
+    </div>
+  </div>
+</div>`;
+  return page(ctx, { title: `${member.username} · Member`, body });
+}
+
+export { index, category, thread, newThread, editPost, searchResults, memberProfile };

@@ -71,14 +71,31 @@ CREATE TABLE IF NOT EXISTS threads (
 CREATE INDEX IF NOT EXISTS idx_threads_category ON threads(category_id);
 CREATE INDEX IF NOT EXISTS idx_threads_updated ON threads(updated_at);
 
+-- edited_at/edited_by were added after launch; existing databases get them
+-- via the guarded ALTER TABLE in bootstrap.js.
 CREATE TABLE IF NOT EXISTS posts (
   id         INTEGER PRIMARY KEY AUTOINCREMENT,
   thread_id  INTEGER NOT NULL REFERENCES threads(id) ON DELETE CASCADE,
   user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   body       TEXT NOT NULL,
+  edited_at  TEXT,
+  edited_by  TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS idx_posts_thread ON posts(thread_id);
+
+-- Member reports on posts, feeding the admin panel's moderation queue.
+CREATE TABLE IF NOT EXISTS reports (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  post_id     INTEGER NOT NULL REFERENCES posts(id) ON DELETE CASCADE,
+  reporter_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  reason      TEXT NOT NULL,
+  status      TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open','resolved')),
+  resolved_by TEXT,
+  resolved_at TEXT,
+  created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_reports_status ON reports(status);
 
 -- Lightweight live chat strip shown on the forum index page.
 CREATE TABLE IF NOT EXISTS shouts (

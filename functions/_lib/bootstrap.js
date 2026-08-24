@@ -33,6 +33,17 @@ async function ensureIpBanExpiryColumn(db) {
   await db.run('ALTER TABLE ip_bans ADD COLUMN expires_at INTEGER');
 }
 
+/** And for posts.edited_at / posts.edited_by (post editing shipped after launch). */
+async function ensurePostEditColumns(db) {
+  const columns = await db.all('PRAGMA table_info(posts)');
+  if (!columns.some((c) => c.name === 'edited_at')) {
+    await db.run('ALTER TABLE posts ADD COLUMN edited_at TEXT');
+  }
+  if (!columns.some((c) => c.name === 'edited_by')) {
+    await db.run('ALTER TABLE posts ADD COLUMN edited_by TEXT');
+  }
+}
+
 /** Runs the DDL once per process/isolate. */
 const schemaReady = new WeakMap();
 
@@ -42,6 +53,7 @@ function ensureSchema(db) {
       await db.exec(SCHEMA);
       await ensureTierColumn(db);
       await ensureIpBanExpiryColumn(db);
+      await ensurePostEditColumns(db);
     })());
   }
   return schemaReady.get(db);

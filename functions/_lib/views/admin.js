@@ -15,6 +15,7 @@ function head(ctx, heading) {
     ${tab('/admin', 'Dashboard', p === '/admin')}
     ${tab('/admin/users', 'Users', p.startsWith('/admin/users'))}
     ${tab('/admin/logs', 'IP logs', p.startsWith('/admin/logs'))}
+    ${tab('/admin/reports', 'Reports', p.startsWith('/admin/reports'))}
     ${tab('/admin/forum', 'Forum', p.startsWith('/admin/forum'))}
   </nav>`;
 }
@@ -43,6 +44,7 @@ function dashboard(ctx, { stats, recentLogs, recentUsers }) {
       ${card(stats.failedLogins24h, 'Failed logins (24h)', stats.failedLogins24h > 20)}
       ${card(stats.banned, 'Banned users', stats.banned > 0)}
       ${card(stats.ipBans, 'IP bans', stats.ipBans > 0)}
+      ${card(stats.openReports, 'Open reports', stats.openReports > 0)}
     </div>
     <div class="admin-columns">
       <div class="panel">
@@ -193,6 +195,49 @@ function logs(ctx, { logs: rows, q, event, events, page: current, pages, total, 
   return page(ctx, { title: 'Admin · IP logs', body });
 }
 
+function reports(ctx, { reports: rows }) {
+  const csrf = `<input type="hidden" name="_csrf" value="${esc(ctx.csrfToken)}">`;
+  const row = (r) => {
+    const postCell = r.post_body === null || r.post_body === undefined
+      ? '<span class="muted">(post has been deleted)</span>'
+      : `<a href="/forum/t/${esc(r.thread_id)}#post-${esc(r.post_id)}">${esc(r.thread_title || 'thread')}</a>
+         <div class="muted detail-cell" title="${esc(String(r.post_body).slice(0, 500))}">${esc(String(r.post_body).slice(0, 100))}${String(r.post_body).length > 100 ? '…' : ''}</div>
+         <div class="muted">by ${esc(r.author || '—')}</div>`;
+    const actions = r.status === 'open'
+      ? `<form method="post" action="/admin/reports/${esc(r.id)}/resolve" class="inline-form">${csrf}
+           <button class="btn btn-ghost btn-xs" type="submit">Resolve</button></form>
+         ${r.post_body !== null && r.post_body !== undefined
+          ? `<form method="post" action="/admin/posts/${esc(r.post_id)}/delete" class="inline-form"
+                data-confirm="Delete the reported post?">${csrf}
+              <button class="btn btn-danger btn-xs" type="submit">Delete post</button></form>` : ''}`
+      : `<span class="muted">by ${esc(r.resolved_by || '—')} · ${esc(timeAgo(r.resolved_at))}</span>`;
+    return `<tr class="${r.status === 'open' ? '' : 'row-resolved'}">
+      <td class="muted">${esc(r.id)}</td>
+      <td><span class="tag ${r.status === 'open' ? 'tag-report-open' : 'tag-report-resolved'}">${esc(r.status.toUpperCase())}</span></td>
+      <td>${postCell}</td>
+      <td class="detail-cell" title="${esc(r.reason)}">${esc(r.reason)}</td>
+      <td>${esc(r.reporter)}</td>
+      <td class="muted nowrap">${esc(timeAgo(r.created_at))}</td>
+      <td class="actions-cell">${actions}</td></tr>`;
+  };
+
+  const body = `
+<div class="section admin-page">
+  <div class="container">
+    ${head(ctx, 'Reports')}
+    <p class="muted">Member reports on forum posts. Resolve once handled — deleting the reported post
+      does not auto-resolve the report, so the paper trail stays intact.</p>
+    <div class="panel"><div class="table-wrap"><table>
+      <thead><tr><th>#</th><th>Status</th><th>Reported post</th><th>Reason</th><th>Reporter</th><th>When</th><th>Actions</th></tr></thead>
+      <tbody>${rows.length === 0
+        ? '<tr><td colspan="7" class="muted center">No reports. Quiet day.</td></tr>'
+        : map(rows, row)}
+      </tbody></table></div></div>
+  </div>
+</div>`;
+  return page(ctx, { title: 'Admin · Reports', body });
+}
+
 function forumAdmin(ctx, { categories, threads }) {
   const csrf = `<input type="hidden" name="_csrf" value="${esc(ctx.csrfToken)}">`;
   const canManageCategories = isFullAdmin(ctx.user);
@@ -248,4 +293,4 @@ function forumAdmin(ctx, { categories, threads }) {
   return page(ctx, { title: 'Admin · Forum', body });
 }
 
-export { dashboard, users, logs, forumAdmin };
+export { dashboard, users, logs, reports, forumAdmin };

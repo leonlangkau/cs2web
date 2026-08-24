@@ -18,6 +18,7 @@ const DEFAULTS = {
   shout: { limit: 12, windowMs: 60 * 1000 },          // per user
   burst: { limit: 240, windowMs: 60 * 1000 },         // per IP, ALL dynamic routes (flood control)
   flood: { limit: 5, windowMs: 10 * 60 * 1000 },      // per IP, burst BREACHES before auto-ban
+  report: { limit: 5, windowMs: 60 * 60 * 1000 },     // per user
 };
 
 const ENV_KEYS = {
@@ -28,6 +29,7 @@ const ENV_KEYS = {
   shout: 'RATE_LIMIT_SHOUT',
   burst: 'RATE_LIMIT_BURST',
   flood: 'RATE_LIMIT_FLOOD',
+  report: 'RATE_LIMIT_REPORT',
 };
 
 function limitFor(name, env = {}) {

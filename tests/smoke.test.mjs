@@ -627,6 +627,74 @@ test("loader API: credential auth returns a verifiable license; verify endpoint 
   assert.equal(res.status, 403, "banned account cannot loader-auth");
 });
 
+test("forum extras: search, member profiles, post editing, reporting + admin queue", async () => {
+  const { app, db } = await buildTestApp(ENV);
+  const admin = makeClient(app);
+  const author = makeClient(app);
+  const other = makeClient(app);
+
+  await admin.get("/auth/login");
+  await admin.post("/auth/login", { identifier: "admin", password: "admin-test-password-1", next: "/" });
+  for (const [client, name, mail] of [[author, "poster_a", "pa@example.com"], [other, "poster_b", "pb@example.com"]]) {
+    await client.get("/auth/signup");
+    await client.post("/auth/signup", { username: name, email: mail, password: "supersecret1", confirm: "supersecret1", ...(await solveCaptcha(client)) });
+  }
+  await db.run("UPDATE users SET tier = 'paid' WHERE username IN ('poster_a', 'poster_b')");
+  // Tier change touches the row, not sessions — clients stay logged in; reload user rows.
+  let res = await author.post("/forum/new", { category: "general", title: "Quantum crosshair settings", body: "The flux capacitor spread pattern is optimal." });
+  const threadLoc = res.headers.get("location");
+  const threadId = threadLoc.split("/").pop();
+  res = await author.post(`${threadLoc}/reply`, { body: "Bump with extra flux details." });
+  const replyId = res.headers.get("location").split("#post-").pop();
+
+  // --- search: title match and body match, gated to paid+ ---
+  let html = await (await other.get("/forum/search?q=quantum")).text();
+  assert.ok(html.includes("Quantum crosshair settings"), "search finds thread by title");
+  html = await (await other.get("/forum/search?q=capacitor")).text();
+  assert.ok(html.includes("Quantum crosshair settings"), "search finds thread via post body");
+  const anon = makeClient(app);
+  res = await anon.get("/forum/search?q=quantum");
+  assert.equal(res.status, 302, "search is members-only like the rest of the forum");
+
+  // --- member profile ---
+  html = await (await other.get("/u/poster_a")).text();
+  assert.ok(html.includes("poster_a") && html.includes("Quantum crosshair settings"), "member profile shows identity and threads");
+  assert.equal((await other.get("/u/no_such_member")).status, 404, "unknown member 404s");
+  assert.equal((await other.get("/u/%5Bdeleted%5D")).status, 404, "the [deleted] placeholder has no profile");
+
+  // --- post editing: author within the window; not others; staff anytime; edits marked ---
+  res = await other.get(`/forum/posts/${replyId}/edit`);
+  assert.equal(res.status, 404, "non-author cannot open the edit form");
+  res = await author.post(`/forum/posts/${replyId}/edit`, { body: "Edited: corrected the flux details." });
+  assert.equal(res.status, 302, "author edits own recent post");
+  html = await (await author.get(`/forum/t/${threadId}`)).text();
+  assert.ok(html.includes("Edited: corrected the flux details.") && html.includes("edited"), "edit saved and marked");
+  await db.run("UPDATE posts SET created_at = datetime('now', '-2 hours') WHERE id = ?", replyId);
+  res = await author.get(`/forum/posts/${replyId}/edit`);
+  assert.equal(res.status, 404, "author's edit window closes after 30 minutes");
+  res = await admin.post(`/forum/posts/${replyId}/edit`, { body: "Staff edit outside the window." });
+  assert.equal(res.status, 302, "staff can edit at any time");
+  const row = await db.get("SELECT edited_by FROM posts WHERE id = ?", replyId);
+  assert.equal(row.edited_by, "admin", "edited_by records the staff editor");
+
+  // --- reporting ---
+  res = await other.post(`/forum/posts/${replyId}/report`, { reason: "Spam and misinformation about flux" });
+  assert.equal(res.status, 302, "member files a report");
+  const report = await db.get("SELECT * FROM reports WHERE post_id = ?", replyId);
+  assert.ok(report && report.status === "open", "report stored open");
+  await other.post(`/forum/posts/${replyId}/report`, { reason: "Duplicate attempt" });
+  assert.equal(Number((await db.get("SELECT COUNT(*) AS n FROM reports WHERE post_id = ?", replyId)).n), 1,
+    "duplicate open report by the same member is not stored twice");
+
+  // Admin queue: staff see it, resolve it; the [deleted]-post case renders too.
+  html = await (await admin.get("/admin/reports")).text();
+  assert.ok(html.includes("Spam and misinformation") && html.includes("poster_b"), "report visible in the admin queue");
+  res = await admin.post(`/admin/reports/${report.id}/resolve`);
+  assert.equal(res.status, 302, "report resolved");
+  assert.equal((await db.get("SELECT status, resolved_by FROM reports WHERE id = ?", report.id)).status, "resolved");
+  assert.equal((await other.get("/admin/reports")).status, 404, "queue hidden from non-staff");
+});
+
 test("flood protection: burst cap 429s, repeat offenders get a temporary auto IP ban", async () => {
   const floodEnv = { ...ENV, RATE_LIMIT_BURST: "5", RATE_LIMIT_FLOOD: "2", AUTO_IP_BAN_MINUTES: "60" };
   const { app, db } = await buildTestApp(floodEnv);

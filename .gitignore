@@ -9,3 +9,6 @@ npm-debug.log*
 .wrangler/
 
 .dev.vars
+
+# Local tooling (playwright-cli skill, editor state) — not part of the app
+.claude/

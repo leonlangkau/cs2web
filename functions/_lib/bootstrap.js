@@ -1,4 +1,4 @@
-import { hashPassword, newToken } from "./crypto.js";
+import { hashPassword, verifyPassword, newToken } from "./crypto.js";
 
 /**
  * Reserved account that inherits the threads and posts of a deleted user, so
@@ -10,12 +10,31 @@ const DELETED_USERNAME = '[deleted]';
 
 import SCHEMA from "./schema-sql.js";
 
+/**
+ * `tier` was added after `users` already existed on deployed databases.
+ * schema.sql's CREATE TABLE IF NOT EXISTS is a no-op against an existing
+ * table, so an already-provisioned D1 database needs this ALTER TABLE run
+ * once. Guarded by checking for the column first — ADD COLUMN isn't
+ * idempotent on its own, and this runs on every fresh isolate's cold start.
+ * Existing admins are backfilled from the legacy `role` column so nobody's
+ * access silently changes.
+ */
+async function ensureTierColumn(db) {
+  const columns = await db.all('PRAGMA table_info(users)');
+  if (columns.some((c) => c.name === 'tier')) return;
+  await db.run("ALTER TABLE users ADD COLUMN tier TEXT NOT NULL DEFAULT 'user'");
+  await db.run("UPDATE users SET tier = 'admin' WHERE role = 'admin'");
+}
+
 /** Runs the DDL once per process/isolate. */
 const schemaReady = new WeakMap();
 
 function ensureSchema(db) {
   if (!schemaReady.has(db)) {
-    schemaReady.set(db, db.exec(SCHEMA));
+    schemaReady.set(db, (async () => {
+      await db.exec(SCHEMA);
+      await ensureTierColumn(db);
+    })());
   }
   return schemaReady.get(db);
 }
@@ -55,21 +74,43 @@ async function seed(db, env = {}) {
   await ensureSchema(db);
   await deletedUserId(db);
 
+  const username = env.ADMIN_USERNAME || 'admin';
   let generatedPassword = null;
-  const admin = await db.get("SELECT id FROM users WHERE role = 'admin' LIMIT 1");
-  if (!admin) {
-    const username = env.ADMIN_USERNAME || 'admin';
-    let password = env.ADMIN_PASSWORD;
-    if (!password) {
-      // Workers has no interactive console, so a generated password is only
-      // useful locally. Deployments should set the ADMIN_PASSWORD secret.
-      password = newToken(9);
-      generatedPassword = password;
+  const seededAdmin = await db.get(
+    "SELECT id, password_hash FROM users WHERE username = ? AND role = 'admin'", username
+  );
+
+  if (!seededAdmin) {
+    // Someone may have already promoted a different account to admin (or
+    // renamed/deleted the seed one) — only create a new one if no admin
+    // exists at all, so this never produces two seeded admins.
+    const anyAdmin = await db.get("SELECT id FROM users WHERE role = 'admin' LIMIT 1");
+    if (!anyAdmin) {
+      let password = env.ADMIN_PASSWORD;
+      if (!password) {
+        // Workers has no interactive console, so a generated password is only
+        // useful locally. Deployments should set the ADMIN_PASSWORD secret.
+        password = newToken(9);
+        generatedPassword = password;
+      }
+      await db.run(
+        "INSERT INTO users (username, email, password_hash, role, tier) VALUES (?, ?, ?, 'admin', 'admin')",
+        username, env.ADMIN_EMAIL || 'admin@goyhub.local', await hashPassword(password)
+      );
     }
-    await db.run(
-      "INSERT INTO users (username, email, password_hash, role) VALUES (?, ?, ?, 'admin')",
-      username, env.ADMIN_EMAIL || 'admin@goyhub.local', await hashPassword(password)
-    );
+  } else if (env.ADMIN_PASSWORD) {
+    // The ADMIN_PASSWORD secret is the source of truth for the seeded admin:
+    // keep its password in sync with it on every boot. Without this, rotating
+    // the secret (or setting it late, after the account was first created
+    // with no password / a locally-generated one) would silently never take
+    // effect and lock the operator out.
+    const matches = await verifyPassword(env.ADMIN_PASSWORD, seededAdmin.password_hash);
+    if (!matches) {
+      await db.run(
+        'UPDATE users SET password_hash = ? WHERE id = ?',
+        await hashPassword(env.ADMIN_PASSWORD), seededAdmin.id
+      );
+    }
   }
 
   const hasCategories = await db.get('SELECT id FROM categories LIMIT 1');

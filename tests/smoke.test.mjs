@@ -7,8 +7,11 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import crypto from "node:crypto";
-import { buildTestApp } from "./harness.mjs";
+import { buildTestApp, createNodeAdapter } from "./harness.mjs";
 import { leadingZeroBits } from "../functions/_lib/captcha.js";
+import { seed } from "../functions/_lib/bootstrap.js";
+import { verifyPassword } from "../functions/_lib/crypto.js";
+import { verifyLicense } from "../functions/_lib/license.js";
 import buildSchema from "../scripts/build-schema.cjs";
 import buildInstaller from "../scripts/build-installer.cjs";
 
@@ -39,8 +42,8 @@ function makeClient(app) {
     }
   };
   const cookieHeader = () => [...jar].map(([k, v]) => `${k}=${v}`).join("; ");
-  const req = async (method, path, body) => {
-    const headers = { cookie: cookieHeader() };
+  const req = async (method, path, body, extraHeaders = {}) => {
+    const headers = { cookie: cookieHeader(), ...extraHeaders };
     let payload;
     if (body) {
       headers["content-type"] = "application/x-www-form-urlencoded";
@@ -53,9 +56,9 @@ function makeClient(app) {
   };
   return {
     jar,
-    get: (p) => req("GET", p),
-    post: (p, b = {}) => req("POST", p, { _csrf: jar.get("ghcsrf") || "", ...b }),
-    raw: (m, p, b) => req(m, p, b),
+    get: (p, extraHeaders) => req("GET", p, undefined, extraHeaders),
+    post: (p, b = {}, extraHeaders) => req("POST", p, { _csrf: jar.get("ghcsrf") || "", ...b }, extraHeaders),
+    raw: (m, p, b, extraHeaders) => req(m, p, b, extraHeaders),
   };
 }
 
@@ -76,6 +79,39 @@ test("build artifacts are in sync with their sources", () => {
   assert.ok(installerInSync(), "functions/_lib/installer-data.js is stale — run npm run build");
 });
 
+test("admin password stays in sync with the ADMIN_PASSWORD secret across reboots", async () => {
+  globalThis.PBKDF2_ITERATIONS_OVERRIDE = "10000";
+  const db = createNodeAdapter(":memory:");
+
+  // First boot: no admin yet, ADMIN_PASSWORD wasn't set (the operator's exact
+  // mistake — the site got hit once before the secret was configured).
+  await seed(db, {});
+  let admin = await db.get("SELECT id, password_hash FROM users WHERE role = 'admin'");
+  assert.ok(admin, "admin created on first boot even without ADMIN_PASSWORD");
+  const generatedHash = admin.password_hash;
+
+  // Operator sets ADMIN_PASSWORD afterward and a fresh isolate boots (or a
+  // redeploy happens) — the secret must now win, not the old generated one.
+  await seed(db, { ADMIN_PASSWORD: "first-real-password-1" });
+  admin = await db.get("SELECT id, password_hash FROM users WHERE role = 'admin'");
+  assert.notEqual(admin.password_hash, generatedHash, "generated password replaced by the secret");
+  assert.ok(await verifyPassword("first-real-password-1", admin.password_hash), "logs in with the secret's password");
+
+  // Operator rotates the secret; the next boot must pick it up too, and the
+  // old password must stop working.
+  await seed(db, { ADMIN_PASSWORD: "rotated-password-2" });
+  admin = await db.get("SELECT id, password_hash FROM users WHERE role = 'admin'");
+  assert.ok(await verifyPassword("rotated-password-2", admin.password_hash), "logs in with the rotated secret");
+  assert.ok(!(await verifyPassword("first-real-password-1", admin.password_hash)), "old password no longer works");
+
+  // Re-running seed with the same secret again (every request's boot check)
+  // must be a no-op — no needless re-hash/write.
+  const before = admin.password_hash;
+  await seed(db, { ADMIN_PASSWORD: "rotated-password-2" });
+  admin = await db.get("SELECT id, password_hash FROM users WHERE role = 'admin'");
+  assert.equal(admin.password_hash, before, "unchanged password is not rewritten");
+});
+
 test("public pages, forum, legal, gate, auth, captcha, admin, moderation, download", async () => {
   const { app, db } = await buildTestApp(ENV);
   const anon = makeClient(app);
@@ -88,13 +124,13 @@ test("public pages, forum, legal, gate, auth, captcha, admin, moderation, downlo
   assert.ok(html.includes("Play smarter.") && html.includes("hero-canvas"), "landing renders");
   assert.ok(String(res.headers.get("content-security-policy")).includes("default-src 'self'"), "CSP header");
 
+  // The forum is a Paid-tier benefit — anonymous visitors are gated out
+  // entirely rather than being able to browse it read-only.
   res = await anon.get("/forum");
-  html = await res.text();
-  assert.ok(html.includes("Announcements") && html.includes("General Discussion"), "seeded categories");
-
-  res = await anon.get("/forum/t/1");
-  html = await res.text();
-  assert.ok(html.includes("Welcome to the GoyHub community forum!"), "seeded welcome thread");
+  assert.ok(res.status === 302 && res.headers.get("location").startsWith("/auth/login"), "anon forum access gated");
+  assert.ok(await db.get("SELECT id FROM categories WHERE slug = 'announcements'")
+    && await db.get("SELECT id FROM categories WHERE slug = 'general'"), "seeded categories exist");
+  assert.ok(await db.get("SELECT id FROM threads WHERE title LIKE 'Welcome to the GoyHub%'"), "seeded welcome thread exists");
 
   assert.equal((await anon.get("/nope/nothing")).status, 404, "unknown route 404s");
 
@@ -152,6 +188,11 @@ test("public pages, forum, legal, gate, auth, captcha, admin, moderation, downlo
   const good = await solveCaptcha(user);
   res = await user.post("/auth/signup", { username: "player_one", email: "player1@example.com", password: "supersecret1", confirm: "supersecret1", ...good });
   assert.ok(res.status === 302 && user.jar.has("ghsession"), "valid signup");
+  // The forum is Paid-tier+. There's no real payment flow yet, so upgrading
+  // here simulates an admin having granted it — same as production requires
+  // — letting the rest of this test exercise real forum logic rather than
+  // being stopped by the tier gate at every turn.
+  await db.run("UPDATE users SET tier = 'paid' WHERE username = 'player_one'");
 
   const replay = makeClient(app);
   await replay.get("/auth/signup");
@@ -161,6 +202,12 @@ test("public pages, forum, legal, gate, auth, captcha, admin, moderation, downlo
   const u = await db.get("SELECT * FROM users WHERE username = 'player_one'");
   assert.ok(u.password_hash.startsWith("pbkdf2$") && !u.password_hash.includes("supersecret1"), "PBKDF2 hash");
   assert.ok(u.signup_ip, "signup IP stored");
+
+  // Now confirm the forum actually renders for a Paid member.
+  html = await (await user.get("/forum")).text();
+  assert.ok(html.includes("Announcements") && html.includes("General Discussion"), "forum renders for a paid member");
+  html = await (await user.get("/forum/t/1")).text();
+  assert.ok(html.includes("Welcome to the GoyHub community forum!"), "seeded welcome thread renders");
 
   // Forum posting with XSS escaping
   res = await user.post("/forum/new", { category: "general", title: "My first thread", body: "Hi <script>alert(1)</script>" });
@@ -211,12 +258,14 @@ test("public pages, forum, legal, gate, auth, captcha, admin, moderation, downlo
   const doomed = makeClient(app);
   await doomed.get("/auth/signup");
   await doomed.post("/auth/signup", { username: "doomed_user", email: "d@example.com", password: "supersecret1", confirm: "supersecret1", ...(await solveCaptcha(doomed)) });
+  await db.run("UPDATE users SET tier = 'paid' WHERE username = 'doomed_user'");
   res = await doomed.post("/forum/new", { category: "general", title: "By a doomed user", body: "Please survive me." });
   const dThread = res.headers.get("location").split("/").pop();
   const dId = (await db.get("SELECT id FROM users WHERE username = 'doomed_user'")).id;
   await admin.post(`/admin/users/${dId}/delete`);
   assert.ok(!(await db.get("SELECT id FROM users WHERE id = ?", dId)), "user deleted");
-  html = await (await anon.get(`/forum/t/${dThread}`)).text();
+  await admin.get("/admin/users"); // consume the delete action's own flash ("doomed_user has been deleted…")
+  html = await (await admin.get(`/forum/t/${dThread}`)).text();
   assert.ok(html.includes("Please survive me.") && html.includes("[deleted]") && !html.includes("doomed_user"), "thread reattributed to [deleted]");
 
   // Download gating
@@ -251,6 +300,7 @@ test("public pages, forum, legal, gate, auth, captcha, admin, moderation, downlo
   const other = makeClient(app);
   await other.get("/auth/signup");
   await other.post("/auth/signup", { username: "second_user", email: "second@example.com", password: "supersecret1", confirm: "supersecret1", ...(await solveCaptcha(other)) });
+  await db.run("UPDATE users SET tier = 'paid' WHERE username = 'second_user'");
 
   res = await user.post("/forum/new", { category: "general", title: "Deletable thread", body: "OP text" });
   const delThreadLoc = res.headers.get("location");
@@ -290,10 +340,10 @@ test("public pages, forum, legal, gate, auth, captcha, admin, moderation, downlo
   assert.ok(res.status === 302 && res.headers.get("location") === "/forum", "shout posted (no-JS fallback redirects to /forum)");
   assert.ok(await db.get("SELECT id FROM shouts WHERE body = 'hello from player_one'"), "shout stored");
 
-  html = await (await anon.get("/forum")).text();
+  html = await (await user.get("/forum")).text();
   assert.ok(html.includes("hello from player_one") && html.includes('id="shoutbox"'), "shoutbox renders on the forum index");
 
-  res = await anon.get("/forum/shoutbox?after=0");
+  res = await user.get("/forum/shoutbox?after=0");
   const shoutData = await res.json();
   assert.ok(Array.isArray(shoutData.shouts) && shoutData.shouts.some((s) => s.body === "hello from player_one"),
     "shoutbox JSON polling endpoint");
@@ -313,4 +363,109 @@ test("public pages, forum, legal, gate, auth, captcha, admin, moderation, downlo
     await r.arrayBuffer();
   }
   assert.ok(got429, "login rate limit fires");
+});
+
+test("tiers: forum/download gating, admin-only tier changes, staff moderation boundary", async () => {
+  const { app, db } = await buildTestApp(ENV);
+  const admin = makeClient(app);
+  const free = makeClient(app);
+  const mod = makeClient(app);
+
+  await admin.get("/auth/login");
+  await admin.post("/auth/login", { identifier: "admin", password: "admin-test-password-1", next: "/" });
+
+  await free.get("/auth/signup");
+  await free.post("/auth/signup", { username: "free_user", email: "free@example.com", password: "supersecret1", confirm: "supersecret1", ...(await solveCaptcha(free)) });
+
+  await mod.get("/auth/signup");
+  await mod.post("/auth/signup", { username: "trial_mod", email: "mod@example.com", password: "supersecret1", confirm: "supersecret1", ...(await solveCaptcha(mod)) });
+
+  // A Free account is gated out of both the forum and the download, but the
+  // gate is a real 403 explaining why, not a 404 or a silent redirect.
+  let res = await free.get("/forum");
+  let html = await res.text();
+  assert.ok(res.status === 403 && html.includes("Paid"), "free tier blocked from forum with an explanatory 403");
+  res = await free.get("/download/file");
+  html = await res.text();
+  assert.ok(res.status === 403 && html.includes("Paid"), "free tier blocked from download");
+
+  // Only full Admin can change tiers — not staff below it.
+  const modId = (await db.get("SELECT id FROM users WHERE username = 'trial_mod'")).id;
+  res = await admin.post(`/admin/users/${modId}/tier`, { tier: "trial_admin" });
+  assert.equal(res.status, 302, "admin sets a user's tier");
+  assert.equal((await db.get("SELECT tier FROM users WHERE id = ?", modId)).tier, "trial_admin", "tier persisted");
+
+  // trial_mod must re-authenticate — destroyUserSessions logs them out on tier change.
+  await mod.get("/auth/login");
+  await mod.post("/auth/login", { identifier: "trial_mod", password: "supersecret1", next: "/" });
+
+  // Staff (trial_admin) gets into the admin panel and can moderate, but the
+  // full-admin-only actions (tier changes, delete user, delete category) 404.
+  assert.equal((await free.get("/admin")).status, 404, "free tier still can't reach the admin panel");
+  html = await (await mod.get("/admin")).text();
+  assert.ok(html.includes("Dashboard"), "trial_admin can reach the admin panel");
+
+  const otherId = (await db.get("SELECT id FROM users WHERE username = 'free_user'")).id;
+  assert.equal((await mod.post(`/admin/users/${otherId}/tier`, { tier: "admin" })).status, 404,
+    "trial_admin cannot change tiers (full admin only)");
+  assert.equal((await db.get("SELECT tier FROM users WHERE id = ?", otherId)).tier, "user", "tier unchanged");
+  assert.equal((await mod.post(`/admin/users/${otherId}/delete`)).status, 404, "trial_admin cannot delete accounts");
+  assert.equal((await mod.post("/admin/categories", { name: "Should not exist", description: "" })).status, 404,
+    "trial_admin cannot create categories");
+
+  // But ordinary moderation — banning a user, forum thread moderation — is
+  // within a trial_admin's reach.
+  res = await mod.post(`/admin/users/${otherId}/ban`);
+  assert.equal(res.status, 302, "trial_admin can ban a user");
+  assert.equal((await db.get("SELECT banned FROM users WHERE id = ?", otherId)).banned, 1, "ban applied");
+  await mod.post(`/admin/users/${otherId}/unban`);
+
+  // Upgrade free_user to Paid (as an admin would) and confirm the forum opens up.
+  await admin.post(`/admin/users/${otherId}/tier`, { tier: "paid" });
+  await free.get("/auth/login");
+  await free.post("/auth/login", { identifier: "free_user", password: "supersecret1", next: "/" });
+  res = await free.get("/forum");
+  assert.equal(res.status, 200, "paid tier can now browse the forum");
+
+  // The signed license token: verifiable, tier-accurate, and rejects a tampered payload.
+  res = await free.get("/account/license");
+  const license = await res.json();
+  assert.equal(license.tier, "paid", "license reports the account's real tier");
+  assert.ok(await verifyLicense(license, ENV), "license verifies against the server secret");
+  assert.ok(!(await verifyLicense({ ...license, tier: "admin" }, ENV)), "tampered license fails verification");
+});
+
+test("IP bans block every route except for staff, who are exempt", async () => {
+  const { app, db } = await buildTestApp(ENV);
+  const admin = makeClient(app);
+  const victim = makeClient(app);
+
+  await admin.get("/auth/login");
+  await admin.post("/auth/login", { identifier: "admin", password: "admin-test-password-1", next: "/" });
+
+  let res = await admin.post("/admin/ip-bans", { ip: "203.0.113.42", reason: "spam" });
+  assert.equal(res.status, 302, "IP ban created");
+  assert.ok(await db.get("SELECT * FROM ip_bans WHERE ip = '203.0.113.42'"), "ban row stored");
+
+  // A visitor from that IP is blocked on every route, not just the ones it
+  // was first seen on — the fetch call itself sets the "IP" via CF-Connecting-IP.
+  const bannedReq = async (path) => app.fetch(
+    new Request("http://local" + path, { headers: { "cf-connecting-ip": "203.0.113.42" } }), ENV
+  );
+  res = await bannedReq("/");
+  const html = await res.text();
+  assert.ok(res.status === 403 && html.includes("blocked"), "banned IP blocked on the homepage");
+  res = await bannedReq("/terms");
+  assert.equal(res.status, 403, "banned IP blocked on every route, not just where it was banned");
+
+  // Admin themself is exempt from IP bans even if they share the banned address —
+  // otherwise a fat-fingered self-ban would lock the whole panel out.
+  const selfBanned = await admin.get("/admin", { "cf-connecting-ip": "203.0.113.42" });
+  assert.equal(selfBanned.status, 200, "staff are exempt from IP bans");
+
+  res = await admin.post(`/admin/ip-bans/${encodeURIComponent("203.0.113.42")}/unban`);
+  assert.equal(res.status, 302, "IP unbanned");
+  assert.ok(!(await db.get("SELECT * FROM ip_bans WHERE ip = '203.0.113.42'")), "ban row removed");
+  res = await bannedReq("/");
+  assert.equal(res.status, 200, "unbanned IP can browse again");
 });

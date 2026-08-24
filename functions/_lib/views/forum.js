@@ -1,5 +1,6 @@
 import { page } from "./layout.js";
 import { esc, timeAgo, map, pagination } from "./util.js";
+import { isStaff, STAFF_TIERS } from "../tiers.js";
 
 function errorList(errors) {
   if (!errors || errors.length === 0) return '';
@@ -7,7 +8,7 @@ function errorList(errors) {
 }
 
 const shoutRow = (s) => `<div class="shout-row" data-id="${esc(s.id)}">
-  <span class="shout-user">${esc(s.username)}${s.author_role === 'admin' ? ' <span class="tag tag-admin">STAFF</span>' : ''}</span>
+  <span class="shout-user">${esc(s.username)}${STAFF_TIERS.has(s.author_tier) ? ' <span class="tag tag-admin">STAFF</span>' : ''}</span>
   <span class="shout-body">${esc(s.body)}</span>
   <span class="shout-time muted">${esc(timeAgo(s.created_at))}</span>
 </div>`;
@@ -113,16 +114,16 @@ function category(ctx, { category: cat, threads, page: current, pages }) {
 }
 
 function thread(ctx, { thread: t, posts, firstPostId, page: current, pages, postOffset }) {
-  const isAdmin = ctx.user && ctx.user.role === 'admin';
+  const staff = isStaff(ctx.user);
   const isOwner = ctx.user && ctx.user.id === t.user_id;
   const csrf = `<input type="hidden" name="_csrf" value="${esc(ctx.csrfToken)}">`;
 
-  const modActions = isAdmin ? `
+  const modActions = staff ? `
       <form method="post" action="/admin/threads/${esc(t.id)}/pin" class="inline-form">${csrf}
         <button class="btn btn-ghost btn-sm" type="submit">${t.pinned ? 'Unpin' : 'Pin'}</button></form>
       <form method="post" action="/admin/threads/${esc(t.id)}/lock" class="inline-form">${csrf}
         <button class="btn btn-ghost btn-sm" type="submit">${t.locked ? 'Unlock' : 'Lock'}</button></form>` : '';
-  const deleteThreadBtn = (isAdmin || isOwner) ? `
+  const deleteThreadBtn = (staff || isOwner) ? `
       <form method="post" action="/forum/t/${esc(t.id)}/delete" class="inline-form"
             data-confirm="Delete this thread and all its replies?">${csrf}
         <button class="btn btn-danger btn-sm" type="submit">Delete</button></form>` : '';
@@ -130,11 +131,11 @@ function thread(ctx, { thread: t, posts, firstPostId, page: current, pages, post
     ? `<div class="thread-actions">${modActions}${deleteThreadBtn}</div>` : '';
 
   const postList = map(posts, (p, i) => {
-    const canDelete = (isAdmin || (ctx.user && ctx.user.id === p.user_id)) && p.id !== firstPostId;
+    const canDelete = (staff || (ctx.user && ctx.user.id === p.user_id)) && p.id !== firstPostId;
     return `<article class="post" id="post-${esc(p.id)}">
     <aside class="post-author">
       <span class="avatar avatar-lg" aria-hidden="true">${esc(String(p.username || '?')[0].toUpperCase())}</span>
-      <span class="post-username">${esc(p.username)}${p.author_role === 'admin' ? ' <span class="tag tag-admin">STAFF</span>' : ''}</span>
+      <span class="post-username">${esc(p.username)}${STAFF_TIERS.has(p.author_tier) ? ' <span class="tag tag-admin">STAFF</span>' : ''}</span>
       <span class="muted">joined ${esc(timeAgo(p.author_since))}</span>
       <span class="muted">${esc(p.author_posts)} posts</span>
     </aside>
@@ -149,7 +150,7 @@ function thread(ctx, { thread: t, posts, firstPostId, page: current, pages, post
   });
 
   let replyArea;
-  if (t.locked && !isAdmin) {
+  if (t.locked && !staff) {
     replyArea = '<p class="muted locked-note">🔒 This thread is locked. New replies are disabled.</p>';
   } else if (ctx.user) {
     replyArea = `<div class="reply-box"><h2>Post a reply</h2>

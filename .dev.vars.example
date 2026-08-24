@@ -5,6 +5,11 @@
 # Generate one: node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
 CAPTCHA_SECRET=replace_me_with_a_long_random_string
 
-# Password for the seeded admin account (created on first run).
+# Password for the seeded admin account. Kept in sync with this value on
+# every boot — rotate it here any time.
 ADMIN_PASSWORD=choose-a-strong-password
 # ADMIN_USERNAME=admin   # optional, defaults to "admin"
+
+# Signs the /account/license token the desktop loader verifies a member's
+# tier with. Optional — falls back to CAPTCHA_SECRET if unset.
+# LICENSE_SECRET=replace_me_with_a_different_long_random_string

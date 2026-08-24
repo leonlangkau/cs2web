@@ -38,8 +38,14 @@ RATE_LIMIT_SHOUT = "12"
 # Variables and Secrets) or with `npx wrangler pages secret put NAME`, or in
 # .dev.vars for local dev:
 #   CAPTCHA_SECRET   signs CAPTCHA challenges (required)
-#   ADMIN_PASSWORD   password for the seeded admin account (required)
+#   ADMIN_PASSWORD   password for the seeded admin account (required) — stays
+#                    in sync with this value on every boot, so rotating it
+#                    here (then redeploying) always takes effect
 #   ADMIN_USERNAME   optional, defaults to "admin"
+#   LICENSE_SECRET   signs the /account/license token the desktop loader
+#                    verifies a member's tier with. Falls back to
+#                    CAPTCHA_SECRET if unset — set a dedicated one in
+#                    production so rotating one doesn't invalidate the other.
 
 # Optional: serve a real, multi-megabyte installer from R2 instead of the copy
 # embedded in the Function bundle. Create the bucket, upload the zip under its

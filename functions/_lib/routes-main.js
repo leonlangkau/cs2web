@@ -4,7 +4,9 @@ import installer from "./installer-data.js";
 import * as captcha from "./captcha.js";
 import * as limits from "./limits.js";
 import { DELETED_USERNAME } from "./bootstrap.js";
-import { audit, clientIp, requireAuth, acceptTerms, formBody, setFlash, TERMS_VERSION, } from "./middleware.js";
+import { audit, clientIp, requireAuth, requireTier, acceptTerms, formBody, setFlash, TERMS_VERSION, } from "./middleware.js";
+import { meetsTier } from "./tiers.js";
+import { issueLicense } from "./license.js";
 
 const DOWNLOAD_META = {
   sha256: installer.sha256,
@@ -40,11 +42,15 @@ function tooMany(c, retryAfterSec) {
 function register(app) {
   app.get('/', async (c) => {
     const db = c.get('db');
-    const recentThreads = await db.all(
-      `SELECT t.id, t.title, t.updated_at, c.name AS category, u.username
-       FROM threads t JOIN categories c ON c.id = t.category_id JOIN users u ON u.id = t.user_id
-       ORDER BY t.updated_at DESC LIMIT 4`
-    );
+    // The forum is members-only (Paid tier+), so its content isn't teased to
+    // visitors who can't actually open it.
+    const recentThreads = meetsTier(c.get('user'), 'paid')
+      ? await db.all(
+        `SELECT t.id, t.title, t.updated_at, c.name AS category, u.username
+         FROM threads t JOIN categories c ON c.id = t.category_id JOIN users u ON u.id = t.user_id
+         ORDER BY t.updated_at DESC LIMIT 4`
+      )
+      : [];
     return c.html(views.home(c.get('view'), {
       stats: await siteStats(db),
       recentThreads,
@@ -74,10 +80,11 @@ function register(app) {
 
   app.get('/download', (c) => c.html(views.downloadPage(c.get('view'), { downloadMeta: DOWNLOAD_META })));
 
-  // Members only: anonymous visitors are redirected to login, so the artifact is
-  // never served without an account even by direct URL.
+  // Paid members only: anonymous visitors are sent to log in, and a signed-in
+  // Free account gets a clear "upgrade" message — the artifact is never
+  // served below that tier even by direct URL.
   app.get('/download/file', async (c) => {
-    const gate = requireAuth(c);
+    const gate = requireTier(c, 'paid');
     if (gate) return gate;
 
     const verdict = await limits.check(c.get('db'), 'download', clientIp(c), c.get('cfg'));
@@ -100,6 +107,18 @@ function register(app) {
         'Cache-Control': 'no-store',
       },
     });
+  });
+
+  // Signed entitlement token for the desktop loader: it can call this (with
+  // the member's session cookie, or the member pastes the token into it) to
+  // learn which tier the account is on without trusting the client alone.
+  // Available to every signed-in account, not just Paid+ — the loader needs
+  // a verifiable "this account is Free" just as much as "this is Paid".
+  app.get('/account/license', async (c) => {
+    const gate = requireAuth(c);
+    if (gate) return gate;
+    c.header('Cache-Control', 'no-store');
+    return c.json(await issueLicense(c.get('user'), c.get('cfg')));
   });
 }
 

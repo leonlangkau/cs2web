@@ -1,7 +1,8 @@
 import * as views from "./views/forum.js";
 import * as site from "./views/site.js";
 import * as limits from "./limits.js";
-import { requireAuth, formBody, setFlash, clientIp } from "./middleware.js";
+import { requireAuth, requireTier, formBody, setFlash, clientIp } from "./middleware.js";
+import { isStaff } from "./tiers.js";
 import { tooMany } from "./routes-main.js";
 
 const THREADS_PER_PAGE = 20;
@@ -23,6 +24,14 @@ function intParam(value, fallback = 1) {
 }
 
 function register(app) {
+  // The whole forum is a Paid-tier benefit — gate every /forum route (and the
+  // bare /forum path) before any handler runs.
+  app.use('/forum/*', async (c, next) => {
+    const gate = requireTier(c, 'paid');
+    if (gate) return gate;
+    await next();
+  });
+
   app.get('/forum', async (c) => {
     const db = c.get('db');
     const categories = await db.all(
@@ -41,7 +50,7 @@ function register(app) {
        ORDER BY t.updated_at DESC LIMIT 8`
     );
     const shouts = await db.all(
-      `SELECT s.id, s.body, s.created_at, u.username, u.role AS author_role
+      `SELECT s.id, s.body, s.created_at, u.username, u.tier AS author_tier
        FROM shouts s JOIN users u ON u.id = s.user_id
        ORDER BY s.id DESC LIMIT ?`,
       SHOUTS_PER_LOAD
@@ -141,7 +150,7 @@ function register(app) {
     const page = Math.max(1, Math.min(pages, intParam(new URL(c.req.url).searchParams.get('page'))));
 
     const posts = await db.all(
-      `SELECT p.*, u.username, u.role AS author_role, u.created_at AS author_since,
+      `SELECT p.*, u.username, u.tier AS author_tier, u.created_at AS author_since,
           (SELECT COUNT(*) FROM posts x WHERE x.user_id = u.id) AS author_posts
        FROM posts p JOIN users u ON u.id = p.user_id
        WHERE p.thread_id = ? ORDER BY p.id LIMIT ? OFFSET ?`,
@@ -166,7 +175,7 @@ function register(app) {
     const thread = await db.get('SELECT * FROM threads WHERE id = ?', id);
     if (!thread) return notFound(c);
 
-    if (thread.locked && user.role !== 'admin') {
+    if (thread.locked && !isStaff(user)) {
       setFlash(c, 'error', 'This thread is locked.');
       return c.redirect(`/forum/t/${id}`, 302);
     }
@@ -193,7 +202,7 @@ function register(app) {
     return c.redirect(`/forum/t/${id}${query}#post-${post.lastInsertRowid}`, 302);
   });
 
-  // Self-serve delete: the thread's own author, or an admin, may remove it.
+  // Self-serve delete: the thread's own author, or staff, may remove it.
   // (The admin panel additionally exposes /admin/threads/:id/delete for
   // moderation from the Forum management tab.)
   app.post('/forum/t/:id/delete', async (c) => {
@@ -204,7 +213,7 @@ function register(app) {
     const id = intParam(c.req.param('id'), 0);
     const thread = id > 0 ? await db.get('SELECT * FROM threads WHERE id = ?', id) : null;
     if (!thread) return notFound(c);
-    if (thread.user_id !== user.id && user.role !== 'admin') return notFound(c);
+    if (thread.user_id !== user.id && !isStaff(user)) return notFound(c);
 
     await db.run('DELETE FROM threads WHERE id = ?', id);
     setFlash(c, 'success', 'Thread deleted.');
@@ -219,7 +228,7 @@ function register(app) {
     const id = intParam(c.req.param('id'), 0);
     const post = id > 0 ? await db.get('SELECT * FROM posts WHERE id = ?', id) : null;
     if (!post) return notFound(c);
-    if (post.user_id !== user.id && user.role !== 'admin') return notFound(c);
+    if (post.user_id !== user.id && !isStaff(user)) return notFound(c);
 
     const first = await db.get('SELECT MIN(id) AS m FROM posts WHERE thread_id = ?', post.thread_id);
     if (Number(first.m) === post.id) {
@@ -239,7 +248,7 @@ function register(app) {
     const db = c.get('db');
     const afterId = intParam(new URL(c.req.url).searchParams.get('after'), 0);
     const shouts = await db.all(
-      `SELECT s.id, s.body, s.created_at, u.username, u.role AS author_role
+      `SELECT s.id, s.body, s.created_at, u.username, u.tier AS author_tier
        FROM shouts s JOIN users u ON u.id = s.user_id
        WHERE s.id > ? ORDER BY s.id DESC LIMIT ?`,
       afterId, SHOUTS_PER_LOAD

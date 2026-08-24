@@ -1,12 +1,18 @@
 -- GoyHub schema. Shared by the node:sqlite adapter and Cloudflare D1.
 -- D1 applies this through `wrangler d1 execute --file`; the Node adapter runs it at boot.
 
+-- `role` ('user'/'admin') is legacy and kept only so an already-deployed
+-- database never needs its CHECK constraint migrated in place; `tier` is the
+-- single source of truth for access control everywhere in the app now (see
+-- functions/_lib/tiers.js). Fresh installs get the column here; an existing
+-- database gets it via the guarded ALTER TABLE in bootstrap.js.
 CREATE TABLE IF NOT EXISTS users (
   id            INTEGER PRIMARY KEY AUTOINCREMENT,
   username      TEXT NOT NULL UNIQUE COLLATE NOCASE,
   email         TEXT NOT NULL UNIQUE COLLATE NOCASE,
   password_hash TEXT NOT NULL,
   role          TEXT NOT NULL DEFAULT 'user' CHECK (role IN ('user','admin')),
+  tier          TEXT NOT NULL DEFAULT 'user',
   banned        INTEGER NOT NULL DEFAULT 0,
   signup_ip     TEXT,
   last_login_ip TEXT,
@@ -95,3 +101,12 @@ CREATE TABLE IF NOT EXISTS captcha_used (
   expires_at INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_captcha_used_expires ON captcha_used(expires_at);
+
+-- IP-level bans: blocks every route (except for staff, so nobody can lock
+-- themselves out) regardless of which account, or no account, is behind it.
+CREATE TABLE IF NOT EXISTS ip_bans (
+  ip         TEXT PRIMARY KEY,
+  reason     TEXT,
+  banned_by  TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);

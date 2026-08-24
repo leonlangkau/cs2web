@@ -493,6 +493,18 @@ textarea { resize: vertical; min-height: 90px; }
 [data-theme="dark"] .tag-admin { background: var(--accent-soft); color: var(--accent); }
 [data-theme="dark"] .tag-banned { background: rgba(255, 107, 122, 0.16); color: var(--danger); }
 
+/* Tier badges */
+.tag-tier-paid { background: #e2efe9; color: var(--success); }
+.tag-tier-developer { background: #ece3f7; color: #6a3fb5; }
+.tag-tier-trial_admin { background: #f0eade; color: var(--warn); }
+.tag-tier-admin { background: #e1e7f6; color: var(--accent); }
+[data-theme="dark"] .tag-tier-paid { background: rgba(62, 203, 130, 0.16); color: var(--success); }
+[data-theme="dark"] .tag-tier-developer { background: rgba(167, 124, 235, 0.18); color: #b79cf0; }
+[data-theme="dark"] .tag-tier-trial_admin { background: rgba(224, 168, 60, 0.18); color: var(--warn); }
+[data-theme="dark"] .tag-tier-admin { background: var(--accent-soft); color: var(--accent); }
+
+.panel-spaced { margin-top: 1.8rem; }
+
 /* thread view */
 .thread-heading { display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; }
 .thread-actions { display: flex; gap: 0.4rem; flex-wrap: wrap; }

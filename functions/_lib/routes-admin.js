@@ -1,7 +1,8 @@
 import * as views from "./views/admin.js";
 import * as site from "./views/site.js";
 import { DELETED_USERNAME, deletedUserId } from "./bootstrap.js";
-import { requireAdmin, destroyUserSessions, audit, formBody, setFlash, } from "./middleware.js";
+import { requireAdmin, requireStaff, destroyUserSessions, audit, formBody, setFlash, clientIp } from "./middleware.js";
+import { TIERS, TIER_LABELS } from "./tiers.js";
 
 const LOGS_PER_PAGE = 50;
 const USERS_PER_PAGE = 25;
@@ -37,14 +38,10 @@ async function findUser(c) {
 }
 
 function register(app) {
-  // Gate every /admin route before the handlers run.
+  // Staff (developer/trial_admin/admin) may enter the admin area at all;
+  // the most sensitive actions further down additionally require full admin.
   app.use('/admin/*', async (c, next) => {
-    const gate = requireAdmin(c);
-    if (gate) return gate;
-    await next();
-  });
-  app.use('/admin', async (c, next) => {
-    const gate = requireAdmin(c);
+    const gate = requireStaff(c);
     if (gate) return gate;
     await next();
   });
@@ -61,10 +58,11 @@ function register(app) {
       sessions: await one("SELECT COUNT(*) AS n FROM sessions WHERE expires_at > datetime('now')"),
       signups24h: await one("SELECT COUNT(*) AS n FROM ip_logs WHERE event = 'signup' AND created_at > datetime('now', '-1 day')"),
       failedLogins24h: await one("SELECT COUNT(*) AS n FROM ip_logs WHERE event = 'login_failed' AND created_at > datetime('now', '-1 day')"),
+      ipBans: await one('SELECT COUNT(*) AS n FROM ip_bans'),
     };
     const recentLogs = await db.all('SELECT * FROM ip_logs ORDER BY id DESC LIMIT 12');
     const recentUsers = await db.all(
-      'SELECT id, username, role, banned, signup_ip, created_at FROM users WHERE username != ? ORDER BY id DESC LIMIT 8',
+      'SELECT id, username, tier, banned, signup_ip, created_at FROM users WHERE username != ? ORDER BY id DESC LIMIT 8',
       DELETED_USERNAME
     );
     return c.html(views.dashboard(c.get('view'), { stats, recentLogs, recentUsers }));
@@ -89,13 +87,13 @@ function register(app) {
     const page = Math.max(1, Math.min(pages, intParam(url.searchParams.get('page'))));
 
     const users = await db.all(
-      `SELECT id, username, email, role, banned, signup_ip, last_login_ip, last_login_at, created_at,
+      `SELECT id, username, email, tier, banned, signup_ip, last_login_ip, last_login_at, created_at,
           (SELECT COUNT(*) FROM posts p WHERE p.user_id = users.id) AS post_count
        FROM users ${where} ORDER BY id DESC LIMIT ? OFFSET ?`,
       ...params, USERS_PER_PAGE, (page - 1) * USERS_PER_PAGE
     );
 
-    return c.html(views.users(c.get('view'), { users, q, page, pages, total }));
+    return c.html(views.users(c.get('view'), { users, q, page, pages, total, tiers: TIERS, tierLabels: TIER_LABELS }));
   });
 
   app.post('/admin/users/:id/ban', async (c) => {
@@ -122,23 +120,37 @@ function register(app) {
     return c.redirect(backTo(c, '/admin/users'), 302);
   });
 
-  app.post('/admin/users/:id/role', async (c) => {
+  // Tier changes are the most sensitive user action (they grant/revoke admin
+  // panel access) — full admin only, unlike ban/unban which any staff can do.
+  app.post('/admin/users/:id/tier', async (c) => {
+    const gate = requireAdmin(c);
+    if (gate) return gate;
     const db = c.get('db');
     const user = await findUser(c);
     if (!user) return notFound(c, 'No such user.');
     if (user.id === c.get('user').id) {
-      setFlash(c, 'error', 'You cannot change your own role.');
+      setFlash(c, 'error', 'You cannot change your own tier.');
       return c.redirect(backTo(c, '/admin/users'), 302);
     }
-    const newRole = user.role === 'admin' ? 'user' : 'admin';
-    await db.run('UPDATE users SET role = ? WHERE id = ?', newRole, user.id);
-    await destroyUserSessions(db, user.id); // force re-login so the new role takes effect cleanly
-    await adminAudit(c, `set role of #${user.id} (${user.username}) to ${newRole}`);
-    setFlash(c, 'success', `${user.username} is now ${newRole === 'admin' ? 'an admin' : 'a regular user'}.`);
+    const body = await formBody(c);
+    const requested = String(body.tier || '');
+    if (!TIERS.includes(requested)) {
+      setFlash(c, 'error', 'Not a valid tier.');
+      return c.redirect(backTo(c, '/admin/users'), 302);
+    }
+    // role stays in sync as a coarse legacy mirror of tier — nothing reads it
+    // for access control anymore, but keeping it sane avoids a confusing drift.
+    const legacyRole = requested === 'admin' ? 'admin' : 'user';
+    await db.run('UPDATE users SET tier = ?, role = ? WHERE id = ?', requested, legacyRole, user.id);
+    await destroyUserSessions(db, user.id); // force re-login so the new tier takes effect cleanly
+    await adminAudit(c, `set tier of #${user.id} (${user.username}) to ${requested}`);
+    setFlash(c, 'success', `${user.username} is now ${TIER_LABELS[requested]}.`);
     return c.redirect(backTo(c, '/admin/users'), 302);
   });
 
   app.post('/admin/users/:id/delete', async (c) => {
+    const gate = requireAdmin(c);
+    if (gate) return gate;
     const db = c.get('db');
     const user = await findUser(c);
     if (!user) return notFound(c, 'No such user.');
@@ -182,8 +194,41 @@ function register(app) {
       `SELECT * FROM ip_logs ${where} ORDER BY id DESC LIMIT ? OFFSET ?`,
       ...params, LOGS_PER_PAGE, (page - 1) * LOGS_PER_PAGE
     );
+    const ipBans = await db.all('SELECT * FROM ip_bans ORDER BY created_at DESC LIMIT 100');
 
-    return c.html(views.logs(c.get('view'), { logs, q, event, events: LOG_EVENTS, page, pages, total }));
+    return c.html(views.logs(c.get('view'), { logs, q, event, events: LOG_EVENTS, page, pages, total, ipBans }));
+  });
+
+  app.post('/admin/ip-bans', async (c) => {
+    const db = c.get('db');
+    const body = await formBody(c);
+    const ip = String(body.ip || '').trim().slice(0, 64);
+    const reason = String(body.reason || '').trim().slice(0, 300) || null;
+    if (!ip) {
+      setFlash(c, 'error', 'Enter an IP address to ban.');
+      return c.redirect(backTo(c, '/admin/logs'), 302);
+    }
+    if (ip === clientIp(c)) {
+      setFlash(c, 'error', 'You cannot ban your own IP address.');
+      return c.redirect(backTo(c, '/admin/logs'), 302);
+    }
+    await db.run(
+      `INSERT INTO ip_bans (ip, reason, banned_by) VALUES (?, ?, ?)
+       ON CONFLICT(ip) DO UPDATE SET reason = excluded.reason, banned_by = excluded.banned_by`,
+      ip, reason, c.get('user').username
+    );
+    await adminAudit(c, `banned IP ${ip}${reason ? ` (${reason})` : ''}`);
+    setFlash(c, 'success', `${ip} has been banned.`);
+    return c.redirect(backTo(c, '/admin/logs'), 302);
+  });
+
+  app.post('/admin/ip-bans/:ip/unban', async (c) => {
+    const db = c.get('db');
+    const ip = c.req.param('ip'); // already decoded by the router
+    await db.run('DELETE FROM ip_bans WHERE ip = ?', ip);
+    await adminAudit(c, `unbanned IP ${ip}`);
+    setFlash(c, 'success', `${ip} has been unbanned.`);
+    return c.redirect(backTo(c, '/admin/logs'), 302);
   });
 
   app.get('/admin/forum', async (c) => {
@@ -202,6 +247,8 @@ function register(app) {
   });
 
   app.post('/admin/categories', async (c) => {
+    const gate = requireAdmin(c);
+    if (gate) return gate;
     const db = c.get('db');
     const body = await formBody(c);
     const name = String(body.name || '').trim().replace(/\s+/g, ' ');
@@ -227,6 +274,8 @@ function register(app) {
   });
 
   app.post('/admin/categories/:id/delete', async (c) => {
+    const gate = requireAdmin(c);
+    if (gate) return gate;
     const db = c.get('db');
     const id = intParam(c.req.param('id'), 0);
     const category = id > 0 ? await db.get('SELECT * FROM categories WHERE id = ?', id) : null;

@@ -1,6 +1,7 @@
 import { getCookie, setCookie, deleteCookie } from "./cookies.js";
 import { newToken, sha256hex, safeEqual } from "./crypto.js";
 import { errorPage } from "./views/site.js";
+import { TIER_LABELS, meetsTier, isStaff, isFullAdmin } from "./tiers.js";
 
 const SESSION_COOKIE = 'ghsession';
 const CSRF_COOKIE = 'ghcsrf';
@@ -155,7 +156,7 @@ const loadContext = async (c, next) => {
   if (token) {
     const row = /^[a-f0-9]{64}$/.test(token)
       ? await db.get(
-        `SELECT u.id, u.username, u.email, u.role, u.banned, u.created_at,
+        `SELECT u.id, u.username, u.email, u.role, u.tier, u.banned, u.created_at,
                 s.id AS session_id, s.csrf_hash
          FROM sessions s JOIN users u ON u.id = s.user_id
          WHERE s.token_hash = ? AND s.expires_at > datetime('now')`,
@@ -174,6 +175,30 @@ const loadContext = async (c, next) => {
     }
   }
 
+  await next();
+};
+
+/**
+ * Blocks every route for a banned IP address, regardless of which account
+ * (or no account) is behind it — staff are exempt so nobody can lock
+ * themselves, or a shared office/household IP with a staff member on it, out
+ * by banning the wrong address.
+ */
+const ipBanGate = async (c, next) => {
+  const user = c.get('user');
+  if (isStaff(user)) { await next(); return; }
+
+  const ip = clientIp(c);
+  if (ip && ip !== 'unknown') {
+    const ban = await c.get('db').get('SELECT reason FROM ip_bans WHERE ip = ?', ip);
+    if (ban) {
+      return c.html(errorPage(c.get('view'), {
+        code: 403, title: 'Access blocked',
+        message: 'This network has been blocked from GoyHub.'
+          + (ban.reason ? ` Reason: ${ban.reason}` : ''),
+      }), 403);
+    }
+  }
   await next();
 };
 
@@ -266,19 +291,48 @@ function requireAuth(c) {
   return c.redirect(`/auth/login?next=${next}`, 302);
 }
 
-/** Admin gate: renders a 404 (not 403) so the admin area is not discoverable. */
+/** Full-admin gate (tier changes, deleting accounts/categories): 404s, not 403 — the admin area is not discoverable. */
 function requireAdmin(c) {
-  const user = c.get('user');
-  if (user && user.role === 'admin') return null;
+  if (isFullAdmin(c.get('user'))) return null;
   return c.html(errorPage(c.get('view'), {
     code: 404, title: 'Not found', message: 'This page does not exist.',
   }), 404);
 }
 
+/** Staff gate (admin panel + moderation): any of developer/trial_admin/admin. */
+function requireStaff(c) {
+  if (isStaff(c.get('user'))) return null;
+  return c.html(errorPage(c.get('view'), {
+    code: 404, title: 'Not found', message: 'This page does not exist.',
+  }), 404);
+}
+
+/**
+ * Content-tier gate (forum, download): requires sign-in and at least
+ * `minTier`. Unlike requireAdmin/requireStaff this is meant to be
+ * discoverable, so a logged-in user under the tier gets a real 403
+ * explaining what to do, not a 404.
+ */
+function requireTier(c, minTier) {
+  const user = c.get('user');
+  if (!user) {
+    setFlash(c, 'error', 'You need to sign in to do that.');
+    const next = encodeURIComponent(new URL(c.req.url).pathname + new URL(c.req.url).search);
+    return c.redirect(`/auth/login?next=${next}`, 302);
+  }
+  if (!meetsTier(user, minTier)) {
+    return c.html(errorPage(c.get('view'), {
+      code: 403, title: 'Members only',
+      message: `This area requires ${TIER_LABELS[minTier]} access or higher. Contact an admin to upgrade your account.`,
+    }), 403);
+  }
+  return null;
+}
+
 export {
   SESSION_COOKIE, CSRF_COOKIE, FLASH_COOKIE, TERMS_COOKIE, TERMS_VERSION,
-  securityHeaders, loadContext, csrfProtection, termsGate,
+  securityHeaders, loadContext, csrfProtection, termsGate, ipBanGate,
   createSession, destroySession, destroyUserSessions,
-  acceptTerms, setFlash, formBody, requireAuth, requireAdmin,
+  acceptTerms, setFlash, formBody, requireAuth, requireAdmin, requireStaff, requireTier,
   clientIp, userAgent, audit, cookieOptions,
 };

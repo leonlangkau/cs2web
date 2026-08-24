@@ -1,5 +1,9 @@
 import { page } from "./layout.js";
 import { esc, timeAgo, map, pagination } from "./util.js";
+import { TIER_LABELS, STAFF_TIERS, isFullAdmin } from "../tiers.js";
+
+const tierTag = (tier) => tier && tier !== 'user'
+  ? ` <span class="tag tag-tier tag-tier-${esc(tier)}">${esc(TIER_LABELS[tier] || tier)}</span>` : '';
 
 function head(ctx, heading) {
   const tab = (href, label, active) => `<a href="${href}" class="${active ? 'active' : ''}">${label}</a>`;
@@ -38,6 +42,7 @@ function dashboard(ctx, { stats, recentLogs, recentUsers }) {
       ${card(stats.signups24h, 'Signups (24h)')}
       ${card(stats.failedLogins24h, 'Failed logins (24h)', stats.failedLogins24h > 20)}
       ${card(stats.banned, 'Banned users', stats.banned > 0)}
+      ${card(stats.ipBans, 'IP bans', stats.ipBans > 0)}
     </div>
     <div class="admin-columns">
       <div class="panel">
@@ -51,8 +56,7 @@ function dashboard(ctx, { stats, recentLogs, recentUsers }) {
         <div class="table-wrap"><table>
           <thead><tr><th>User</th><th>Signup IP</th><th>Joined</th></tr></thead>
           <tbody>${map(recentUsers, (u) => `<tr>
-            <td>${esc(u.username)}
-              ${u.role === 'admin' ? '<span class="tag tag-admin">ADMIN</span>' : ''}
+            <td>${esc(u.username)}${tierTag(u.tier)}
               ${u.banned ? '<span class="tag tag-banned">BANNED</span>' : ''}</td>
             <td class="mono">${esc(u.signup_ip || '—')}</td>
             <td class="muted">${esc(timeAgo(u.created_at))}</td></tr>`)}
@@ -64,21 +68,26 @@ function dashboard(ctx, { stats, recentLogs, recentUsers }) {
   return page(ctx, { title: 'Admin · Dashboard', body });
 }
 
-function users(ctx, { users: rows, q, page: current, pages, total }) {
+function users(ctx, { users: rows, q, page: current, pages, total, tiers, tierLabels }) {
   const csrf = `<input type="hidden" name="_csrf" value="${esc(ctx.csrfToken)}">`;
+  const canManageTiers = isFullAdmin(ctx.user);
 
   const actions = (u) => {
     if (u.id === ctx.user.id) return '<span class="muted">you</span>';
     const banBtn = u.banned
       ? `<form method="post" action="/admin/users/${esc(u.id)}/unban" class="inline-form">${csrf}<button class="btn btn-ghost btn-xs" type="submit">Unban</button></form>`
       : `<form method="post" action="/admin/users/${esc(u.id)}/ban" class="inline-form" data-confirm="Ban ${esc(u.username)}? They will be signed out everywhere.">${csrf}<button class="btn btn-warn btn-xs" type="submit">Ban</button></form>`;
-    const roleLabel = u.role === 'admin' ? 'Demote' : 'Promote';
-    const roleConfirm = u.role === 'admin'
-      ? `Remove admin rights from ${u.username}?`
-      : `Make ${u.username} an admin?`;
-    return `${banBtn}
-      <form method="post" action="/admin/users/${esc(u.id)}/role" class="inline-form" data-confirm="${esc(roleConfirm)}">${csrf}
-        <button class="btn btn-ghost btn-xs" type="submit">${roleLabel}</button></form>
+
+    if (!canManageTiers) return banBtn;
+
+    const tierSelect = `<form method="post" action="/admin/users/${esc(u.id)}/tier" class="inline-form"
+          data-confirm="Set ${esc(u.username)}'s tier to the selected value?">${csrf}
+        <select name="tier" aria-label="Tier for ${esc(u.username)}">
+          ${map(tiers, (t) => `<option value="${esc(t)}" ${u.tier === t ? 'selected' : ''}>${esc(tierLabels[t] || t)}</option>`)}
+        </select>
+        <button class="btn btn-ghost btn-xs" type="submit">Set</button></form>`;
+
+    return `${banBtn} ${tierSelect}
       <form method="post" action="/admin/users/${esc(u.id)}/delete" class="inline-form"
             data-confirm="Permanently delete ${esc(u.username)}? Their threads and posts stay on the forum, reattributed to [deleted].">${csrf}
         <button class="btn btn-danger btn-xs" type="submit">Delete</button></form>`;
@@ -95,11 +104,11 @@ function users(ctx, { users: rows, q, page: current, pages, total }) {
       ${q ? '<a class="btn btn-ghost" href="/admin/users">Clear</a>' : ''}
       <span class="muted">${esc(total)} user${total === 1 ? '' : 's'}</span>
     </form>
+    ${!canManageTiers ? '<p class="muted">Tier changes and account deletion require full Admin access.</p>' : ''}
     <div class="panel"><div class="table-wrap"><table>
       <thead><tr><th>User</th><th>Email</th><th>Signup IP</th><th>Last login</th><th>Posts</th><th>Actions</th></tr></thead>
       <tbody>${map(rows, (u) => `<tr class="${u.banned ? 'row-banned' : ''}">
-        <td><strong>${esc(u.username)}</strong>
-          ${u.role === 'admin' ? '<span class="tag tag-admin">ADMIN</span>' : ''}
+        <td><strong>${esc(u.username)}</strong>${tierTag(u.tier)}
           ${u.banned ? '<span class="tag tag-banned">BANNED</span>' : ''}
           <div class="muted">#${esc(u.id)} · joined ${esc(timeAgo(u.created_at))}</div></td>
         <td>${esc(u.email)}</td>
@@ -114,7 +123,12 @@ function users(ctx, { users: rows, q, page: current, pages, total }) {
   return page(ctx, { title: 'Admin · Users', body });
 }
 
-function logs(ctx, { logs: rows, q, event, events, page: current, pages, total }) {
+function logs(ctx, { logs: rows, q, event, events, page: current, pages, total, ipBans }) {
+  const csrf = `<input type="hidden" name="_csrf" value="${esc(ctx.csrfToken)}">`;
+  const banForm = (ip) => `<form method="post" action="/admin/ip-bans/${encodeURIComponent(ip)}/unban" class="inline-form"
+        data-confirm="Unban ${esc(ip)}?">${csrf}
+      <button class="btn btn-ghost btn-xs" type="submit">Unban</button></form>`;
+
   const body = `
 <div class="section admin-page">
   <div class="container">
@@ -131,9 +145,9 @@ function logs(ctx, { logs: rows, q, event, events, page: current, pages, total }
       <span class="muted">${esc(total)} entr${total === 1 ? 'y' : 'ies'}</span>
     </form>
     <div class="panel"><div class="table-wrap"><table>
-      <thead><tr><th>#</th><th>Event</th><th>User</th><th>IP address</th><th>Detail</th><th>User agent</th><th>When</th></tr></thead>
+      <thead><tr><th>#</th><th>Event</th><th>User</th><th>IP address</th><th>Detail</th><th>User agent</th><th>When</th><th></th></tr></thead>
       <tbody>${rows.length === 0
-        ? '<tr><td colspan="7" class="muted center">No log entries match.</td></tr>'
+        ? '<tr><td colspan="8" class="muted center">No log entries match.</td></tr>'
         : map(rows, (l) => `<tr>
             <td class="muted">${esc(l.id)}</td>
             <td><span class="tag tag-event tag-${esc(l.event)}">${esc(l.event)}</span></td>
@@ -141,9 +155,34 @@ function logs(ctx, { logs: rows, q, event, events, page: current, pages, total }
             <td class="mono"><a href="/admin/logs?q=${encodeURIComponent(l.ip)}">${esc(l.ip)}</a></td>
             <td class="muted detail-cell">${esc(l.detail || '—')}</td>
             <td class="muted ua-cell" title="${esc(l.user_agent || '')}">${esc(String(l.user_agent || '—').slice(0, 60))}</td>
-            <td class="muted nowrap">${esc(l.created_at)} UTC</td></tr>`)}
+            <td class="muted nowrap">${esc(l.created_at)} UTC</td>
+            <td class="actions-cell"><form method="post" action="/admin/ip-bans" class="inline-form"
+                  data-confirm="Ban ${esc(l.ip)} from GoyHub entirely?">${csrf}
+                <input type="hidden" name="ip" value="${esc(l.ip)}">
+                <button class="btn btn-warn btn-xs" type="submit">Ban IP</button></form></td></tr>`)}
       </tbody></table></div></div>
     ${pagination(current, pages, (p) => `/admin/logs?page=${p}&event=${encodeURIComponent(event)}&q=${encodeURIComponent(q)}`)}
+
+    <div class="panel panel-spaced">
+      <div class="panel-head"><h2>IP bans</h2></div>
+      <div class="table-wrap"><table>
+        <thead><tr><th>IP</th><th>Reason</th><th>Banned by</th><th>Since</th><th></th></tr></thead>
+        <tbody>${ipBans.length === 0
+          ? '<tr><td colspan="5" class="muted center">No IPs currently banned.</td></tr>'
+          : map(ipBans, (b) => `<tr>
+              <td class="mono">${esc(b.ip)}</td>
+              <td class="muted detail-cell">${esc(b.reason || '—')}</td>
+              <td class="muted">${esc(b.banned_by || '—')}</td>
+              <td class="muted nowrap">${esc(timeAgo(b.created_at))}</td>
+              <td class="actions-cell">${banForm(b.ip)}</td></tr>`)}
+        </tbody></table></div>
+      <form method="post" action="/admin/ip-bans" class="stack panel-form">
+        <h3>Ban an IP manually</h3>${csrf}
+        <label><span>IP address</span><input type="text" name="ip" required maxlength="64" placeholder="203.0.113.42"></label>
+        <label><span>Reason (optional)</span><input type="text" name="reason" maxlength="300"></label>
+        <button class="btn btn-warn btn-sm" type="submit">Ban</button>
+      </form>
+    </div>
   </div>
 </div>`;
   return page(ctx, { title: 'Admin · IP logs', body });
@@ -151,6 +190,7 @@ function logs(ctx, { logs: rows, q, event, events, page: current, pages, total }
 
 function forumAdmin(ctx, { categories, threads }) {
   const csrf = `<input type="hidden" name="_csrf" value="${esc(ctx.csrfToken)}">`;
+  const canManageCategories = isFullAdmin(ctx.user);
   const body = `
 <div class="section admin-page">
   <div class="container">
@@ -164,17 +204,18 @@ function forumAdmin(ctx, { categories, threads }) {
             <td><strong>${esc(c.name)}</strong><div class="muted">${esc(c.description)}</div></td>
             <td class="mono">${esc(c.slug)}</td>
             <td>${esc(c.thread_count)}</td>
-            <td class="actions-cell">
+            <td class="actions-cell">${canManageCategories ? `
               <form method="post" action="/admin/categories/${esc(c.id)}/delete" class="inline-form"
                     data-confirm="Delete category '${esc(c.name)}' and ALL ${esc(c.thread_count)} of its threads?">${csrf}
-                <button class="btn btn-danger btn-xs" type="submit">Delete</button></form></td></tr>`)}
+                <button class="btn btn-danger btn-xs" type="submit">Delete</button></form>` : ''}</td></tr>`)}
           </tbody></table></div>
+        ${canManageCategories ? `
         <form method="post" action="/admin/categories" class="stack panel-form">
           <h3>Add category</h3>${csrf}
           <label><span>Name</span><input type="text" name="name" required minlength="2" maxlength="50"></label>
           <label><span>Description</span><input type="text" name="description" maxlength="300"></label>
           <button class="btn btn-primary btn-sm" type="submit">Create</button>
-        </form>
+        </form>` : '<p class="muted panel-form">Creating and deleting categories requires full Admin access.</p>'}
       </div>
       <div class="panel">
         <div class="panel-head"><h2>Latest threads</h2></div>

@@ -1,5 +1,6 @@
 import { page } from "./layout.js";
 import { esc, timeAgo, map } from "./util.js";
+import { meetsTier, tierOf, TIER_LABELS } from "../tiers.js";
 
 const DOWNLOAD_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m0 0l-5-5m5 5l5-5M4 19h16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
 
@@ -25,26 +26,38 @@ const FEATURES = [
 ];
 
 function home(ctx, { stats, recentThreads, downloadMeta }) {
-  const heroCta = ctx.user
+  const canDownload = meetsTier(ctx.user, 'paid');
+  const canViewForum = meetsTier(ctx.user, 'paid');
+
+  const heroCta = canDownload
     ? `<a class="btn btn-primary btn-lg btn-download" href="/download/file" rel="nofollow">${DOWNLOAD_ICON}Download for Windows</a>`
-    : '<a class="btn btn-primary btn-lg" href="/auth/signup">Create a free account</a>';
+    : ctx.user
+      ? '<a class="btn btn-primary btn-lg" href="/download">Upgrade to download</a>'
+      : '<a class="btn btn-primary btn-lg" href="/auth/signup">Create a free account</a>';
 
-  const heroMeta = ctx.user
-    ? `Free · v${esc(ctx.appVersion)} · ${esc(downloadMeta.sizeKb)} KB · <span class="mono">SHA-256 ${esc(downloadMeta.sha256.slice(0, 12))}…</span>`
-    : `Free · v${esc(ctx.appVersion)} · Windows 10/11 · <a href="/auth/login?next=%2Fdownload">Already a member? Log in to download</a>`;
+  const heroMeta = canDownload
+    ? `v${esc(ctx.appVersion)} · ${esc(downloadMeta.sizeKb)} KB · <span class="mono">SHA-256 ${esc(downloadMeta.sha256.slice(0, 12))}…</span>`
+    : ctx.user
+      ? `v${esc(ctx.appVersion)} · Windows 10/11 · <a href="/download">Paid members only — see upgrade options</a>`
+      : `v${esc(ctx.appVersion)} · Windows 10/11 · <a href="/auth/login?next=%2Fdownload">Already a member? Log in</a>`;
 
-  const bottomCta = ctx.user
+  const bottomCta = canDownload
     ? `<p class="reveal"><a class="btn btn-primary btn-lg btn-download" href="/download/file" rel="nofollow">${DOWNLOAD_ICON}Download GoyHub v${esc(ctx.appVersion)}</a></p>
        <p class="fineprint mono reveal">SHA-256: ${esc(downloadMeta.sha256)}</p>`
-    : `<p class="reveal"><a class="btn btn-primary btn-lg" href="/auth/signup">Sign up to download</a></p>
-       <p class="fineprint reveal">Downloads are for members only. Already have an account? <a href="/auth/login?next=%2Fdownload">Log in</a>.</p>`;
+    : ctx.user
+      ? `<p class="reveal"><a class="btn btn-primary btn-lg" href="/download">See upgrade options</a></p>
+         <p class="fineprint reveal">The download is a Paid-tier benefit. Contact an admin to upgrade your account.</p>`
+      : `<p class="reveal"><a class="btn btn-primary btn-lg" href="/auth/signup">Sign up to download</a></p>
+         <p class="fineprint reveal">Downloads are a Paid membership benefit. Already have an account? <a href="/auth/login?next=%2Fdownload">Log in</a>.</p>`;
 
-  const recent = recentThreads.length === 0
-    ? '<p class="muted reveal">No threads yet — <a href="/forum">be the first to post</a>.</p>'
-    : map(recentThreads, (t) => `<a class="recent-thread reveal" href="/forum/t/${esc(t.id)}">
-        <span class="recent-cat">${esc(t.category)}</span>
-        <span class="recent-title">${esc(t.title)}</span>
-        <span class="recent-meta">by ${esc(t.username)} · ${esc(timeAgo(t.updated_at))}</span></a>`);
+  const recent = !canViewForum
+    ? '<p class="muted reveal">The forum is a Paid membership benefit. <a href="/download">See upgrade options</a>.</p>'
+    : recentThreads.length === 0
+      ? '<p class="muted reveal">No threads yet — <a href="/forum">be the first to post</a>.</p>'
+      : map(recentThreads, (t) => `<a class="recent-thread reveal" href="/forum/t/${esc(t.id)}">
+          <span class="recent-cat">${esc(t.category)}</span>
+          <span class="recent-title">${esc(t.title)}</span>
+          <span class="recent-meta">by ${esc(t.username)} · ${esc(timeAgo(t.updated_at))}</span></a>`);
 
   const body = `
 <section class="hero" id="hero">
@@ -111,12 +124,29 @@ function home(ctx, { stats, recentThreads, downloadMeta }) {
 }
 
 function downloadPage(ctx, { downloadMeta }) {
-  const action = ctx.user
+  const canDownload = meetsTier(ctx.user, 'paid');
+
+  const action = canDownload
     ? `<a class="btn btn-primary btn-lg btn-download" href="/download/file" rel="nofollow">${DOWNLOAD_ICON}Download now</a>`
-    : `<span class="download-gate">
-         <a class="btn btn-primary btn-lg" href="/auth/signup">Sign up to download</a>
-         <a class="btn btn-outline btn-lg" href="/auth/login?next=%2Fdownload">Log in</a>
-       </span>`;
+    : ctx.user
+      ? `<span class="download-gate"><a class="btn btn-primary btn-lg" href="mailto:${esc(ctx.company.contactEmail)}">Contact us to upgrade</a></span>`
+      : `<span class="download-gate">
+           <a class="btn btn-primary btn-lg" href="/auth/signup">Sign up free</a>
+           <a class="btn btn-outline btn-lg" href="/auth/login?next=%2Fdownload">Log in</a>
+         </span>`;
+
+  const gateNote = canDownload
+    ? ''
+    : ctx.user
+      ? '<div class="muted">The download is a Paid-tier benefit. Contact an admin to upgrade your account.</div>'
+      : '<div class="muted">Downloads are available to Paid members. Signing up is free — upgrading unlocks the download.</div>';
+
+  const licenseBlock = canDownload ? `
+    <h2>Loader license</h2>
+    <p class="muted">GoyHub's desktop loader verifies your tier with a signed token rather than trusting the client.
+      Fetch <span class="mono">GET /account/license</span> while signed in (or paste the token it returns into the
+      loader) to prove your account is <strong>${esc(TIER_LABELS[tierOf(ctx.user)])}</strong>. Tokens expire after 24
+      hours, so the loader should re-fetch rather than cache one indefinitely.</p>` : '';
 
   const body = `
 <div class="section download-page">
@@ -128,13 +158,14 @@ function downloadPage(ctx, { downloadMeta }) {
       <div>
         <strong>GoyHub-Setup-1.0.0.zip</strong>
         <span class="muted"> · Windows 10/11 (64-bit) · ${esc(downloadMeta.sizeKb)} KB</span>
-        ${ctx.user ? '' : '<div class="muted">Downloads are available to members. It\'s free to join.</div>'}
+        ${gateNote}
       </div>
       ${action}
     </div>
     <h2>Verify your download</h2>
     <p class="muted">Always check the checksum before installing — if it does not match, delete the file.</p>
     <pre class="mono code-block">SHA-256  ${esc(downloadMeta.sha256)}</pre>
+    ${licenseBlock}
     <h2>Install in 3 steps</h2>
     <ol class="steps">
       <li>Unzip the archive and run <span class="mono">GoyHubSetup.exe</span>.</li>

@@ -1,4 +1,5 @@
 import { esc } from "./util.js";
+import { isStaff } from "../tiers.js";
 
 const BRAND_MARK = `<svg class="brand-mark" viewBox="0 0 32 32" aria-hidden="true">
   <path d="M16 4L26.4 22H5.6z" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linejoin="round"/>
@@ -55,7 +56,7 @@ function nav(ctx) {
       ${link('/', 'Home', ctx.path === '/')}
       ${link('/forum', 'Forum', ctx.path.startsWith('/forum'))}
       ${link('/download', 'Download', ctx.path.startsWith('/download'))}
-      ${ctx.user && ctx.user.role === 'admin' ? link('/admin', 'Admin', ctx.path.startsWith('/admin')) : ''}
+      ${isStaff(ctx.user) ? link('/admin', 'Admin', ctx.path.startsWith('/admin')) : ''}
     </nav>
     <div class="nav-auth">${THEME_TOGGLE}${authArea}</div>
   </div>

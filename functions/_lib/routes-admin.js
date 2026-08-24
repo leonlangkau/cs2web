@@ -3,12 +3,13 @@ import * as site from "./views/site.js";
 import { DELETED_USERNAME, deletedUserId } from "./bootstrap.js";
 import { requireAdmin, requireStaff, destroyUserSessions, audit, formBody, setFlash, clientIp } from "./middleware.js";
 import { TIERS, TIER_LABELS } from "./tiers.js";
+import { setSetting, ANNOUNCEMENT_KEY } from "./settings.js";
 
 const LOGS_PER_PAGE = 50;
 const USERS_PER_PAGE = 25;
 const LOG_EVENTS = ['signup', 'login', 'login_failed', 'login_blocked', 'logout', 'download',
   'admin_action', 'captcha_failed', 'terms_accepted', 'password_changed', 'loader_auth', 'loader_auth_failed',
-  'ip_autoban', 'signup_surge_blocked', 'post_reported'];
+  'ip_autoban', 'signup_surge_blocked', 'post_reported', 'email_changed', 'account_deleted'];
 
 const IP_HIDDEN = '(hidden)';
 
@@ -265,6 +266,18 @@ function register(app) {
     await adminAudit(c, `unbanned IP ${ip}`);
     setFlash(c, 'success', `${ip} has been unbanned.`);
     return c.redirect(backTo(c, '/admin/logs'), 302);
+  });
+
+  // Site-wide announcement banner. Full admin only — it speaks with the
+  // site's voice on every page. Empty text clears it.
+  app.post('/admin/announcement', async (c) => {
+    const gate = requireAdmin(c);
+    if (gate) return gate;
+    const body = await formBody(c);
+    const value = await setSetting(c.get('db'), ANNOUNCEMENT_KEY, body.announcement);
+    await adminAudit(c, value ? `set announcement: "${value.slice(0, 80)}"` : 'cleared announcement');
+    setFlash(c, 'success', value ? 'Announcement is live on every page.' : 'Announcement cleared.');
+    return c.redirect('/admin', 302);
   });
 
   // Report queue: member reports on posts, open first. Staff-level like the

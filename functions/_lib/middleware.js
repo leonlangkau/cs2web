@@ -3,6 +3,7 @@ import { newToken, sha256hex, safeEqual } from "./crypto.js";
 import { errorPage } from "./views/site.js";
 import { TIER_LABELS, meetsTier, isStaff, isFullAdmin } from "./tiers.js";
 import * as limits from "./limits.js";
+import { getSetting, ANNOUNCEMENT_KEY } from "./settings.js";
 
 const SESSION_COOKIE = 'ghsession';
 const CSRF_COOKIE = 'ghcsrf';
@@ -134,8 +135,15 @@ const loadContext = async (c, next) => {
     company: c.get('company'),
     appName: 'GoyHub',
     appVersion: c.get('appVersion'),
+    announcement: '',
   };
   c.set('view', view);
+
+  // Site-wide announcement banner (admin-set). Only fetched for page GETs —
+  // API calls and form posts never render it.
+  if (c.req.method === 'GET' && !url.pathname.startsWith('/api/')) {
+    view.announcement = await getSetting(db, ANNOUNCEMENT_KEY);
+  }
 
   // --- flash (one-shot cookie) ---
   const rawFlash = getCookie(c, FLASH_COOKIE);

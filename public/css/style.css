@@ -211,6 +211,15 @@ a.nav-user:hover { color: var(--accent); }
 }
 .avatar-lg { width: 52px; height: 52px; font-size: 1.4rem; }
 
+/* ---------- Announcement banner ---------- */
+.announcement { background: var(--accent); color: #fff; font-weight: 600; font-size: 0.92rem; }
+.announcement-inner { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: 0.55rem 0; }
+.announcement-dismiss {
+  background: transparent; border: 0; color: #fff; font: inherit; cursor: pointer;
+  opacity: 0.8; padding: 0.1rem 0.4rem; border-radius: 5px; flex: none;
+}
+.announcement-dismiss:hover { opacity: 1; background: rgba(255, 255, 255, 0.15); }
+
 /* ---------- Flash ---------- */
 .flash { padding: 0.65rem 0; font-weight: 600; animation: flash-in 0.3s ease; transition: opacity 0.35s ease; }
 .flash-success { background: rgba(15, 122, 69, 0.1); color: var(--success); border-bottom: 1px solid rgba(15, 122, 69, 0.25); }
@@ -433,6 +442,28 @@ textarea { resize: vertical; min-height: 90px; }
 .pay-address { display: flex; gap: 0.8rem; align-items: baseline; background: var(--bg-2); border: 1px solid var(--border); border-radius: 8px; padding: 0.7rem 1rem; overflow-wrap: anywhere; }
 .pay-coin { font-weight: 800; min-width: 3.5rem; color: var(--accent); }
 .error-actions { display: flex; gap: 0.7rem; justify-content: center; flex-wrap: wrap; }
+.danger-zone { border-color: rgba(192, 24, 41, 0.35); }
+.danger-zone h2 { color: var(--danger); }
+.panel-form-inline { margin-top: 1rem; display: block; }
+
+/* ---------- FAQ & changelog ---------- */
+.faq-list { display: flex; flex-direction: column; gap: 0.6rem; margin: 1.6rem 0 2rem; }
+.faq-item {
+  background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius);
+  padding: 0; box-shadow: var(--shadow-sm);
+}
+.faq-item summary {
+  cursor: pointer; font-weight: 700; padding: 1rem 1.3rem;
+  list-style-position: inside;
+}
+.faq-item summary:hover { color: var(--accent); }
+.faq-item[open] summary { border-bottom: 1px solid var(--border); }
+.faq-item p { padding: 0.9rem 1.3rem 1.1rem; color: var(--text-soft); }
+.release { margin: 2rem 0; }
+.release h2 { font-size: 1.2rem; margin-bottom: 0.2rem; }
+.release-date { font-size: 0.85rem; margin-bottom: 0.6rem; }
+.release ul { padding-left: 1.3rem; color: var(--text-soft); }
+.release li { margin: 0.3rem 0; }
 
 /* Account-switch notice on the login page */
 .switch-note {
@@ -702,6 +733,10 @@ tbody tr.row-banned:hover td { background: #f8e7e9; }
 .tag-ip_autoban { background: #f4d5d8; color: var(--danger); }
 .tag-signup_surge_blocked { background: #f0eade; color: var(--warn); }
 .tag-post_reported { background: #f0eade; color: var(--warn); }
+.tag-email_changed { background: #e1e7f6; color: var(--accent); }
+.tag-account_deleted { background: #e8eaee; color: var(--muted); }
+[data-theme="dark"] .tag-email_changed { background: var(--accent-soft); color: var(--accent); }
+[data-theme="dark"] .tag-account_deleted { background: var(--panel-2); color: var(--muted); }
 .tag-report-open { background: #f4d5d8; color: var(--danger); }
 .tag-report-resolved { background: #e2efe9; color: var(--success); }
 [data-theme="dark"] .tag-post_reported { background: rgba(224, 168, 60, 0.18); color: var(--warn); }

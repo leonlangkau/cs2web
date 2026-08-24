@@ -57,14 +57,32 @@ Copy `.dev.vars.example` to `.dev.vars` and set `CAPTCHA_SECRET` and
   CAPTCHA failure, terms acceptance and every admin action are recorded with IP,
   user agent and timestamp
 
+### Accounts & tiers
+- Access tiers `user < paid < developer < trial_admin < admin`; the forum and
+  download are Paid+ benefits, staff tiers unlock the admin panel
+- `/profile`: tier + loader license, change password/email, per-session revoke,
+  sign-out-everywhere, self-serve account deletion
+- `/upgrade`: env-configurable crypto checkout (honest "coming soon" until set)
+- Loader API: `POST /api/loader/auth` (username+password → tier + signed
+  license) and `POST /api/loader/verify` (server-side check, live tier)
+
 ### Forum
 - Categories → threads → replies, with views, pinning, locking and pagination
+- Search, member profiles (`/u/name`), live shoutbox, post editing (30-minute
+  author window, staff anytime, edits marked), member reports
 - Deleting a user **preserves their threads and replies**, reattributed to a
   reserved `[deleted]` account
 
-### Admin backend (`/admin`, hidden as 404 for non-admins)
-- Dashboard, user management (ban/unban, promote/demote, delete), filterable IP
-  log viewer, forum moderation
+### Admin backend (`/admin`, hidden as 404 for non-staff)
+- Dashboard (+ site-wide announcement banner), user management (ban/unban,
+  tier changes, delete), filterable IP log viewer with IP bans, report queue,
+  forum moderation
+- Admin accounts' IPs are hidden from other staff in the panel
+
+### Flood protection
+- Global per-IP burst cap on dynamic routes, temporary auto IP bans for repeat
+  offenders, and a site-wide signup surge breaker — on top of Cloudflare's own
+  DDoS protection
 
 ### Bot protection
 Proof-of-work CAPTCHA in `functions/_lib/captcha.js` — no third party.
@@ -95,7 +113,11 @@ Set as `[vars]`/secrets in `wrangler.toml` / the Pages dashboard (see DEPLOY.md)
 | `CAPTCHA_SECRET` | insecure dev value | **Required** — signs CAPTCHA challenges |
 | `CAPTCHA_DIFFICULTY` | `16` | Proof-of-work leading zero bits (8–24) |
 | `PBKDF2_ITERATIONS` | `100000` | Hash cost; watch the free 10ms CPU limit |
-| `RATE_LIMIT_*` | `10`/`5`/`6`/`30` | login / signup / post / download per window |
+| `RATE_LIMIT_*` | see wrangler.toml | login / signup / post / download / shout / report / burst / flood |
+| `AUTO_IP_BAN_MINUTES` | `60` | How long automatic flood bans last |
+| `SIGNUP_SURGE_LIMIT` | `30` | Site-wide signups per 10 min before registration pauses |
+| `CRYPTO_PAY_URL` / `CRYPTO_PAY_ADDRESSES` / `PAID_PRICE` | unset | Upgrade-page checkout config (page shows "coming soon" until set) |
+| `LICENSE_SECRET` | falls back to `CAPTCHA_SECRET` | Signs loader license tokens |
 | `COMPANY_*` | placeholders | Registered entity on the legal pages |
 | `TRUST_PROXY` | unset | Non-Cloudflare proxies only |
 

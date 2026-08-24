@@ -2,9 +2,23 @@ import { page } from "./layout.js";
 import { esc, timeAgo } from "./util.js";
 import { TIER_LABELS, normalizeTier } from "../tiers.js";
 
-function profile(ctx, { account, stats, license, isPaid }) {
+function profile(ctx, { account, stats, license, isPaid, sessions = [], currentSessionId, isAdminAccount = false }) {
   const csrf = `<input type="hidden" name="_csrf" value="${esc(ctx.csrfToken)}">`;
   const tier = normalizeTier(account.tier);
+
+  const sessionRows = sessions.map((s) => {
+    const current = s.id === currentSessionId;
+    return `<tr>
+      <td>${current ? '<span class="tag tag-tier-paid">THIS DEVICE</span>' : ''}</td>
+      <td class="mono">${esc(s.ip || '—')}</td>
+      <td class="muted ua-cell" title="${esc(s.user_agent || '')}">${esc(String(s.user_agent || '—').slice(0, 60))}</td>
+      <td class="muted nowrap">${esc(timeAgo(s.created_at))}</td>
+      <td class="actions-cell">
+        <form method="post" action="/profile/sessions/${esc(s.id)}/revoke" class="inline-form"
+              ${current ? 'data-confirm="This is the session you are using — revoking it signs you out here. Continue?"' : ''}>${csrf}
+          <button class="btn btn-ghost btn-xs" type="submit">${current ? 'Sign out' : 'Revoke'}</button></form>
+      </td></tr>`;
+  }).join('');
 
   const upgradeNote = isPaid
     ? ''
@@ -60,14 +74,44 @@ function profile(ctx, { account, stats, license, isPaid }) {
     </div>
 
     <div class="panel profile-card">
-      <h2>Security</h2>
-      <p class="muted">Lost a device or suspect someone else has your session? Sign out everywhere —
-        every device including this one gets logged out.</p>
-      <form method="post" action="/profile/logout-all" class="inline-form"
-            data-confirm="Sign out on every device, including this one?">${csrf}
-        <button class="btn btn-warn" type="submit">Sign out everywhere</button>
+      <h2>Change email</h2>
+      <form method="post" action="/profile/email" class="stack">${csrf}
+        <label><span>New email</span>
+          <input type="email" name="email" required maxlength="254" autocomplete="email"
+                 placeholder="${esc(account.email)}"></label>
+        <label><span>Your password</span>
+          <input type="password" name="password" required autocomplete="current-password"></label>
+        <button class="btn btn-primary" type="submit">Update email</button>
       </form>
     </div>
+
+    <div class="panel profile-card">
+      <h2>Active sessions</h2>
+      <p class="muted">Every device currently signed in to your account. Revoke anything you don't recognise.</p>
+      <div class="table-wrap"><table>
+        <thead><tr><th></th><th>IP</th><th>Browser</th><th>Signed in</th><th></th></tr></thead>
+        <tbody>${sessionRows || '<tr><td colspan="5" class="muted center">No active sessions.</td></tr>'}</tbody>
+      </table></div>
+      <form method="post" action="/profile/logout-all" class="inline-form panel-form-inline"
+            data-confirm="Sign out on every device, including this one?">${csrf}
+        <button class="btn btn-warn btn-sm" type="submit">Sign out everywhere</button>
+      </form>
+    </div>
+
+    ${isAdminAccount ? '' : `<div class="panel profile-card danger-zone">
+      <h2>Delete account</h2>
+      <p class="muted">Deleting your account is permanent. Your forum posts stay so conversations survive,
+        reattributed to <span class="mono">[deleted]</span> — everything identifying you is removed
+        (see the <a href="/privacy">Privacy Policy</a>).</p>
+      <form method="post" action="/profile/delete" class="stack"
+            data-confirm="Permanently delete your account? This cannot be undone.">${csrf}
+        <label><span>Your password</span>
+          <input type="password" name="password" required autocomplete="current-password"></label>
+        <label><span>Type <strong>DELETE</strong> to confirm</span>
+          <input type="text" name="confirm_phrase" required autocomplete="off" placeholder="DELETE"></label>
+        <button class="btn btn-danger" type="submit">Delete my account forever</button>
+      </form>
+    </div>`}
   </div>
 </div>`;
   return page(ctx, { title: 'Profile', body });

@@ -30,6 +30,19 @@ function dashboard(ctx, { stats, recentLogs, recentUsers }) {
   const card = (value, label, warn = false) =>
     `<div class="stat-card ${warn ? 'stat-card-warn' : ''}"><span class="stat-card-value">${esc(value)}</span><span class="stat-card-label">${esc(label)}</span></div>`;
 
+  const announcementForm = isFullAdmin(ctx.user) ? `
+      <div class="panel panel-spaced">
+        <form method="post" action="/admin/announcement" class="stack panel-form">
+          <h3>Site announcement</h3>
+          <p class="muted">Shown as a banner on every page until a visitor dismisses it. Leave empty and save to clear.</p>
+          <input type="hidden" name="_csrf" value="${esc(ctx.csrfToken)}">
+          <label><span>Message</span>
+            <input type="text" name="announcement" maxlength="500" value="${esc(ctx.announcement || '')}"
+                   placeholder="e.g. v1.1 is out — restart GoyHub to update!"></label>
+          <button class="btn btn-primary btn-sm" type="submit">${ctx.announcement ? 'Update' : 'Publish'}</button>
+        </form>
+      </div>` : '';
+
   const body = `
 <div class="section admin-page">
   <div class="container">
@@ -65,6 +78,7 @@ function dashboard(ctx, { stats, recentLogs, recentUsers }) {
           </tbody></table></div>
       </div>
     </div>
+    ${announcementForm}
   </div>
 </div>`;
   return page(ctx, { title: 'Admin · Dashboard', body });

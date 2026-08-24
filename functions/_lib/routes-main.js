@@ -1,5 +1,6 @@
 import * as views from "./views/site.js";
 import * as legalViews from "./views/legal.js";
+import * as contentViews from "./views/content.js";
 import installer from "./installer-data.js";
 import * as captcha from "./captcha.js";
 import * as limits from "./limits.js";
@@ -87,6 +88,24 @@ function register(app) {
 
   app.get('/terms', (c) => c.html(legalViews.terms(c.get('view'))));
   app.get('/privacy', (c) => c.html(legalViews.privacy(c.get('view'))));
+  app.get('/faq', (c) => c.html(contentViews.faq(c.get('view'))));
+  app.get('/changelog', (c) => c.html(contentViews.changelog(c.get('view'))));
+
+  // SEO plumbing. Only genuinely public pages belong in the sitemap — the
+  // forum is members-only and must not be advertised to crawlers.
+  app.get('/robots.txt', (c) => {
+    const origin = new URL(c.req.url).origin;
+    return c.text(`User-agent: *\nAllow: /\nDisallow: /admin\nDisallow: /api/\n\nSitemap: ${origin}/sitemap.xml\n`);
+  });
+
+  app.get('/sitemap.xml', (c) => {
+    const origin = new URL(c.req.url).origin;
+    const urls = ['/', '/download', '/upgrade', '/faq', '/changelog', '/terms', '/privacy', '/auth/signup', '/auth/login'];
+    const xml = `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n`
+      + urls.map((u) => `  <url><loc>${origin}${u}</loc></url>`).join('\n')
+      + `\n</urlset>\n`;
+    return new Response(xml, { headers: { 'Content-Type': 'application/xml; charset=UTF-8' } });
+  });
 
   app.post('/legal/accept', async (c) => {
     const body = await formBody(c);

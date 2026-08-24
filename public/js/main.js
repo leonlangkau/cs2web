@@ -14,6 +14,28 @@
     });
   }
 
+  /* ---------- Announcement banner (dismiss persists per message) ---------- */
+  var announcement = document.getElementById('announcement');
+  if (announcement) {
+    var annText = announcement.textContent.trim();
+    var annKey = 'gh-announcement-dismissed';
+    var hash = 0;
+    for (var ai = 0; ai < annText.length; ai++) {
+      hash = ((hash << 5) - hash + annText.charCodeAt(ai)) | 0;
+    }
+    var annHash = String(hash);
+    try {
+      if (localStorage.getItem(annKey) === annHash) announcement.remove();
+    } catch (e) { /* storage blocked — banner just stays visible */ }
+    var dismissBtn = document.getElementById('announcement-dismiss');
+    if (dismissBtn) {
+      dismissBtn.addEventListener('click', function () {
+        announcement.remove();
+        try { localStorage.setItem(annKey, annHash); } catch (e) { /* ignore */ }
+      });
+    }
+  }
+
   /* ---------- Auto-dismiss flash messages ---------- */
   var flash = document.querySelector('.flash');
   if (flash) {

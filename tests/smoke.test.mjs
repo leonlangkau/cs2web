@@ -759,6 +759,112 @@ test("signup surge breaker pauses registration when site-wide signups spike", as
   assert.ok(await db.get("SELECT id FROM ip_logs WHERE event = 'signup_surge_blocked'"), "surge block audited");
 });
 
+test("content & announcements: FAQ, changelog, robots/sitemap, admin banner", async () => {
+  const { app, db } = await buildTestApp(ENV);
+  const anon = makeClient(app);
+  const admin = makeClient(app);
+
+  let html = await (await anon.get("/faq")).text();
+  assert.ok(html.includes("Frequently asked questions") && html.includes("VAC"), "FAQ renders");
+  html = await (await anon.get("/changelog")).text();
+  assert.ok(html.includes("Changelog") && html.includes("v1.0.0"), "changelog renders");
+
+  let res = await anon.get("/robots.txt");
+  const robots = await res.text();
+  assert.ok(res.status === 200 && robots.includes("Disallow: /admin") && robots.includes("Sitemap: http://local/sitemap.xml"),
+    "robots.txt disallows the admin area and points at the sitemap");
+  res = await anon.get("/sitemap.xml");
+  const sitemap = await res.text();
+  assert.ok(res.status === 200 && sitemap.includes("<loc>http://local/download</loc>"), "sitemap lists public pages");
+  assert.ok(!sitemap.includes("/forum"), "members-only forum is not advertised to crawlers");
+
+  // Announcement: full-admin sets it, every page shows it, staff below admin cannot.
+  await admin.get("/auth/login");
+  await admin.post("/auth/login", { identifier: "admin", password: "admin-test-password-1", next: "/admin" });
+  await admin.get("/admin");
+  res = await admin.post("/admin/announcement", { announcement: "Maintenance window at midnight UTC" });
+  assert.equal(res.status, 302, "announcement saved");
+  html = await (await anon.get("/faq")).text();
+  assert.ok(html.includes("Maintenance window at midnight UTC"), "banner shows on every page");
+
+  const dev = makeClient(app);
+  await dev.get("/auth/signup");
+  await dev.post("/auth/signup", { username: "banner_dev", email: "bd@example.com", password: "supersecret1", confirm: "supersecret1", ...(await solveCaptcha(dev)) });
+  await db.run("UPDATE users SET tier = 'developer' WHERE username = 'banner_dev'");
+  await dev.get("/admin");
+  assert.equal((await dev.post("/admin/announcement", { announcement: "hax" })).status, 404,
+    "staff below full admin cannot set the announcement");
+
+  await admin.get("/admin");
+  await admin.post("/admin/announcement", { announcement: "" });
+  html = await (await anon.get("/faq")).text();
+  assert.ok(!html.includes("Maintenance window"), "empty save clears the banner");
+});
+
+test("account extras: email change, per-session revoke, self-serve deletion", async () => {
+  const { app, db } = await buildTestApp(ENV);
+  const phone = makeClient(app);
+  const laptop = makeClient(app);
+
+  await phone.get("/auth/signup");
+  await phone.post("/auth/signup", { username: "extra_user", email: "extra@example.com", password: "supersecret1", confirm: "supersecret1", ...(await solveCaptcha(phone)) });
+  await laptop.get("/auth/login");
+  await laptop.post("/auth/login", { identifier: "extra_user", password: "supersecret1", next: "/" });
+
+  // Email change: wrong password rejected; duplicate rejected; success audited.
+  await phone.get("/profile");
+  await phone.post("/profile/email", { email: "new@example.com", password: "wrong" });
+  assert.equal((await db.get("SELECT email FROM users WHERE username = 'extra_user'")).email, "extra@example.com", "wrong password keeps old email");
+  await phone.get("/profile");
+  await phone.post("/profile/email", { email: "admin@goyhub.local", password: "supersecret1" });
+  assert.equal((await db.get("SELECT email FROM users WHERE username = 'extra_user'")).email, "extra@example.com", "taken email rejected");
+  await phone.get("/profile");
+  await phone.post("/profile/email", { email: "new@example.com", password: "supersecret1" });
+  assert.equal((await db.get("SELECT email FROM users WHERE username = 'extra_user'")).email, "new@example.com", "email updated");
+  assert.ok(await db.get("SELECT id FROM ip_logs WHERE event = 'email_changed' AND username = 'extra_user'"), "email change audited");
+
+  // Session management: the profile lists both devices; revoking the laptop's
+  // session signs out only the laptop.
+  const uid = (await db.get("SELECT id FROM users WHERE username = 'extra_user'")).id;
+  const sessions = await db.all("SELECT id FROM sessions WHERE user_id = ? ORDER BY id", uid);
+  assert.equal(sessions.length, 2, "two active sessions");
+  const html = await (await phone.get("/profile")).text();
+  assert.ok(html.includes("THIS DEVICE"), "profile marks the current session");
+  // The phone signed up first, so sessions[1] (higher id) is the laptop's —
+  // the phone revokes it and stays signed in itself.
+  await phone.post(`/profile/sessions/${sessions[1].id}/revoke`);
+  const left = await db.all("SELECT id FROM sessions WHERE user_id = ?", uid);
+  assert.equal(left.length, 1, "one session revoked");
+  assert.equal((await phone.get("/profile")).status, 200, "revoking another device keeps this one signed in");
+  assert.equal((await laptop.get("/profile")).status, 302, "revoked device is signed out");
+  const active = phone;
+
+  // Self-serve deletion: wrong phrase refused, then full deletion reattributes content.
+  let res = await active.post("/forum/new", { category: "general", title: "Doomed by self-delete", body: "Preserve me." });
+  assert.equal(res.status, 403, "free tier can't post — upgrade first");
+  await db.run("UPDATE users SET tier = 'paid' WHERE id = ?", uid);
+  res = await active.post("/forum/new", { category: "general", title: "Doomed by self-delete", body: "Preserve me." });
+  const threadId = res.headers.get("location").split("/").pop();
+
+  await active.post("/profile/delete", { password: "supersecret1", confirm_phrase: "nope" });
+  assert.ok(await db.get("SELECT id FROM users WHERE id = ?", uid), "wrong confirmation phrase keeps the account");
+  res = await active.post("/profile/delete", { password: "supersecret1", confirm_phrase: "DELETE" });
+  assert.ok(res.status === 302 && res.headers.get("location") === "/", "account deleted");
+  assert.ok(!(await db.get("SELECT id FROM users WHERE id = ?", uid)), "user row gone");
+  const adminC = makeClient(app);
+  await adminC.get("/auth/login");
+  await adminC.post("/auth/login", { identifier: "admin", password: "admin-test-password-1", next: "/" });
+  const threadHtml = await (await adminC.get(`/forum/t/${threadId}`)).text();
+  assert.ok(threadHtml.includes("Preserve me.") && threadHtml.includes("[deleted]"), "content survives, reattributed");
+  assert.ok(await db.get("SELECT id FROM ip_logs WHERE event = 'account_deleted'"), "deletion audited");
+
+  // The seeded admin cannot self-delete.
+  await adminC.get("/profile");
+  res = await adminC.post("/profile/delete", { password: "admin-test-password-1", confirm_phrase: "DELETE" });
+  assert.equal(res.status, 302);
+  assert.ok(await db.get("SELECT id FROM users WHERE username = 'admin'"), "seeded admin cannot self-delete");
+});
+
 test("admin IP privacy: admins' addresses are hidden from other staff in the panel", async () => {
   const { app, db } = await buildTestApp(ENV);
   const admin = makeClient(app);

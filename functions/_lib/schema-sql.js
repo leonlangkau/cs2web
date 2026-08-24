@@ -84,6 +84,14 @@ CREATE TABLE IF NOT EXISTS posts (
 );
 CREATE INDEX IF NOT EXISTS idx_posts_thread ON posts(thread_id);
 
+-- Small key/value store for admin-editable site settings (announcement
+-- banner, etc.) — avoids a redeploy for content-level changes.
+CREATE TABLE IF NOT EXISTS settings (
+  key        TEXT PRIMARY KEY,
+  value      TEXT NOT NULL,
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 -- Member reports on posts, feeding the admin panel's moderation queue.
 CREATE TABLE IF NOT EXISTS reports (
   id          INTEGER PRIMARY KEY AUTOINCREMENT,

@@ -5,7 +5,9 @@ import {
   audit, formBody, setFlash,
 } from "./middleware.js";
 import { issueLicense } from "./license.js";
-import { meetsTier } from "./tiers.js";
+import { meetsTier, isFullAdmin } from "./tiers.js";
+import { EMAIL_RE } from "./routes-auth.js";
+import { DELETED_USERNAME, deletedUserId } from "./bootstrap.js";
 
 function register(app) {
   app.get('/profile', async (c) => {
@@ -24,12 +26,109 @@ function register(app) {
       'SELECT username, email, tier, created_at, last_login_at, last_login_ip FROM users WHERE id = ?',
       user.id
     );
+    const sessions = await db.all(
+      `SELECT id, ip, user_agent, created_at FROM sessions
+       WHERE user_id = ? AND expires_at > datetime('now') ORDER BY id DESC LIMIT 20`,
+      user.id
+    );
     // The license is shown to every signed-in member — the loader needs a
     // verifiable "this account is Free" just as much as "this is Paid".
     const license = await issueLicense(user, c.get('cfg'));
     return c.html(views.profile(c.get('view'), {
       account, stats, license, isPaid: meetsTier(user, 'paid'),
+      sessions, currentSessionId: c.get('sessionId'),
+      isAdminAccount: isFullAdmin(user),
     }));
+  });
+
+  app.post('/profile/email', async (c) => {
+    const gate = requireAuth(c);
+    if (gate) return gate;
+    const db = c.get('db');
+    const user = c.get('user');
+    const body = await formBody(c);
+    const password = String(body.password || '');
+    const email = String(body.email || '').trim();
+
+    const row = await db.get('SELECT password_hash, email FROM users WHERE id = ?', user.id);
+    if (!(await verifyPassword(password, row.password_hash))) {
+      setFlash(c, 'error', 'Your password was incorrect.');
+      return c.redirect('/profile', 302);
+    }
+    if (!EMAIL_RE.test(email) || email.length > 254) {
+      setFlash(c, 'error', 'Enter a valid email address.');
+      return c.redirect('/profile', 302);
+    }
+    const taken = await db.get('SELECT id FROM users WHERE email = ? AND id != ?', email, user.id);
+    if (taken) {
+      setFlash(c, 'error', 'That email is already in use by another account.');
+      return c.redirect('/profile', 302);
+    }
+    await db.run('UPDATE users SET email = ? WHERE id = ?', email, user.id);
+    await audit(c, 'email_changed', { userId: user.id, username: user.username, detail: `${row.email} -> ${email}` });
+    setFlash(c, 'success', 'Email updated.');
+    return c.redirect('/profile', 302);
+  });
+
+  // Revoke one session (a lost device) without signing out everywhere.
+  app.post('/profile/sessions/:id/revoke', async (c) => {
+    const gate = requireAuth(c);
+    if (gate) return gate;
+    const db = c.get('db');
+    const user = c.get('user');
+    const id = Number.parseInt(c.req.param('id'), 10);
+    const session = Number.isInteger(id)
+      ? await db.get('SELECT id FROM sessions WHERE id = ? AND user_id = ?', id, user.id)
+      : null;
+    if (!session) {
+      setFlash(c, 'error', 'No such session.');
+      return c.redirect('/profile', 302);
+    }
+    await db.run('DELETE FROM sessions WHERE id = ?', session.id);
+    if (session.id === c.get('sessionId')) {
+      // They revoked the session they're on — that's a logout.
+      await destroySession(c);
+      return c.redirect('/auth/login', 302);
+    }
+    setFlash(c, 'success', 'Session revoked — that device is signed out.');
+    return c.redirect('/profile', 302);
+  });
+
+  // Self-serve account deletion (Privacy Policy s9): content is reattributed
+  // to [deleted], everything identifying the member is removed. The seeded
+  // admin can't delete itself here — ADMIN_PASSWORD would just recreate it,
+  // and a site must never lose its last admin by accident.
+  app.post('/profile/delete', async (c) => {
+    const gate = requireAuth(c);
+    if (gate) return gate;
+    const db = c.get('db');
+    const user = c.get('user');
+    const body = await formBody(c);
+
+    if (isFullAdmin(user)) {
+      setFlash(c, 'error', 'Admin accounts cannot self-delete. Demote the account first (or have another admin delete it).');
+      return c.redirect('/profile', 302);
+    }
+    const row = await db.get('SELECT password_hash FROM users WHERE id = ?', user.id);
+    if (!(await verifyPassword(String(body.password || ''), row.password_hash))) {
+      setFlash(c, 'error', 'Your password was incorrect.');
+      return c.redirect('/profile', 302);
+    }
+    if (String(body.confirm_phrase || '').trim().toUpperCase() !== 'DELETE') {
+      setFlash(c, 'error', 'Type DELETE in the confirmation box to close your account.');
+      return c.redirect('/profile', 302);
+    }
+
+    await audit(c, 'account_deleted', { userId: user.id, username: user.username, detail: 'self-service deletion' });
+    const placeholder = await deletedUserId(db);
+    await db.run('UPDATE threads SET user_id = ? WHERE user_id = ?', placeholder, user.id);
+    await db.run('UPDATE posts SET user_id = ? WHERE user_id = ?', placeholder, user.id);
+    await db.run('DELETE FROM shouts WHERE user_id = ?', user.id);
+    await destroyUserSessions(db, user.id);
+    await db.run('DELETE FROM users WHERE id = ?', user.id);
+    await destroySession(c); // clears the cookie; the session row is already gone
+    setFlash(c, 'success', `Your account has been deleted. Your posts remain, attributed to ${DELETED_USERNAME}.`);
+    return c.redirect('/', 302);
   });
 
   app.post('/profile/password', async (c) => {

@@ -78,7 +78,7 @@ function footer(ctx) {
       <p class="footer-blurb">The all-in-one CS2 companion. Track your stats, manage your configs, and play at your peak.</p>
     </div>
     <nav aria-label="Product"><h3>Product</h3>
-      <a href="/download">Download</a><a href="/#features">Features</a><a href="/#stats">Stats</a></nav>
+      <a href="/download">Download</a><a href="/#features">Features</a><a href="/changelog">Changelog</a><a href="/faq">FAQ</a></nav>
     <nav aria-label="Community"><h3>Community</h3>
       <a href="/forum">Forum</a><a href="/forum/c/support">Support</a><a href="/forum/c/configs">Configs &amp; Setups</a></nav>
     <nav aria-label="Account"><h3>Account</h3>${accountLinks}</nav>
@@ -101,6 +101,14 @@ function footer(ctx) {
  */
 function page(ctx, { title, body, bodyClass = '', scripts = [] } = {}) {
   const fullTitle = title ? `${title} · ${ctx.appName}` : `${ctx.appName} — The Ultimate CS2 Companion`;
+  const announcement = ctx.announcement
+    ? `<div class="announcement" id="announcement" role="status">
+        <div class="container announcement-inner">
+          <span>📣 ${esc(ctx.announcement)}</span>
+          <button type="button" class="announcement-dismiss" id="announcement-dismiss" aria-label="Dismiss announcement">✕</button>
+        </div>
+      </div>`
+    : '';
   const flash = ctx.flash
     ? `<div class="flash flash-${ctx.flash.type === 'error' ? 'error' : 'success'}" role="status"><div class="container">${esc(ctx.flash.message)}</div></div>`
     : '';
@@ -121,6 +129,7 @@ function page(ctx, { title, body, bodyClass = '', scripts = [] } = {}) {
 <body class="${esc(bodyClass)}">
 <a class="skip-link" href="#main">Skip to content</a>
 ${nav(ctx)}
+${announcement}
 ${flash}
 ${ctx.needsTermsGate ? termsGate(ctx) : ''}
 <main id="main">

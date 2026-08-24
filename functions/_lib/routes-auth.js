@@ -6,7 +6,7 @@ import { createSession, destroySession, audit, clientIp, formBody, setFlash, } f
 import { tooMany } from "./routes-main.js";
 
 const USERNAME_RE = /^[A-Za-z0-9_]{3,20}$/;
-const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/; // also used by the profile email-change flow
 const RESERVED_USERNAMES = new Set([
   'admin', 'administrator', 'moderator', 'system', 'goyhub', 'root', 'support', 'staff',
 ]);
@@ -179,4 +179,4 @@ function register(app) {
   });
 }
 
-export { register };
+export { register, EMAIL_RE };

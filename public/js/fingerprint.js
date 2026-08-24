@@ -97,7 +97,11 @@
     headers: { 'Content-Type': 'application/json' },
     credentials: 'same-origin',
     body: JSON.stringify(payload),
-  }).then(function () {
-    try { sessionStorage.setItem(SENT_KEY, '1'); } catch (e) { /* ignore */ }
-  }).catch(function () { /* offline/blocked — next page load in this session retries */ });
+  }).then(function (r) {
+    // Only suppress the retry on a successful send; a 5xx/flood/CSRF rejection
+    // should not permanently silence this session.
+    if (r && r.ok) {
+      try { sessionStorage.setItem(SENT_KEY, '1'); } catch (e) { /* ignore */ }
+    }
+  }).catch(function () { /* offline/blocked: next page load in this session retries */ });
 })();

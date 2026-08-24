@@ -134,10 +134,10 @@
               input.value = '';
               pollShouts();
             } else {
-              window.alert((result.data && result.data.error) || 'Could not post — try again.');
+              window.alert((result.data && result.data.error) || 'Could not post. Try again.');
             }
           })
-          .catch(function () { window.alert('Network error — try again.'); })
+          .catch(function () { window.alert('Network error. Try again.'); })
           .then(function () { btn.disabled = false; input.focus(); });
       });
     }

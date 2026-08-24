@@ -14,8 +14,8 @@ import { tooMany } from "./routes-main.js";
 const USERNAME_RE = /^[A-Za-z0-9_]{3,20}$/;
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/; // also used by the profile email-change flow
 const RESERVED_USERNAMES = new Set([
-  'admin', 'administrator', 'moderator', 'system', 'goyhub', 'root', 'support', 'staff',
-  'goy', 'goyim', // seeded brand accounts (UID 1 / UID 0)
+  'admin', 'administrator', 'moderator', 'system', 'aimhub', 'goyhub', 'root', 'support', 'staff',
+  'goy', 'goyim', // seeded brand accounts (UID 1 / UID 0); goyhub/goy/goyim kept so pre-rebrand seeds stay guarded
 ]);
 
 /**
@@ -193,7 +193,7 @@ function register(app) {
           + `Someone (hopefully you) asked to reset the password for this AimHub account. Open:\n\n`
           + `${origin}/auth/reset/${raw}\n\n`
           + `The link works once and expires in 1 hour. If you didn't ask for this, ignore this email; `
-          + `your password is unchanged.\n\n— AimHub`,
+          + `your password is unchanged.\n\n- AimHub`,
       });
     }
     setFlash(c, 'success', 'If that account exists, a reset link is on its way to its email address.');

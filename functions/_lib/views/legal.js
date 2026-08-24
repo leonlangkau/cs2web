@@ -93,7 +93,7 @@ function terms(ctx) {
       us. You accept them by any of the following, whichever happens first:</p>
       <ul>
         <li>selecting <strong>"I accept"</strong> in the notice shown when you first open the Service;</li>
-        <li>creating a AimHub account;</li>
+        <li>creating an AimHub account;</li>
         <li>downloading, installing or using the AimHub application; or</li>
         <li>otherwise continuing to use the Service.</li>
       </ul>
@@ -102,7 +102,7 @@ function terms(ctx) {
       Terms, you must not use the Service.</p>` },
 
     { id: 's3', title: 'Eligibility', html: `
-      <p>You must be at least ${esc(c.minimumAge)} years old to create a AimHub account. If the law where you
+      <p>You must be at least ${esc(c.minimumAge)} years old to create an AimHub account. If the law where you
       live sets a higher minimum age for consenting to online services or to the processing of your personal
       data, you must meet that higher age instead.</p>
       <p>By creating an account you represent that you meet these requirements, that the information you give

@@ -78,7 +78,7 @@
   --panel: #111b36;
   --panel-2: #16213f;
   --border: #26314f;
-  --border-strong: #48567c;
+  --border-strong: #63739e; /* 3.97:1 on --bg, 3.63:1 on --panel - clears SC 1.4.11 for control boundaries */
   --text: #eef2fb;
   --text-soft: #c7d0e6;
   --muted: #8b96b8;
@@ -103,7 +103,7 @@
     --panel: #111b36;
     --panel-2: #16213f;
     --border: #26314f;
-    --border-strong: #48567c;
+    --border-strong: #63739e; /* 3.97:1 on --bg, 3.63:1 on --panel - clears SC 1.4.11 for control boundaries */
     --text: #eef2fb;
     --text-soft: #c7d0e6;
     --muted: #8b96b8;
@@ -121,6 +121,16 @@
     --shadow-accent: 0 8px 24px rgba(92, 139, 255, 0.3);
     color-scheme: dark;
   }
+  /* No-JS dark fallback: the [data-theme="dark"] ink overrides below only fire
+     once boot.js stamps the attribute. Repeat them here (guarded so an explicit
+     light choice still wins) so a dark-OS visitor without scripting also gets
+     navy ink on the light-blue accent instead of low-contrast white. */
+  :root:not([data-theme="light"]):not([data-theme="dark"]) .btn-primary,
+  :root:not([data-theme="light"]):not([data-theme="dark"]) .btn-primary:hover,
+  :root:not([data-theme="light"]):not([data-theme="dark"]) .announcement,
+  :root:not([data-theme="light"]):not([data-theme="dark"]) .announcement-dismiss,
+  :root:not([data-theme="light"]):not([data-theme="dark"]) .skip-link,
+  :root:not([data-theme="light"]):not([data-theme="dark"]) .page.current { color: #0a1226; }
 }
 
 * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -332,7 +342,6 @@ a.nav-user:hover { color: var(--accent); }
 
 /* ---------- Sections ---------- */
 .section { padding: 5rem 0; }
-.section-kicker { font-family: var(--mono); color: var(--accent); letter-spacing: 0.22em; font-size: 0.8rem; margin-bottom: 0.7rem; }
 .section-title { font-size: clamp(1.7rem, 3.6vw, 2.5rem); font-weight: 700; letter-spacing: -0.02em; line-height: 1.12; margin-bottom: 1rem; text-wrap: balance; }
 
 /* Reveal on scroll - hidden state only applies when JS actually runs (html.js
@@ -603,7 +612,8 @@ textarea { resize: vertical; min-height: 90px; }
   transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }
 .thread-row:hover { border-color: var(--accent); color: var(--text); box-shadow: var(--shadow); }
-.thread-flags:empty { display: none; }
+/* Search results reuse the row chrome but carry only the main column. */
+.thread-row--flush { grid-template-columns: 1fr; }
 .thread-title { font-weight: 700; display: block; }
 .thread-nums { display: flex; flex-direction: column; font-size: 0.83rem; color: var(--muted); text-align: right; }
 .thread-nums strong { color: var(--text); }
@@ -623,6 +633,7 @@ textarea { resize: vertical; min-height: 90px; }
 .tag-device { background: color-mix(in srgb, var(--muted) 14%, var(--panel)); color: var(--muted); }
 
 /* Tier badges */
+.tag-tier-user { background: color-mix(in srgb, var(--muted) 14%, var(--panel)); color: var(--muted); }
 .tag-tier-paid { background: color-mix(in srgb, var(--success) 12%, var(--panel)); color: var(--success); }
 .tag-tier-developer { background: color-mix(in srgb, var(--tier-dev) 14%, var(--panel)); color: var(--tier-dev); }
 .tag-tier-trial_admin { background: color-mix(in srgb, var(--warn) 14%, var(--panel)); color: var(--warn); }
@@ -818,16 +829,19 @@ tbody tr.row-banned:hover td { background: color-mix(in srgb, var(--danger) 11%,
 .tag-login_failed { background: color-mix(in srgb, var(--danger) 12%, var(--panel)); color: var(--danger); }
 .tag-login_blocked { background: color-mix(in srgb, var(--danger) 18%, var(--panel)); color: var(--danger); }
 .tag-logout { background: color-mix(in srgb, var(--muted) 14%, var(--panel)); color: var(--muted); }
-.tag-download { background: color-mix(in srgb, var(--accent) 16%, var(--panel)); color: var(--accent); }
+.tag-download { background: color-mix(in srgb, var(--accent) 10%, var(--panel)); color: var(--accent); }
 .tag-admin_action { background: color-mix(in srgb, var(--warn) 14%, var(--panel)); color: var(--warn); }
 .tag-captcha_failed { background: color-mix(in srgb, var(--warn) 14%, var(--panel)); color: var(--warn); }
 .tag-terms_accepted { background: color-mix(in srgb, var(--success) 12%, var(--panel)); color: var(--success); }
 .tag-password_changed { background: color-mix(in srgb, var(--accent) 12%, var(--panel)); color: var(--accent); }
-.tag-loader_auth { background: color-mix(in srgb, var(--accent) 16%, var(--panel)); color: var(--accent); }
+.tag-loader_auth { background: color-mix(in srgb, var(--accent) 10%, var(--panel)); color: var(--accent); }
 .tag-loader_auth_failed { background: color-mix(in srgb, var(--danger) 12%, var(--panel)); color: var(--danger); }
 .tag-ip_autoban { background: color-mix(in srgb, var(--danger) 18%, var(--panel)); color: var(--danger); }
 .tag-signup_surge_blocked { background: color-mix(in srgb, var(--warn) 14%, var(--panel)); color: var(--warn); }
 .tag-post_reported { background: color-mix(in srgb, var(--warn) 14%, var(--panel)); color: var(--warn); }
+.tag-email_verified { background: color-mix(in srgb, var(--success) 12%, var(--panel)); color: var(--success); }
+.tag-password_reset { background: color-mix(in srgb, var(--accent) 12%, var(--panel)); color: var(--accent); }
+.tag-password_reset_requested { background: color-mix(in srgb, var(--warn) 14%, var(--panel)); color: var(--warn); }
 .tag-email_changed { background: color-mix(in srgb, var(--accent) 12%, var(--panel)); color: var(--accent); }
 .tag-account_deleted { background: color-mix(in srgb, var(--muted) 14%, var(--panel)); color: var(--muted); }
 .tag-shout_deleted { background: color-mix(in srgb, var(--muted) 14%, var(--panel)); color: var(--muted); }

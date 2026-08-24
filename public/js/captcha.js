@@ -95,7 +95,7 @@
   }
 
   // Exposed so the test suite can check this matches Node's SHA-256.
-  window.__goyhubSha256 = sha256hex;
+  window.__aimhubSha256 = sha256hex;
 
   function init(box) {
     var form = box.closest('form');

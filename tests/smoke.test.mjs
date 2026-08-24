@@ -1166,6 +1166,34 @@ test("forum: title rename, category edit, shout delete + 3/min limit, /buy alias
   res = await admin.post(`/forum/shouts/${shout.id}/delete`);
   assert.equal(res.status, 302, "staff deletes a shout");
   assert.ok(!(await db.get("SELECT id FROM shouts WHERE id = ?", shout.id)), "shout gone");
+  assert.equal(
+    (await db.get("SELECT event FROM ip_logs WHERE detail LIKE 'deleted shout%' ORDER BY id DESC LIMIT 1")).event,
+    "shout_deleted", "shout delete logs under its own event, not admin_action"
+  );
+
+  // Purge: staff-only, clears every shout in one go, audited as shout_deleted.
+  for (let i = 1; i <= 2; i += 1) {
+    res = await other.post("/forum/shoutbox", { body: `purge fodder ${i}` });
+    assert.equal(res.status, 302, `purge fodder ${i} posted`);
+  }
+  res = await other.post("/forum/shouts/purge");
+  assert.equal(res.status, 404, "non-staff cannot purge the shoutbox");
+  assert.ok((await db.get("SELECT COUNT(*) AS n FROM shouts")).n > 0, "shouts survive a non-staff purge attempt");
+  res = await admin.post("/forum/shouts/purge");
+  assert.equal(res.status, 302, "staff purges the shoutbox");
+  assert.equal((await db.get("SELECT COUNT(*) AS n FROM shouts")).n, 0, "all shouts gone");
+  assert.ok(
+    await db.get("SELECT id FROM ip_logs WHERE event = 'shout_deleted' AND detail LIKE 'purged the shoutbox%' ORDER BY id DESC LIMIT 1"),
+    "purge is audited"
+  );
+
+  // "Important only" IP-log filter hides shout-deletion noise but keeps real
+  // moderation events (the category edit above logged as admin_action). The
+  // event-type <select> always lists every event name as an <option>, so
+  // check the per-row "tag-<event>" class rather than raw substring text.
+  const importantHtml = await (await admin.get("/admin/logs?important=1")).text();
+  assert.ok(!importantHtml.includes("tag-shout_deleted"), "important-only filter hides shout deletions");
+  assert.ok(importantHtml.includes("tag-admin_action"), "important-only filter keeps real moderation events");
 
   // /buy is the upgrade page.
   const buyHtml = await (await other.get("/buy")).text();

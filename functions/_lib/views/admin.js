@@ -189,7 +189,7 @@ function users(ctx, { users: rows, q, page: current, pages, total, tiers, tierLa
   return page(ctx, { title: 'Admin · Users', body });
 }
 
-function logs(ctx, { logs: rows, q, event, events, page: current, pages, total, ipBans }) {
+function logs(ctx, { logs: rows, q, event, events, important, page: current, pages, total, ipBans }) {
   const csrf = `<input type="hidden" name="_csrf" value="${esc(ctx.csrfToken)}">`;
   const banForm = (ip) => `<form method="post" action="/admin/ip-bans/${encodeURIComponent(ip)}/unban" class="inline-form"
         data-confirm="Unban ${esc(ip)}?">${csrf}
@@ -206,8 +206,11 @@ function logs(ctx, { logs: rows, q, event, events, page: current, pages, total, 
       </select>
       <input type="search" name="q" value="${esc(q)}" aria-label="Filter logs by IP, username or detail"
              placeholder="Filter by IP, username or detail…">
+      <label class="filter-check" title="Hide routine/high-volume events (logins, downloads, shout deletions…)">
+        <input type="checkbox" name="important" value="1" ${important ? 'checked' : ''}> Important only
+      </label>
       <button class="btn btn-outline" type="submit">Filter</button>
-      ${q || event ? '<a class="btn btn-ghost" href="/admin/logs">Clear</a>' : ''}
+      ${q || event || important ? '<a class="btn btn-ghost" href="/admin/logs">Clear</a>' : ''}
       <span class="muted">${esc(total)} entr${total === 1 ? 'y' : 'ies'}</span>
     </form>
     <div class="panel"><div class="table-wrap"><table>
@@ -229,7 +232,7 @@ function logs(ctx, { logs: rows, q, event, events, page: current, pages, total, 
                 <input type="hidden" name="ip" value="${esc(l.ip)}">
                 <button class="btn btn-warn btn-xs" type="submit">Ban IP</button></form>`}</td></tr>`)}
       </tbody></table></div></div>
-    ${pagination(current, pages, (p) => `/admin/logs?page=${p}&event=${encodeURIComponent(event)}&q=${encodeURIComponent(q)}`)}
+    ${pagination(current, pages, (p) => `/admin/logs?page=${p}&event=${encodeURIComponent(event)}&q=${encodeURIComponent(q)}${important ? '&important=1' : ''}`)}
 
     <div class="panel panel-spaced">
       <div class="panel-head"><h2>IP bans</h2></div>

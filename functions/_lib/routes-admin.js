@@ -11,7 +11,15 @@ const USERS_PER_PAGE = 25;
 const LOG_EVENTS = ['signup', 'login', 'login_failed', 'login_blocked', 'logout', 'download',
   'admin_action', 'captcha_failed', 'terms_accepted', 'password_changed', 'loader_auth', 'loader_auth_failed',
   'ip_autoban', 'signup_surge_blocked', 'post_reported', 'email_changed', 'account_deleted',
-  'password_reset_requested', 'password_reset', 'email_verified'];
+  'password_reset_requested', 'password_reset', 'email_verified', 'shout_deleted'];
+
+// High-volume, low-signal events — routine traffic rather than something an
+// admin needs to review. Excluded by the "Important only" log filter so a
+// spree of shout deletions (or ordinary logins) doesn't bury real
+// moderation/security events. An allowlist would rot silently as new event
+// types are added; this blacklist fails safe — anything new stays visible.
+const NOISY_EVENTS = new Set(['login', 'logout', 'download', 'captcha_failed', 'terms_accepted',
+  'loader_auth', 'shout_deleted']);
 
 const IP_HIDDEN = '(hidden)';
 
@@ -354,10 +362,20 @@ function register(app) {
     const rawEvent = url.searchParams.get('event') || '';
     const event = LOG_EVENTS.includes(rawEvent) ? rawEvent : '';
     const q = String(url.searchParams.get('q') || '').trim().slice(0, 100);
+    const important = url.searchParams.get('important') === '1';
+    // A specific event already narrows the view — only apply the noise
+    // exclusion when browsing everything, so picking e.g. "shout_deleted"
+    // explicitly still works with "Important only" left checked.
+    const applyImportant = important && !event;
 
     const clauses = [];
     const params = [];
     if (event) { clauses.push('event = ?'); params.push(event); }
+    if (applyImportant) {
+      const noisy = [...NOISY_EVENTS];
+      clauses.push(`event NOT IN (${noisy.map(() => '?').join(', ')})`);
+      params.push(...noisy);
+    }
     if (q) { clauses.push('(ip LIKE ? OR username LIKE ? OR detail LIKE ?)'); params.push(`%${q}%`, `%${q}%`, `%${q}%`); }
     const where = clauses.length ? `WHERE ${clauses.join(' AND ')}` : '';
 
@@ -372,7 +390,7 @@ function register(app) {
     )).map(maskLog);
     const ipBans = await db.all('SELECT * FROM ip_bans ORDER BY created_at DESC LIMIT 100');
 
-    return c.html(views.logs(c.get('view'), { logs, q, event, events: LOG_EVENTS, page, pages, total, ipBans }));
+    return c.html(views.logs(c.get('view'), { logs, q, event, events: LOG_EVENTS, important, page, pages, total, ipBans }));
   });
 
   app.post('/admin/ip-bans', async (c) => {

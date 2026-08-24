@@ -31,6 +31,11 @@ function termsGate(ctx) {
 </div>`;
 }
 
+const THEME_TOGGLE = `<button type="button" class="theme-toggle" id="theme-toggle" aria-label="Toggle dark mode" title="Toggle dark mode">
+  <svg class="icon-sun" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4.5" fill="none" stroke="currentColor" stroke-width="2"/><path d="M12 2v2.5M12 19.5V22M4.2 4.2l1.8 1.8M18 18l1.8 1.8M2 12h2.5M19.5 12H22M4.2 19.8L6 18M18 6l1.8-1.8" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+  <svg class="icon-moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 14.5A8.5 8.5 0 119.5 4a7 7 0 0010.5 10.5z" fill="currentColor"/></svg>
+</button>`;
+
 function nav(ctx) {
   const link = (href, label, active) =>
     `<a href="${href}" class="${active ? 'active' : ''}">${label}</a>`;
@@ -52,7 +57,7 @@ function nav(ctx) {
       ${link('/download', 'Download', ctx.path.startsWith('/download'))}
       ${ctx.user && ctx.user.role === 'admin' ? link('/admin', 'Admin', ctx.path.startsWith('/admin')) : ''}
     </nav>
-    <div class="nav-auth">${authArea}</div>
+    <div class="nav-auth">${THEME_TOGGLE}${authArea}</div>
   </div>
 </header>`;
 }

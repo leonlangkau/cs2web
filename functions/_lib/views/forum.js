@@ -6,7 +6,34 @@ function errorList(errors) {
   return `<div class="form-errors" role="alert"><ul>${map(errors, (e) => `<li>${esc(e)}</li>`)}</ul></div>`;
 }
 
-function index(ctx, { categories, recent }) {
+const shoutRow = (s) => `<div class="shout-row" data-id="${esc(s.id)}">
+  <span class="shout-user">${esc(s.username)}${s.author_role === 'admin' ? ' <span class="tag tag-admin">STAFF</span>' : ''}</span>
+  <span class="shout-body">${esc(s.body)}</span>
+  <span class="shout-time muted">${esc(timeAgo(s.created_at))}</span>
+</div>`;
+
+function shoutbox(ctx, shouts) {
+  const lastId = shouts.length ? shouts[shouts.length - 1].id : 0;
+  const list = shouts.length === 0
+    ? '<p class="muted shout-empty">No shouts yet. Say hi!</p>'
+    : map(shouts, shoutRow);
+  const form = ctx.user
+    ? `<form method="post" action="/forum/shoutbox" class="shout-form" id="shout-form">
+        <input type="hidden" name="_csrf" value="${esc(ctx.csrfToken)}">
+        <input type="text" name="body" maxlength="200" required placeholder="Say something…"
+               aria-label="Shoutbox message" autocomplete="off">
+        <button class="btn btn-primary btn-sm" type="submit">Send</button>
+      </form>`
+    : '<p class="muted shout-login-note"><a href="/auth/login?next=%2Fforum">Log in</a> to join the shoutbox.</p>';
+
+  return `<div class="shoutbox" id="shoutbox" data-last-id="${esc(lastId)}">
+    <h2>Shoutbox</h2>
+    <div class="shout-list" id="shout-list">${list}</div>
+    ${form}
+  </div>`;
+}
+
+function index(ctx, { categories, recent, shouts }) {
   const newBtn = ctx.user
     ? '<a class="btn btn-primary" href="/forum/new">+ New thread</a>'
     : '<a class="btn btn-primary" href="/auth/signup">Sign up to post</a>';
@@ -38,6 +65,7 @@ function index(ctx, { categories, recent }) {
             <span class="sidebar-title">${esc(t.title)}</span>
             <span class="muted">${esc(t.category)} · ${esc(t.username)} · ${esc(timeAgo(t.updated_at))}</span>
           </a>`)}
+        ${shoutbox(ctx, shouts)}
       </aside>
     </div>
   </div>
@@ -86,19 +114,24 @@ function category(ctx, { category: cat, threads, page: current, pages }) {
 
 function thread(ctx, { thread: t, posts, firstPostId, page: current, pages, postOffset }) {
   const isAdmin = ctx.user && ctx.user.role === 'admin';
+  const isOwner = ctx.user && ctx.user.id === t.user_id;
   const csrf = `<input type="hidden" name="_csrf" value="${esc(ctx.csrfToken)}">`;
 
-  const adminActions = isAdmin ? `<div class="admin-actions">
+  const modActions = isAdmin ? `
       <form method="post" action="/admin/threads/${esc(t.id)}/pin" class="inline-form">${csrf}
         <button class="btn btn-ghost btn-sm" type="submit">${t.pinned ? 'Unpin' : 'Pin'}</button></form>
       <form method="post" action="/admin/threads/${esc(t.id)}/lock" class="inline-form">${csrf}
-        <button class="btn btn-ghost btn-sm" type="submit">${t.locked ? 'Unlock' : 'Lock'}</button></form>
-      <form method="post" action="/admin/threads/${esc(t.id)}/delete" class="inline-form"
+        <button class="btn btn-ghost btn-sm" type="submit">${t.locked ? 'Unlock' : 'Lock'}</button></form>` : '';
+  const deleteThreadBtn = (isAdmin || isOwner) ? `
+      <form method="post" action="/forum/t/${esc(t.id)}/delete" class="inline-form"
             data-confirm="Delete this thread and all its replies?">${csrf}
-        <button class="btn btn-danger btn-sm" type="submit">Delete</button></form>
-    </div>` : '';
+        <button class="btn btn-danger btn-sm" type="submit">Delete</button></form>` : '';
+  const threadActions = (modActions || deleteThreadBtn)
+    ? `<div class="thread-actions">${modActions}${deleteThreadBtn}</div>` : '';
 
-  const postList = map(posts, (p, i) => `<article class="post" id="post-${esc(p.id)}">
+  const postList = map(posts, (p, i) => {
+    const canDelete = (isAdmin || (ctx.user && ctx.user.id === p.user_id)) && p.id !== firstPostId;
+    return `<article class="post" id="post-${esc(p.id)}">
     <aside class="post-author">
       <span class="avatar avatar-lg" aria-hidden="true">${esc(String(p.username || '?')[0].toUpperCase())}</span>
       <span class="post-username">${esc(p.username)}${p.author_role === 'admin' ? ' <span class="tag tag-admin">STAFF</span>' : ''}</span>
@@ -108,11 +141,12 @@ function thread(ctx, { thread: t, posts, firstPostId, page: current, pages, post
     <div class="post-body">
       <div class="post-meta">
         <span class="muted">#${esc(postOffset + i + 1)} · ${esc(timeAgo(p.created_at))}</span>
-        ${isAdmin && p.id !== firstPostId ? `<form method="post" action="/admin/posts/${esc(p.id)}/delete" class="inline-form" data-confirm="Delete this post?">${csrf}<button class="btn btn-danger btn-xs" type="submit">Delete</button></form>` : ''}
+        ${canDelete ? `<form method="post" action="/forum/posts/${esc(p.id)}/delete" class="inline-form" data-confirm="Delete this post?">${csrf}<button class="btn btn-danger btn-xs" type="submit">Delete</button></form>` : ''}
       </div>
       <div class="post-text">${esc(p.body)}</div>
     </div>
-  </article>`);
+  </article>`;
+  });
 
   let replyArea;
   if (t.locked && !isAdmin) {
@@ -146,7 +180,7 @@ function thread(ctx, { thread: t, posts, firstPostId, page: current, pages, post
         </h1>
         <p class="muted">Started by ${esc(t.username)} · ${esc(timeAgo(t.created_at))} · ${esc(t.views)} views</p>
       </div>
-      ${adminActions}
+      ${threadActions}
     </div>
     <div class="post-list">${postList}</div>
     ${pagination(current, pages, (p) => `/forum/t/${t.id}?page=${p}`, 'Post pages')}

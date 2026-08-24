@@ -247,6 +247,62 @@ test("public pages, forum, legal, gate, auth, captcha, admin, moderation, downlo
   await user.get("/");
   assert.equal((await user.post("/forum/new", { category: "general", title: "Real token thread", body: "works" })).status, 302, "rotated token accepted");
 
+  // Self-serve delete: the thread/post author (not just an admin) may remove their own content.
+  const other = makeClient(app);
+  await other.get("/auth/signup");
+  await other.post("/auth/signup", { username: "second_user", email: "second@example.com", password: "supersecret1", confirm: "supersecret1", ...(await solveCaptcha(other)) });
+
+  res = await user.post("/forum/new", { category: "general", title: "Deletable thread", body: "OP text" });
+  const delThreadLoc = res.headers.get("location");
+  const delThreadId = delThreadLoc.split("/").pop();
+  res = await user.post(`${delThreadLoc}/reply`, { body: "a reply to delete" });
+  const replyPostId = res.headers.get("location").split("#post-").pop();
+
+  assert.equal((await other.post(`/forum/posts/${replyPostId}/delete`)).status, 404, "non-owner can't delete another user's post");
+  assert.equal((await other.post(`/forum/t/${delThreadId}/delete`)).status, 404, "non-owner can't delete another user's thread");
+  assert.ok(await db.get("SELECT id FROM posts WHERE id = ?", replyPostId), "post survives the non-owner's attempt");
+
+  res = await user.post(`/forum/posts/${replyPostId}/delete`);
+  assert.equal(res.status, 302, "owner deletes their own reply");
+  assert.ok(!(await db.get("SELECT id FROM posts WHERE id = ?", replyPostId)), "reply gone");
+
+  const opPost = await db.get("SELECT id FROM posts WHERE thread_id = ? ORDER BY id LIMIT 1", delThreadId);
+  res = await user.post(`/forum/posts/${opPost.id}/delete`);
+  assert.ok(res.status === 302 && res.headers.get("location") === `/forum/t/${delThreadId}`,
+    "deleting the opening post redirects to the thread instead");
+  assert.ok(await db.get("SELECT id FROM posts WHERE id = ?", opPost.id), "opening post not deleted directly");
+
+  res = await user.post(`/forum/t/${delThreadId}/delete`);
+  assert.equal(res.status, 302, "owner deletes their own thread");
+  assert.ok(!(await db.get("SELECT id FROM threads WHERE id = ?", delThreadId)), "thread gone");
+
+  res = await other.post("/forum/new", { category: "general", title: "Someone else's thread", body: "text" });
+  const othersThreadId = res.headers.get("location").split("/").pop();
+  res = await admin.post(`/forum/t/${othersThreadId}/delete`);
+  assert.equal(res.status, 302, "admin can delete via the self-serve route too");
+  assert.ok(!(await db.get("SELECT id FROM threads WHERE id = ?", othersThreadId)), "thread gone via admin");
+
+  // Shoutbox
+  res = await anon.post("/forum/shoutbox", { body: "anon shout" });
+  assert.ok(res.status === 302 && res.headers.get("location").startsWith("/auth/login"), "shoutbox requires login");
+
+  res = await user.post("/forum/shoutbox", { body: "hello from player_one" });
+  assert.ok(res.status === 302 && res.headers.get("location") === "/forum", "shout posted (no-JS fallback redirects to /forum)");
+  assert.ok(await db.get("SELECT id FROM shouts WHERE body = 'hello from player_one'"), "shout stored");
+
+  html = await (await anon.get("/forum")).text();
+  assert.ok(html.includes("hello from player_one") && html.includes('id="shoutbox"'), "shoutbox renders on the forum index");
+
+  res = await anon.get("/forum/shoutbox?after=0");
+  const shoutData = await res.json();
+  assert.ok(Array.isArray(shoutData.shouts) && shoutData.shouts.some((s) => s.body === "hello from player_one"),
+    "shoutbox JSON polling endpoint");
+
+  const overlong = "x".repeat(300);
+  res = await user.post("/forum/shoutbox", { body: overlong });
+  assert.equal(res.status, 302, "overlong shout redirects with a flash instead of erroring");
+  assert.ok(!(await db.get("SELECT id FROM shouts WHERE body = ?", overlong)), "overlong shout not stored");
+
   // Rate limiting
   const hammer = makeClient(app);
   await hammer.get("/auth/login");

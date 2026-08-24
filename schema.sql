@@ -72,6 +72,15 @@ CREATE TABLE IF NOT EXISTS posts (
 );
 CREATE INDEX IF NOT EXISTS idx_posts_thread ON posts(thread_id);
 
+-- Lightweight live chat strip shown on the forum index page.
+CREATE TABLE IF NOT EXISTS shouts (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  body       TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_shouts_created ON shouts(id);
+
 -- Workers isolates share no memory, so the rate limiter and the CAPTCHA
 -- single-use check are backed by the database rather than in-process Maps.
 CREATE TABLE IF NOT EXISTS rate_limits (

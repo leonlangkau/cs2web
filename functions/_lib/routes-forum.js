@@ -8,6 +8,8 @@ const THREADS_PER_PAGE = 20;
 const POSTS_PER_PAGE = 20;
 const MAX_TITLE = 120;
 const MAX_BODY = 10000;
+const SHOUT_MAX = 200;
+const SHOUTS_PER_LOAD = 30;
 
 function notFound(c) {
   return c.html(site.errorPage(c.get('view'), {
@@ -38,7 +40,14 @@ function register(app) {
        FROM threads t JOIN users u ON u.id = t.user_id JOIN categories c ON c.id = t.category_id
        ORDER BY t.updated_at DESC LIMIT 8`
     );
-    return c.html(views.index(c.get('view'), { categories, recent }));
+    const shouts = await db.all(
+      `SELECT s.id, s.body, s.created_at, u.username, u.role AS author_role
+       FROM shouts s JOIN users u ON u.id = s.user_id
+       ORDER BY s.id DESC LIMIT ?`,
+      SHOUTS_PER_LOAD
+    );
+    shouts.reverse();
+    return c.html(views.index(c.get('view'), { categories, recent, shouts }));
   });
 
   app.get('/forum/c/:slug', async (c) => {
@@ -182,6 +191,92 @@ function register(app) {
     const lastPage = Math.max(1, Math.ceil(total / POSTS_PER_PAGE));
     const query = lastPage > 1 ? `?page=${lastPage}` : '';
     return c.redirect(`/forum/t/${id}${query}#post-${post.lastInsertRowid}`, 302);
+  });
+
+  // Self-serve delete: the thread's own author, or an admin, may remove it.
+  // (The admin panel additionally exposes /admin/threads/:id/delete for
+  // moderation from the Forum management tab.)
+  app.post('/forum/t/:id/delete', async (c) => {
+    const gate = requireAuth(c);
+    if (gate) return gate;
+    const db = c.get('db');
+    const user = c.get('user');
+    const id = intParam(c.req.param('id'), 0);
+    const thread = id > 0 ? await db.get('SELECT * FROM threads WHERE id = ?', id) : null;
+    if (!thread) return notFound(c);
+    if (thread.user_id !== user.id && user.role !== 'admin') return notFound(c);
+
+    await db.run('DELETE FROM threads WHERE id = ?', id);
+    setFlash(c, 'success', 'Thread deleted.');
+    return c.redirect('/forum', 302);
+  });
+
+  app.post('/forum/posts/:id/delete', async (c) => {
+    const gate = requireAuth(c);
+    if (gate) return gate;
+    const db = c.get('db');
+    const user = c.get('user');
+    const id = intParam(c.req.param('id'), 0);
+    const post = id > 0 ? await db.get('SELECT * FROM posts WHERE id = ?', id) : null;
+    if (!post) return notFound(c);
+    if (post.user_id !== user.id && user.role !== 'admin') return notFound(c);
+
+    const first = await db.get('SELECT MIN(id) AS m FROM posts WHERE thread_id = ?', post.thread_id);
+    if (Number(first.m) === post.id) {
+      setFlash(c, 'error', 'That is the opening post — delete the whole thread instead.');
+      return c.redirect(`/forum/t/${post.thread_id}`, 302);
+    }
+    await db.run('DELETE FROM posts WHERE id = ?', id);
+    setFlash(c, 'success', 'Post deleted.');
+    return c.redirect(`/forum/t/${post.thread_id}`, 302);
+  });
+
+  // Shoutbox: a short-lived, JS-polled chat strip on the forum index. The GET
+  // endpoint is used by the client to pull anything newer than `after`; POST
+  // is progressively enhanced — with JS it returns JSON, without it falls
+  // back to a normal redirect+flash like every other form on the site.
+  app.get('/forum/shoutbox', async (c) => {
+    const db = c.get('db');
+    const afterId = intParam(new URL(c.req.url).searchParams.get('after'), 0);
+    const shouts = await db.all(
+      `SELECT s.id, s.body, s.created_at, u.username, u.role AS author_role
+       FROM shouts s JOIN users u ON u.id = s.user_id
+       WHERE s.id > ? ORDER BY s.id DESC LIMIT ?`,
+      afterId, SHOUTS_PER_LOAD
+    );
+    shouts.reverse();
+    c.header('Cache-Control', 'no-store');
+    return c.json({ shouts });
+  });
+
+  app.post('/forum/shoutbox', async (c) => {
+    const wantsJson = c.req.header('x-requested-with') === 'fetch';
+    if (wantsJson && !c.get('user')) return c.json({ ok: false, error: 'You need to sign in to do that.' }, 401);
+    const gate = requireAuth(c);
+    if (gate) return gate;
+
+    const db = c.get('db');
+    const user = c.get('user');
+
+    const verdict = await limits.check(db, 'shout', String(user.id), c.get('cfg'));
+    if (!verdict.ok) {
+      if (wantsJson) return c.json({ ok: false, error: 'Slow down — try again shortly.' }, 429);
+      return tooMany(c, verdict.retryAfterSec);
+    }
+
+    const body = await formBody(c);
+    const text = String(body.body || '').trim().replace(/\s+/g, ' ');
+    if (text.length < 1 || text.length > SHOUT_MAX) {
+      const message = `Shout must be 1–${SHOUT_MAX} characters.`;
+      if (wantsJson) return c.json({ ok: false, error: message }, 400);
+      setFlash(c, 'error', message);
+      return c.redirect('/forum', 302);
+    }
+
+    await db.run('INSERT INTO shouts (user_id, body) VALUES (?, ?)', user.id, text);
+    if (wantsJson) return c.json({ ok: true });
+    setFlash(c, 'success', 'Shout posted.');
+    return c.redirect('/forum', 302);
   });
 }
 

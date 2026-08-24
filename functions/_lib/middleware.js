@@ -12,6 +12,21 @@ const SESSION_DAYS = 7;
 const TERMS_VERSION = '2026-08-21';
 const TERMS_GATE_EXEMPT = new Set(['/terms', '/privacy', '/legal/accept']);
 
+/** btoa()/atob() only accept Latin1, but flash messages carry arbitrary text
+ *  (em dashes, usernames, category names) — so go through UTF-8 bytes first. */
+function toBase64Url(str) {
+  const bytes = new TextEncoder().encode(str);
+  let binary = '';
+  bytes.forEach((b) => { binary += String.fromCharCode(b); });
+  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_');
+}
+
+function fromBase64Url(str) {
+  const binary = atob(str.replace(/-/g, '+').replace(/_/g, '/'));
+  const bytes = Uint8Array.from(binary, (ch) => ch.charCodeAt(0));
+  return new TextDecoder().decode(bytes);
+}
+
 function isSecure(c) {
   if (c.req.header('x-forwarded-proto') === 'https') return true;
   try { return new URL(c.req.url).protocol === 'https:'; } catch { return false; }
@@ -124,7 +139,7 @@ const loadContext = async (c, next) => {
   const rawFlash = getCookie(c, FLASH_COOKIE);
   if (rawFlash) {
     try {
-      const parsed = JSON.parse(atob(rawFlash.replace(/-/g, '+').replace(/_/g, '/')));
+      const parsed = JSON.parse(fromBase64Url(rawFlash));
       if (parsed && typeof parsed.message === 'string') {
         view.flash = {
           type: parsed.type === 'error' ? 'error' : 'success',
@@ -164,7 +179,7 @@ const loadContext = async (c, next) => {
 
 /** Sets a one-shot flash message for the next request. */
 function setFlash(c, type, message) {
-  const encoded = btoa(JSON.stringify({ type, message })).replace(/\+/g, '-').replace(/\//g, '_');
+  const encoded = toBase64Url(JSON.stringify({ type, message }));
   setCookie(c, FLASH_COOKIE, encoded, cookieOptions(c, { maxAge: 60 }));
 }
 

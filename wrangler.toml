@@ -27,11 +27,12 @@ COMPANY_LEGAL_EMAIL = "legal@goyhub.com"
 CAPTCHA_DIFFICULTY = "16"
 PBKDF2_ITERATIONS = "100000"
 
-# Rate limits: attempts per window (10 min / hour / minute / hour).
+# Rate limits: attempts per window (10 min / hour / minute / hour / minute).
 RATE_LIMIT_LOGIN = "10"
 RATE_LIMIT_SIGNUP = "5"
 RATE_LIMIT_POST = "6"
 RATE_LIMIT_DOWNLOAD = "30"
+RATE_LIMIT_SHOUT = "12"
 
 # Secrets are NOT set here. Add them in the Pages dashboard (Settings →
 # Variables and Secrets) or with `npx wrangler pages secret put NAME`, or in

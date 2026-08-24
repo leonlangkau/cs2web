@@ -15,6 +15,7 @@ const DEFAULTS = {
   signup: { limit: 5, windowMs: 60 * 60 * 1000 },     // per IP
   post: { limit: 6, windowMs: 60 * 1000 },            // per user
   download: { limit: 30, windowMs: 60 * 60 * 1000 },  // per IP
+  shout: { limit: 12, windowMs: 60 * 1000 },          // per user
 };
 
 const ENV_KEYS = {
@@ -22,6 +23,7 @@ const ENV_KEYS = {
   signup: 'RATE_LIMIT_SIGNUP',
   post: 'RATE_LIMIT_POST',
   download: 'RATE_LIMIT_DOWNLOAD',
+  shout: 'RATE_LIMIT_SHOUT',
 };
 
 function limitFor(name, env = {}) {

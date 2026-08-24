@@ -1,32 +1,36 @@
 import * as views from "./views/admin.js";
 import * as site from "./views/site.js";
-import { DELETED_USERNAME, deletedUserId } from "./bootstrap.js";
+import { DELETED_USERNAME, deletedUserId, relocateUserId, RESERVED_UID_MAX } from "./bootstrap.js";
 import { requireAdmin, requireStaff, destroyUserSessions, audit, formBody, setFlash, clientIp } from "./middleware.js";
-import { TIERS, TIER_LABELS } from "./tiers.js";
+import { TIERS, TIER_LABELS, STAFF_TIERS } from "./tiers.js";
+import { hashPassword } from "./crypto.js";
 import { setSetting, ANNOUNCEMENT_KEY } from "./settings.js";
 
 const LOGS_PER_PAGE = 50;
 const USERS_PER_PAGE = 25;
 const LOG_EVENTS = ['signup', 'login', 'login_failed', 'login_blocked', 'logout', 'download',
   'admin_action', 'captcha_failed', 'terms_accepted', 'password_changed', 'loader_auth', 'loader_auth_failed',
-  'ip_autoban', 'signup_surge_blocked', 'post_reported', 'email_changed', 'account_deleted'];
+  'ip_autoban', 'signup_surge_blocked', 'post_reported', 'email_changed', 'account_deleted',
+  'password_reset_requested', 'password_reset', 'email_verified'];
 
 const IP_HIDDEN = '(hidden)';
 
 /**
- * Admin accounts' IP addresses are not shown to OTHER staff — only that
- * admin themself sees their own. Lower-tier staff (developer/trial_admin)
- * being able to read the owner's home IP out of the panel is an unnecessary
- * exposure. Returns helpers that mask user rows and log rows in place.
+ * Staff IP addresses (developer/trial_admin/admin alike) are not shown to
+ * OTHER panel viewers — each staff member sees only their own. This covers
+ * every surface: users list, dashboard, and the IP log including
+ * admin_action rows. Returns helpers that mask user and log rows in place.
  */
 async function adminIpMask(c) {
   const viewer = c.get('user');
-  const admins = await c.get('db').all("SELECT id, username FROM users WHERE tier = 'admin'");
+  const admins = await c.get('db').all(
+    "SELECT id, username FROM users WHERE tier IN ('developer', 'trial_admin', 'admin')"
+  );
   const adminIds = new Set(admins.map((a) => a.id));
   const adminNames = new Set(admins.map((a) => String(a.username).toLowerCase()));
 
   const maskUser = (u) => {
-    if (u.tier === 'admin' && u.id !== viewer.id) {
+    if (STAFF_TIERS.has(u.tier) && u.id !== viewer.id) {
       return { ...u, signup_ip: IP_HIDDEN, last_login_ip: IP_HIDDEN, ipHidden: true };
     }
     return u;
@@ -65,8 +69,10 @@ function notFound(c, message = 'This page does not exist.') {
 }
 
 async function findUser(c) {
-  const id = intParam(c.req.param('id'), 0);
-  if (id < 1) return null;
+  // UID 0 is a real account (a reserved vanity UID), so garbage must fall
+  // back to -1 — falling back to 0 would make /admin/users/junk/... target it.
+  const id = intParam(c.req.param('id'), -1);
+  if (id < 0) return null;
   return c.get('db').get('SELECT * FROM users WHERE id = ?', id);
 }
 
@@ -123,7 +129,8 @@ function register(app) {
 
     const { maskUser } = await adminIpMask(c);
     const users = (await db.all(
-      `SELECT id, username, email, tier, banned, signup_ip, last_login_ip, last_login_at, created_at,
+      `SELECT id, username, email, tier, banned, paid_until, email_verified_at,
+          signup_ip, last_login_ip, last_login_at, created_at,
           (SELECT COUNT(*) FROM posts p WHERE p.user_id = users.id) AS post_count
        FROM users ${where} ORDER BY id DESC LIMIT ? OFFSET ?`,
       ...params, USERS_PER_PAGE, (page - 1) * USERS_PER_PAGE
@@ -174,13 +181,88 @@ function register(app) {
       setFlash(c, 'error', 'Not a valid tier.');
       return c.redirect(backTo(c, '/admin/users'), 302);
     }
+    // Paid can carry an expiry: paid_days > 0 sets one, empty means lifetime.
+    // Any other tier clears it.
+    let paidUntil = null;
+    let expiryNote = '';
+    if (requested === 'paid') {
+      const days = Number(body.paid_days);
+      if (Number.isFinite(days) && days > 0) {
+        paidUntil = Date.now() + Math.floor(days) * 86_400_000;
+        expiryNote = ` for ${Math.floor(days)} day${Math.floor(days) === 1 ? '' : 's'}`;
+      }
+    }
     // role stays in sync as a coarse legacy mirror of tier — nothing reads it
     // for access control anymore, but keeping it sane avoids a confusing drift.
     const legacyRole = requested === 'admin' ? 'admin' : 'user';
-    await db.run('UPDATE users SET tier = ?, role = ? WHERE id = ?', requested, legacyRole, user.id);
+    await db.run('UPDATE users SET tier = ?, role = ?, paid_until = ? WHERE id = ?',
+      requested, legacyRole, paidUntil, user.id);
     await destroyUserSessions(db, user.id); // force re-login so the new tier takes effect cleanly
-    await adminAudit(c, `set tier of #${user.id} (${user.username}) to ${requested}`);
-    setFlash(c, 'success', `${user.username} is now ${TIER_LABELS[requested]}.`);
+    await adminAudit(c, `set tier of #${user.id} (${user.username}) to ${requested}${expiryNote}`);
+    setFlash(c, 'success', `${user.username} is now ${TIER_LABELS[requested]}${expiryNote}.`);
+    return c.redirect(backTo(c, '/admin/users'), 302);
+  });
+
+  // Set a member's password directly (full admin only) — how the owner gives
+  // the seeded vanity accounts (goyim/goy/omelette) usable credentials, and
+  // the recovery path for members without a working email.
+  app.post('/admin/users/:id/password', async (c) => {
+    const gate = requireAdmin(c);
+    if (gate) return gate;
+    const db = c.get('db');
+    const user = await findUser(c);
+    if (!user) return notFound(c, 'No such user.');
+    if (user.id === c.get('user').id) {
+      setFlash(c, 'error', 'Change your own password from your profile.');
+      return c.redirect(backTo(c, '/admin/users'), 302);
+    }
+    if (user.username === DELETED_USERNAME) {
+      setFlash(c, 'error', 'The placeholder account cannot be signed into.');
+      return c.redirect(backTo(c, '/admin/users'), 302);
+    }
+    const body = await formBody(c);
+    const password = String(body.password || '');
+    if (password.length < 8 || password.length > 128) {
+      setFlash(c, 'error', 'Password must be 8–128 characters.');
+      return c.redirect(backTo(c, '/admin/users'), 302);
+    }
+    await db.run('UPDATE users SET password_hash = ? WHERE id = ?', await hashPassword(password), user.id);
+    await destroyUserSessions(db, user.id);
+    await adminAudit(c, `set password of #${user.id} (${user.username})`);
+    setFlash(c, 'success', `${user.username}'s password has been set; their old sessions are signed out.`);
+    return c.redirect(backTo(c, '/admin/users'), 302);
+  });
+
+  // Assign a reserved vanity UID (0–1001, full admin only). Uses the same
+  // FK-safe relocation as the boot migration.
+  app.post('/admin/users/:id/uid', async (c) => {
+    const gate = requireAdmin(c);
+    if (gate) return gate;
+    const db = c.get('db');
+    const user = await findUser(c);
+    if (!user) return notFound(c, 'No such user.');
+    if (user.id === c.get('user').id) {
+      setFlash(c, 'error', 'You cannot change your own UID while signed in with it.');
+      return c.redirect(backTo(c, '/admin/users'), 302);
+    }
+    const body = await formBody(c);
+    const uid = intParam(String(body.uid ?? ''), -1);
+    if (uid < 0 || uid > RESERVED_UID_MAX) {
+      setFlash(c, 'error', `UID must be between 0 and ${RESERVED_UID_MAX}.`);
+      return c.redirect(backTo(c, '/admin/users'), 302);
+    }
+    if (uid === user.id) {
+      setFlash(c, 'error', `${user.username} already has UID ${uid}.`);
+      return c.redirect(backTo(c, '/admin/users'), 302);
+    }
+    if (await db.get('SELECT id FROM users WHERE id = ?', uid)) {
+      setFlash(c, 'error', `UID ${uid} is already taken.`);
+      return c.redirect(backTo(c, '/admin/users'), 302);
+    }
+    const oldId = user.id;
+    await relocateUserId(db, oldId, uid);
+    await adminAudit(c, `moved ${user.username} from UID ${oldId} to UID ${uid}`);
+    setFlash(c, 'success', `${user.username} is now UID ${uid}. They stay signed in.`);
     return c.redirect(backTo(c, '/admin/users'), 302);
   });
 
@@ -352,6 +434,31 @@ function register(app) {
     );
     await adminAudit(c, `created category "${name}"`);
     setFlash(c, 'success', `Category "${name}" created.`);
+    return c.redirect('/admin/forum', 302);
+  });
+
+  // Edit a category's display name and description in place. The slug (and
+  // therefore every existing link) deliberately stays stable.
+  app.post('/admin/categories/:id/edit', async (c) => {
+    const gate = requireAdmin(c);
+    if (gate) return gate;
+    const db = c.get('db');
+    const id = intParam(c.req.param('id'), 0);
+    const category = id > 0 ? await db.get('SELECT * FROM categories WHERE id = ?', id) : null;
+    if (!category) {
+      setFlash(c, 'error', 'No such category.');
+      return c.redirect('/admin/forum', 302);
+    }
+    const body = await formBody(c);
+    const name = String(body.name || '').trim().replace(/\s+/g, ' ');
+    const description = String(body.description || '').trim().slice(0, 300);
+    if (name.length < 2 || name.length > 50) {
+      setFlash(c, 'error', 'Category name must be 2–50 characters.');
+      return c.redirect('/admin/forum', 302);
+    }
+    await db.run('UPDATE categories SET name = ?, description = ? WHERE id = ?', name, description, id);
+    await adminAudit(c, `edited category #${id} ("${category.name}" -> "${name}")`);
+    setFlash(c, 'success', `Category "${name}" updated.`);
     return c.redirect('/admin/forum', 302);
   });
 

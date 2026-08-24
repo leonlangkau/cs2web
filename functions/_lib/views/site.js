@@ -1,5 +1,5 @@
 import { page } from "./layout.js";
-import { esc, timeAgo, map } from "./util.js";
+import { esc, timeAgo, map, emailLink } from "./util.js";
 import { meetsTier, tierOf, TIER_LABELS } from "../tiers.js";
 
 const DOWNLOAD_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m0 0l-5-5m5 5l5-5M4 19h16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
@@ -226,7 +226,7 @@ function upgradePage(ctx, { pay }) {
   } else if (pay.addresses.length > 0) {
     payBlock = `
       <p>Send the payment in any listed coin, then email
-        <a href="mailto:${esc(ctx.company.contactEmail)}">${esc(ctx.company.contactEmail)}</a> with the
+        ${emailLink(ctx.company.contactEmail)} with the
         <strong>transaction ID</strong> and your username
         <span class="mono">${esc(ctx.user ? ctx.user.username : 'your-username')}</span> — an admin activates
         Paid on your account after confirmation. Automatic activation is coming soon.</p>
@@ -237,7 +237,7 @@ function upgradePage(ctx, { pay }) {
   } else {
     payBlock = `
       <p class="muted">Automatic crypto payments are being set up and will appear here soon.
-        Until then, contact <a href="mailto:${esc(ctx.company.contactEmail)}">${esc(ctx.company.contactEmail)}</a>
+        Until then, contact ${emailLink(ctx.company.contactEmail)}
         ${ctx.user ? `from your account email with your username <span class="mono">${esc(ctx.user.username)}</span>` : ''}
         to upgrade.</p>`;
   }
@@ -265,7 +265,7 @@ function upgradePage(ctx, { pay }) {
       ${payBlock}
     </div>
     <p class="fineprint">Payments are subject to our <a href="/terms">Terms &amp; Conditions</a>.
-      Tier changes are logged. Need help? <a href="mailto:${esc(ctx.company.contactEmail)}">${esc(ctx.company.contactEmail)}</a>.</p>
+      Tier changes are logged. Need help? ${emailLink(ctx.company.contactEmail)}.</p>
   </div>
 </div>`;
   return page(ctx, { title: 'Upgrade', body });

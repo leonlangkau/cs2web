@@ -6,7 +6,10 @@ import {
 } from "./middleware.js";
 import { issueLicense } from "./license.js";
 import { meetsTier, isFullAdmin } from "./tiers.js";
-import { EMAIL_RE } from "./routes-auth.js";
+import { EMAIL_RE, sendVerificationEmail, isDisposableEmail } from "./routes-auth.js";
+import { isEmailConfigured } from "./email.js";
+import * as limits from "./limits.js";
+import { tooMany } from "./routes-main.js";
 import { DELETED_USERNAME, deletedUserId } from "./bootstrap.js";
 
 function register(app) {
@@ -23,7 +26,7 @@ function register(app) {
       sessions: await one("SELECT COUNT(*) AS n FROM sessions WHERE user_id = ? AND expires_at > datetime('now')", user.id),
     };
     const account = await db.get(
-      'SELECT username, email, tier, created_at, last_login_at, last_login_ip FROM users WHERE id = ?',
+      'SELECT id, username, email, tier, email_verified_at, created_at, last_login_at, last_login_ip FROM users WHERE id = ?',
       user.id
     );
     const sessions = await db.all(
@@ -38,7 +41,29 @@ function register(app) {
       account, stats, license, isPaid: meetsTier(user, 'paid'),
       sessions, currentSessionId: c.get('sessionId'),
       isAdminAccount: isFullAdmin(user),
+      emailConfigured: isEmailConfigured(c.get('cfg')),
     }));
+  });
+
+  // Re-send the verification email (rate-limited per user).
+  app.post('/profile/verify-email', async (c) => {
+    const gate = requireAuth(c);
+    if (gate) return gate;
+    const db = c.get('db');
+    const user = c.get('user');
+    if (user.email_verified_at) {
+      setFlash(c, 'success', 'Your email is already verified.');
+      return c.redirect('/profile', 302);
+    }
+    if (!isEmailConfigured(c.get('cfg'))) {
+      setFlash(c, 'error', 'Email sending is not configured on this site yet.');
+      return c.redirect('/profile', 302);
+    }
+    const verdict = await limits.check(db, 'verify', String(user.id), c.get('cfg'));
+    if (!verdict.ok) return tooMany(c, verdict.retryAfterSec);
+    await sendVerificationEmail(c, user);
+    setFlash(c, 'success', `Verification email sent to ${user.email}.`);
+    return c.redirect('/profile', 302);
   });
 
   app.post('/profile/email', async (c) => {
@@ -59,14 +84,22 @@ function register(app) {
       setFlash(c, 'error', 'Enter a valid email address.');
       return c.redirect('/profile', 302);
     }
+    if (isDisposableEmail(email, c.get('cfg'))) {
+      setFlash(c, 'error', 'Disposable email addresses cannot be used — use a real inbox.');
+      return c.redirect('/profile', 302);
+    }
     const taken = await db.get('SELECT id FROM users WHERE email = ? AND id != ?', email, user.id);
     if (taken) {
       setFlash(c, 'error', 'That email is already in use by another account.');
       return c.redirect('/profile', 302);
     }
-    await db.run('UPDATE users SET email = ? WHERE id = ?', email, user.id);
+    // A changed address is unverified until proven; send a fresh link.
+    await db.run('UPDATE users SET email = ?, email_verified_at = NULL WHERE id = ?', email, user.id);
     await audit(c, 'email_changed', { userId: user.id, username: user.username, detail: `${row.email} -> ${email}` });
-    setFlash(c, 'success', 'Email updated.');
+    await sendVerificationEmail(c, { id: user.id, username: user.username, email });
+    setFlash(c, 'success', isEmailConfigured(c.get('cfg'))
+      ? 'Email updated — check your inbox for a new verification link.'
+      : 'Email updated.');
     return c.redirect('/profile', 302);
   });
 

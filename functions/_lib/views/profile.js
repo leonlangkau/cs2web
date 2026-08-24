@@ -2,7 +2,7 @@ import { page } from "./layout.js";
 import { esc, timeAgo } from "./util.js";
 import { TIER_LABELS, normalizeTier } from "../tiers.js";
 
-function profile(ctx, { account, stats, license, isPaid, sessions = [], currentSessionId, isAdminAccount = false }) {
+function profile(ctx, { account, stats, license, isPaid, sessions = [], currentSessionId, isAdminAccount = false, emailConfigured = false }) {
   const csrf = `<input type="hidden" name="_csrf" value="${esc(ctx.csrfToken)}">`;
   const tier = normalizeTier(account.tier);
 
@@ -36,8 +36,14 @@ function profile(ctx, { account, stats, license, isPaid, sessions = [], currentS
         <span class="avatar avatar-lg" aria-hidden="true">${esc(account.username[0].toUpperCase())}</span>
         <div>
           <div class="profile-name">${esc(account.username)}
+            <span class="uid-badge${account.id <= 1001 ? ' uid-reserved' : ''}">UID ${esc(account.id)}</span>
             <span class="tag tag-tier tag-tier-${esc(tier)}">${esc(TIER_LABELS[tier])}</span></div>
-          <div class="muted">${esc(account.email)}</div>
+          <div class="muted">${esc(account.email)}
+            ${account.email_verified_at
+              ? '<span class="tag tag-report-resolved">VERIFIED</span>'
+              : '<span class="tag tag-banned">UNVERIFIED</span>'}</div>
+          ${tier === 'paid' && account.paid_until
+            ? `<div class="muted">Paid until ${esc(new Date(Number(account.paid_until)).toISOString().slice(0, 10))}</div>` : ''}
         </div>
       </div>
       <dl class="profile-facts">
@@ -47,6 +53,11 @@ function profile(ctx, { account, stats, license, isPaid, sessions = [], currentS
         <div><dt>Posts</dt><dd>${esc(stats.posts)}</dd></div>
         <div><dt>Active sessions</dt><dd>${esc(stats.sessions)}</dd></div>
       </dl>
+      ${!account.email_verified_at && emailConfigured ? `
+        <form method="post" action="/profile/verify-email" class="inline-form">${csrf}
+          <button class="btn btn-outline btn-sm" type="submit">Resend verification email</button>
+        </form>
+        <p class="fineprint">Posting on the forum requires a verified email.</p>` : ''}
       ${upgradeNote}
     </div>
 

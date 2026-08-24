@@ -15,7 +15,7 @@ import * as limits from "./limits.js";
 import { verifyPassword } from "./crypto.js";
 import { audit, clientIp, formBody } from "./middleware.js";
 import { issueLicense, verifyLicense } from "./license.js";
-import { tierOf, meetsTier } from "./tiers.js";
+import { tierOf, meetsTier, paidExpired } from "./tiers.js";
 
 /** Reads the request body as form fields or JSON, whichever the client sent. */
 async function apiBody(c) {
@@ -71,8 +71,12 @@ function register(app) {
       ok: true,
       userId: user.id,
       username: user.username,
-      tier: tierOf(user),
+      tier: tierOf(user),          // already reflects an expired Paid as "user"
       paid: meetsTier(user, 'paid'),
+      subscription: {
+        paidUntil: user.paid_until === null || user.paid_until === undefined ? null : Number(user.paid_until),
+        expired: paidExpired(user),
+      },
       license,
     });
   });
@@ -91,7 +95,7 @@ function register(app) {
     // member who was upgraded/downgraded since the token was issued is
     // reflected immediately rather than after the token expires.
     const row = await c.get('db').get(
-      'SELECT tier, banned FROM users WHERE id = ?', Number(license.userId)
+      'SELECT tier, banned, paid_until FROM users WHERE id = ?', Number(license.userId)
     );
     const live = row && !row.banned;
     return c.json({
@@ -99,6 +103,10 @@ function register(app) {
       valid: live,
       tier: live ? tierOf(row) : null,
       paid: live ? meetsTier(row, 'paid') : false,
+      subscription: live ? {
+        paidUntil: row.paid_until === null || row.paid_until === undefined ? null : Number(row.paid_until),
+        expired: paidExpired(row),
+      } : null,
     });
   });
 }

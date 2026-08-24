@@ -2,14 +2,58 @@ import * as views from "./views/auth.js";
 import * as captcha from "./captcha.js";
 import * as limits from "./limits.js";
 import { hashPassword, verifyPassword } from "./crypto.js";
-import { createSession, destroySession, audit, clientIp, formBody, setFlash, } from "./middleware.js";
+import {
+  createSession, destroySession, destroyUserSessions,
+  audit, clientIp, formBody, setFlash,
+} from "./middleware.js";
+import { sendEmail, isEmailConfigured } from "./email.js";
+import { createAuthToken, peekAuthToken, consumeAuthToken } from "./tokens.js";
+import { verifyTurnstile } from "./turnstile.js";
 import { tooMany } from "./routes-main.js";
 
 const USERNAME_RE = /^[A-Za-z0-9_]{3,20}$/;
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/; // also used by the profile email-change flow
 const RESERVED_USERNAMES = new Set([
   'admin', 'administrator', 'moderator', 'system', 'goyhub', 'root', 'support', 'staff',
+  'goy', 'goyim', // seeded brand accounts (UID 1 / UID 0)
 ]);
+
+/**
+ * Common throwaway-email domains, blocked at signup and email change so
+ * mass-created accounts can't hide behind disposable inboxes. Extend via the
+ * DISPOSABLE_EMAIL_DOMAINS env var (comma-separated).
+ */
+const DISPOSABLE_DOMAINS = new Set([
+  'mailinator.com', 'guerrillamail.com', 'guerrillamail.net', 'sharklasers.com',
+  '10minutemail.com', '10minutemail.net', 'temp-mail.org', 'tempmail.com', 'tempmail.dev',
+  'yopmail.com', 'trashmail.com', 'dispostable.com', 'getnada.com', 'maildrop.cc',
+  'mintemail.com', 'throwawaymail.com', 'fakeinbox.com', 'mailnesia.com', 'spamgourmet.com',
+  'mytemp.email', 'burnermail.io', 'temp-mail.io', 'moakt.com', 'tmpmail.org', 'emailondeck.com',
+]);
+
+function isDisposableEmail(email, env = {}) {
+  const domain = String(email).toLowerCase().split('@')[1] || '';
+  if (DISPOSABLE_DOMAINS.has(domain)) return true;
+  return String(env.DISPOSABLE_EMAIL_DOMAINS || '')
+    .toLowerCase().split(',').map((d) => d.trim()).filter(Boolean)
+    .includes(domain);
+}
+
+/** Fire-and-forget verification email; failures are logged, never fatal. */
+async function sendVerificationEmail(c, user) {
+  const cfg = c.get('cfg');
+  if (!isEmailConfigured(cfg)) return;
+  const raw = await createAuthToken(c.get('db'), 'verify', user.id);
+  const origin = new URL(c.req.url).origin;
+  await sendEmail(cfg, {
+    to: user.email,
+    subject: 'Verify your GoyHub email',
+    text: `Hi ${user.username},\n\n`
+      + `Confirm this email address for your GoyHub account by opening:\n\n`
+      + `${origin}/auth/verify/${raw}\n\n`
+      + `The link is valid for 24 hours. If you didn't create this account, ignore this email.\n\n— GoyHub`,
+  });
+}
 
 /** Only allow same-site relative redirect targets. */
 function safeNext(raw) {
@@ -67,11 +111,13 @@ function register(app) {
     if (!USERNAME_RE.test(username)) errors.push('Username must be 3–20 characters: letters, numbers and underscores only.');
     else if (RESERVED_USERNAMES.has(username.toLowerCase())) errors.push('That username is reserved.');
     if (!EMAIL_RE.test(email) || email.length > 254) errors.push('Enter a valid email address.');
+    else if (isDisposableEmail(email, c.get('cfg'))) errors.push('Disposable email addresses cannot be used — use a real inbox.');
     if (password.length < 8 || password.length > 128) errors.push('Password must be 8–128 characters.');
     if (password !== confirm) errors.push('Passwords do not match.');
 
-    // Bot gate before the uniqueness query, so a scripted signup can't probe
-    // which names are already taken.
+    // Bot gates before the uniqueness query, so a scripted signup can't probe
+    // which names are already taken. Proof-of-work is always on; Turnstile is
+    // an optional second layer when its env keys are configured.
     const botCheck = await captcha.verify(db, {
       token: body.captcha_token,
       solution: body.captcha_solution,
@@ -81,6 +127,11 @@ function register(app) {
     if (!botCheck.ok) {
       await audit(c, 'captcha_failed', { username: username.slice(0, 60), detail: botCheck.reason });
       errors.push('Human verification failed. Complete the "I\'m not a bot" check and try again.');
+    }
+    const tsCheck = await verifyTurnstile(c.get('cfg'), body['cf-turnstile-response'], clientIp(c));
+    if (!tsCheck.ok) {
+      await audit(c, 'captcha_failed', { username: username.slice(0, 60), detail: `turnstile: ${tsCheck.error}` });
+      errors.push('The Cloudflare check did not pass. Reload the page and try again.');
     }
 
     if (errors.length === 0) {
@@ -104,8 +155,108 @@ function register(app) {
       clientIp(c), userId
     );
     await createSession(c, userId);
-    setFlash(c, 'success', `Welcome to GoyHub, ${username}! Your account is ready.`);
+    await sendVerificationEmail(c, { id: userId, username, email });
+    setFlash(c, 'success', isEmailConfigured(c.get('cfg'))
+      ? `Welcome to GoyHub, ${username}! We've emailed you a verification link.`
+      : `Welcome to GoyHub, ${username}! Your account is ready.`);
     return c.redirect('/', 302);
+  });
+
+  // ----- Password reset (email link) -----
+
+  app.get('/auth/forgot', (c) => c.html(views.forgot(c.get('view'), {
+    emailConfigured: isEmailConfigured(c.get('cfg')),
+  })));
+
+  app.post('/auth/forgot', async (c) => {
+    const db = c.get('db');
+    const cfg = c.get('cfg');
+
+    const verdict = await limits.check(db, 'reset', clientIp(c), cfg);
+    if (!verdict.ok) return tooMany(c, verdict.retryAfterSec);
+
+    const body = await formBody(c);
+    const identifier = String(body.identifier || '').trim().slice(0, 254);
+    const user = identifier
+      ? await db.get('SELECT id, username, email, banned FROM users WHERE username = ? OR email = ?', identifier, identifier)
+      : null;
+
+    // Same response whether or not the account exists — no enumeration oracle.
+    if (user && !user.banned && isEmailConfigured(cfg)) {
+      const raw = await createAuthToken(db, 'reset', user.id);
+      const origin = new URL(c.req.url).origin;
+      await audit(c, 'password_reset_requested', { userId: user.id, username: user.username });
+      await sendEmail(cfg, {
+        to: user.email,
+        subject: 'Reset your GoyHub password',
+        text: `Hi ${user.username},\n\n`
+          + `Someone (hopefully you) asked to reset the password for this GoyHub account. Open:\n\n`
+          + `${origin}/auth/reset/${raw}\n\n`
+          + `The link works once and expires in 1 hour. If you didn't ask for this, ignore this email — `
+          + `your password is unchanged.\n\n— GoyHub`,
+      });
+    }
+    setFlash(c, 'success', 'If that account exists, a reset link is on its way to its email address.');
+    return c.redirect('/auth/login', 302);
+  });
+
+  app.get('/auth/reset/:token', async (c) => {
+    const token = c.req.param('token');
+    const row = await peekAuthToken(c.get('db'), 'reset', token);
+    if (!row) {
+      setFlash(c, 'error', 'That reset link is invalid or has expired. Request a new one.');
+      return c.redirect('/auth/forgot', 302);
+    }
+    return c.html(views.resetPassword(c.get('view'), { token, errors: [] }));
+  });
+
+  app.post('/auth/reset/:token', async (c) => {
+    const db = c.get('db');
+    const token = c.req.param('token');
+    const body = await formBody(c);
+    const password = String(body.password || '');
+    const confirm = String(body.confirm || '');
+
+    const errors = [];
+    if (password.length < 8 || password.length > 128) errors.push('Password must be 8–128 characters.');
+    if (password !== confirm) errors.push('Passwords do not match.');
+    if (errors.length > 0) {
+      // Only validation failed — the token stays live for the retry.
+      if (!(await peekAuthToken(db, 'reset', token))) {
+        setFlash(c, 'error', 'That reset link is invalid or has expired. Request a new one.');
+        return c.redirect('/auth/forgot', 302);
+      }
+      return c.html(views.resetPassword(c.get('view'), { token, errors }), 400);
+    }
+
+    const row = await consumeAuthToken(db, 'reset', token);
+    if (!row) {
+      setFlash(c, 'error', 'That reset link is invalid or has expired. Request a new one.');
+      return c.redirect('/auth/forgot', 302);
+    }
+
+    const user = await db.get('SELECT id, username FROM users WHERE id = ?', row.user_id);
+    await db.run('UPDATE users SET password_hash = ? WHERE id = ?', await hashPassword(password), row.user_id);
+    await destroyUserSessions(db, row.user_id); // a reset means the old credentials can't be trusted
+    await audit(c, 'password_reset', { userId: row.user_id, username: user ? user.username : null });
+    setFlash(c, 'success', 'Password updated — log in with your new password.');
+    return c.redirect('/auth/login', 302);
+  });
+
+  // ----- Email verification -----
+
+  app.get('/auth/verify/:token', async (c) => {
+    const db = c.get('db');
+    const row = await consumeAuthToken(db, 'verify', c.req.param('token'));
+    if (!row) {
+      setFlash(c, 'error', 'That verification link is invalid or has expired. Request a new one from your profile.');
+      return c.redirect(c.get('user') ? '/profile' : '/auth/login', 302);
+    }
+    await db.run("UPDATE users SET email_verified_at = datetime('now') WHERE id = ?", row.user_id);
+    const user = await db.get('SELECT username FROM users WHERE id = ?', row.user_id);
+    await audit(c, 'email_verified', { userId: row.user_id, username: user ? user.username : null });
+    setFlash(c, 'success', 'Email verified — thanks!');
+    return c.redirect(c.get('user') ? '/profile' : '/auth/login', 302);
   });
 
   // Unlike signup, login stays reachable while signed in: it acts as an
@@ -179,4 +330,4 @@ function register(app) {
   });
 }
 
-export { register, EMAIL_RE };
+export { register, EMAIL_RE, sendVerificationEmail, isDisposableEmail };

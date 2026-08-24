@@ -28,8 +28,22 @@ function normalizeTier(tier) {
   return TIER_RANK[tier] !== undefined ? tier : 'user';
 }
 
+/**
+ * A Paid membership can carry an expiry (users.paid_until, ms epoch;
+ * NULL = lifetime). An expired Paid account is treated as Free everywhere
+ * without a background job — every access check funnels through here.
+ * Staff tiers never expire.
+ */
+function paidExpired(user) {
+  return normalizeTier(user.tier) === 'paid'
+    && user.paid_until !== null && user.paid_until !== undefined
+    && Number(user.paid_until) <= Date.now();
+}
+
 function tierOf(user) {
-  return user ? normalizeTier(user.tier) : 'user';
+  if (!user) return 'user';
+  if (paidExpired(user)) return 'user';
+  return normalizeTier(user.tier);
 }
 
 function rankOf(tier) {
@@ -51,4 +65,4 @@ function isFullAdmin(user) {
   return tierOf(user) === 'admin';
 }
 
-export { TIERS, TIER_RANK, TIER_LABELS, STAFF_TIERS, normalizeTier, tierOf, rankOf, meetsTier, isStaff, isFullAdmin };
+export { TIERS, TIER_RANK, TIER_LABELS, STAFF_TIERS, normalizeTier, tierOf, rankOf, meetsTier, isStaff, isFullAdmin, paidExpired };

@@ -514,8 +514,14 @@ textarea { resize: vertical; min-height: 90px; }
 
 .shoutbox { margin-top: 1.4rem; padding-top: 1.2rem; border-top: 1px solid var(--border); }
 .shoutbox h2 { font-size: 1rem; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); margin-bottom: 0.9rem; }
-.shout-list { display: flex; flex-direction: column; gap: 0.5rem; max-height: 260px; overflow-y: auto; margin-bottom: 0.9rem; }
-.shout-row { display: flex; flex-direction: column; font-size: 0.85rem; padding: 0.45rem 0.6rem; border-radius: 7px; background: var(--bg-2); }
+.shout-list { display: flex; flex-direction: column; gap: 0.5rem; height: 260px; overflow-y: auto; margin-bottom: 0.9rem; }
+.shout-row { position: relative; display: flex; flex-direction: column; flex-shrink: 0; font-size: 0.85rem; padding: 0.45rem 1.6rem 0.45rem 0.6rem; border-radius: 7px; background: var(--bg-2); }
+.shout-del-form { position: absolute; top: 0.3rem; right: 0.4rem; }
+.shout-del {
+  background: transparent; border: 0; cursor: pointer; color: var(--muted);
+  font-size: 0.75rem; padding: 0.1rem 0.25rem; border-radius: 4px;
+}
+.shout-del:hover { color: var(--danger); background: rgba(192, 24, 41, 0.1); }
 .shout-user { font-weight: 700; color: var(--text); }
 .shout-body { color: var(--text-soft); overflow-wrap: break-word; }
 .shout-time { font-size: 0.72rem; }
@@ -580,6 +586,26 @@ textarea { resize: vertical; min-height: 90px; }
 .report-form { display: flex; gap: 0.4rem; margin-top: 0.5rem; flex-wrap: wrap; }
 .report-form input { flex: 1; min-width: 220px; padding: 0.45rem 0.7rem; font-size: 0.87rem; }
 .form-row { display: flex; gap: 0.7rem; align-items: center; flex-wrap: wrap; }
+.uid-badge {
+  display: inline-block; font-family: var(--mono); font-size: 0.68rem; font-weight: 700;
+  letter-spacing: 0.06em; padding: 0.1rem 0.45rem; border-radius: 5px; vertical-align: middle;
+  background: var(--panel-2); color: var(--muted); border: 1px solid var(--border);
+}
+.uid-badge.uid-reserved { background: var(--accent-soft); color: var(--accent); border-color: var(--accent); }
+.title-edit summary { list-style: none; cursor: pointer; }
+.title-edit summary::-webkit-details-marker { display: none; }
+.title-edit-form { display: flex; gap: 0.4rem; margin-top: 0.5rem; flex-wrap: wrap; }
+.title-edit-form input { min-width: 260px; flex: 1; padding: 0.45rem 0.7rem; font-size: 0.9rem; }
+.admin-user-tools { display: inline-block; font-size: 0.85rem; margin-top: 0.3rem; }
+.admin-user-tools summary { cursor: pointer; color: var(--muted); }
+.admin-user-tools summary:hover { color: var(--accent); }
+.admin-user-tools[open] { display: block; }
+.admin-user-tools .inline-form { display: flex; gap: 0.3rem; margin-top: 0.4rem; align-items: center; }
+.admin-user-tools input { width: 160px; padding: 0.35rem 0.6rem; font-size: 0.82rem; }
+.paid-days-input { width: 70px; padding: 0.35rem 0.5rem; font-size: 0.82rem; }
+.cat-edit-form { gap: 0.4rem; margin-top: 0.5rem; max-width: 320px; }
+.cat-edit-form input { padding: 0.4rem 0.6rem; font-size: 0.85rem; }
+.cf-turnstile { margin: 0.4rem 0; }
 .post-list { display: flex; flex-direction: column; gap: 1rem; margin-bottom: 2rem; }
 .post {
   display: grid; grid-template-columns: 170px 1fr;

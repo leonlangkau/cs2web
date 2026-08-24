@@ -4,6 +4,8 @@ import { errorPage } from "./views/site.js";
 import { TIER_LABELS, meetsTier, isStaff, isFullAdmin } from "./tiers.js";
 import * as limits from "./limits.js";
 import { getSetting, ANNOUNCEMENT_KEY } from "./settings.js";
+import { isTurnstileConfigured } from "./turnstile.js";
+import { isEmailConfigured } from "./email.js";
 
 const SESSION_COOKIE = 'ghsession';
 const CSRF_COOKIE = 'ghcsrf';
@@ -67,9 +69,14 @@ function userAgent(c) {
 
 const securityHeaders = async (c, next) => {
   await next();
+  // The CSP stays fully self-contained unless Turnstile is enabled, in which
+  // case exactly its Cloudflare origin is allowed for script/frame/connect.
+  const ts = isTurnstileConfigured(c.get('cfg') || {});
+  const cf = ts ? ' https://challenges.cloudflare.com' : '';
   c.header('Content-Security-Policy',
-    "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; "
-    + "font-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'");
+    `default-src 'self'; script-src 'self'${cf}; style-src 'self'; img-src 'self' data:; `
+    + `font-src 'self'; connect-src 'self'${cf}; frame-src${ts ? cf : " 'none'"}; `
+    + "frame-ancestors 'none'; base-uri 'self'; form-action 'self'");
   c.header('X-Content-Type-Options', 'nosniff');
   c.header('X-Frame-Options', 'DENY');
   c.header('Referrer-Policy', 'no-referrer');
@@ -136,6 +143,7 @@ const loadContext = async (c, next) => {
     appName: 'GoyHub',
     appVersion: c.get('appVersion'),
     announcement: '',
+    turnstileSiteKey: isTurnstileConfigured(c.get('cfg') || {}) ? c.get('cfg').TURNSTILE_SITE_KEY : '',
   };
   c.set('view', view);
 
@@ -165,7 +173,7 @@ const loadContext = async (c, next) => {
   if (token) {
     const row = /^[a-f0-9]{64}$/.test(token)
       ? await db.get(
-        `SELECT u.id, u.username, u.email, u.role, u.tier, u.banned, u.created_at,
+        `SELECT u.id, u.username, u.email, u.role, u.tier, u.banned, u.created_at, u.email_verified_at, u.paid_until,
                 s.id AS session_id, s.csrf_hash
          FROM sessions s JOIN users u ON u.id = s.user_id
          WHERE s.token_hash = ? AND s.expires_at > datetime('now')`,
@@ -377,6 +385,21 @@ function requireStaff(c) {
 }
 
 /**
+ * Anti-bot posting gate: once outbound email is configured, writing to the
+ * forum/shoutbox requires a verified email address. Staff are exempt, and
+ * with no email provider configured the gate is off (nobody could verify).
+ * Returning null = allowed; otherwise a redirect back with an explanation.
+ */
+function requireVerifiedEmail(c) {
+  const cfg = c.get('cfg') || {};
+  if (!isEmailConfigured(cfg) || String(cfg.REQUIRE_VERIFIED_EMAIL || '') === '0') return null;
+  const user = c.get('user');
+  if (!user || user.email_verified_at || isStaff(user)) return null;
+  setFlash(c, 'error', 'Verify your email address before posting — there\'s a resend button on your profile.');
+  return c.redirect('/profile', 302);
+}
+
+/**
  * Content-tier gate (forum, download): requires sign-in and at least
  * `minTier`. Unlike requireAdmin/requireStaff this is meant to be
  * discoverable, so a logged-in user under the tier gets a real 403
@@ -404,5 +427,5 @@ export {
   securityHeaders, loadContext, csrfProtection, termsGate, ipBanGate, floodProtection,
   createSession, destroySession, destroyUserSessions,
   acceptTerms, setFlash, formBody, requireAuth, requireAdmin, requireStaff, requireTier,
-  clientIp, userAgent, audit, cookieOptions,
+  requireVerifiedEmail, clientIp, userAgent, audit, cookieOptions,
 };

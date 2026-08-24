@@ -14,6 +14,16 @@
     });
   }
 
+  /* ---------- Scraper-resistant contact emails ---------- */
+  document.querySelectorAll('.email-protect').forEach(function (a) {
+    var u = a.getAttribute('data-u');
+    var d = a.getAttribute('data-d');
+    if (!u || !d) return;
+    var addr = u + '@' + d;
+    a.href = 'mailto:' + addr;
+    a.textContent = addr;
+  });
+
   /* ---------- Announcement banner (dismiss persists per message) ---------- */
   var announcement = document.getElementById('announcement');
   if (announcement) {
@@ -56,16 +66,28 @@
       return String(s).replace(/[&<>"']/g, function (c) { return shoutEscapes[c]; });
     };
 
+    var STAFF_TIERS = { developer: 1, trial_admin: 1, admin: 1 };
     function renderShout(s) {
       var row = document.createElement('div');
       row.className = 'shout-row';
       row.setAttribute('data-id', s.id);
-      var staff = s.author_role === 'admin' ? ' <span class="tag tag-admin">STAFF</span>' : '';
-      row.innerHTML = '<span class="shout-user">' + escapeHtml(s.username) + staff + '</span>'
+      var staffTag = STAFF_TIERS[s.author_tier] ? ' <span class="tag tag-admin">STAFF</span>' : '';
+      var del = '';
+      if (shoutbox.getAttribute('data-staff') === '1') {
+        del = '<form method="post" action="/forum/shouts/' + encodeURIComponent(s.id)
+          + '/delete" class="inline-form shout-del-form" data-confirm="Delete this shout?">'
+          + '<input type="hidden" name="_csrf" value="' + escapeHtml(shoutbox.getAttribute('data-csrf') || '') + '">'
+          + '<button class="shout-del" type="submit" aria-label="Delete shout">\u2715</button></form>';
+      }
+      row.innerHTML = '<span class="shout-user">' + escapeHtml(s.username) + staffTag + '</span>'
         + '<span class="shout-body">' + escapeHtml(s.body) + '</span>'
-        + '<span class="shout-time muted">just now</span>';
+        + '<span class="shout-time muted">just now</span>'
+        + del;
       return row;
     }
+
+    // Open the box scrolled to the newest message, like a chat window.
+    if (shoutList) shoutList.scrollTop = shoutList.scrollHeight;
 
     function pollShouts() {
       fetch('/forum/shoutbox?after=' + lastShoutId, { headers: { 'X-Requested-With': 'fetch' } })
@@ -85,7 +107,11 @@
         .catch(function () { /* offline or blocked — next poll just retries */ });
     }
 
-    setInterval(pollShouts, 15000);
+    // "Live" via fast polling — 5s while the tab is visible, paused when
+    // hidden (with an immediate catch-up poll when the tab comes back).
+    setInterval(function () {
+      if (!document.hidden) pollShouts();
+    }, 5000);
     document.addEventListener('visibilitychange', function () {
       if (!document.hidden) pollShouts();
     });

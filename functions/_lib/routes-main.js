@@ -8,6 +8,20 @@ import { DELETED_USERNAME } from "./bootstrap.js";
 import { audit, clientIp, requireAuth, requireTier, acceptTerms, formBody, setFlash, TERMS_VERSION, } from "./middleware.js";
 import { meetsTier } from "./tiers.js";
 import { issueLicense } from "./license.js";
+import { newToken } from "./crypto.js";
+
+/**
+ * Per-download filename so the served attachment is never a predictable,
+ * cacheable, shareable URL-to-name mapping. Keeps the real base name and
+ * extension (installers must stay double-clickable) but injects a random,
+ * per-request token: GoyHub-Setup-1.0.0.zip -> GoyHub-Setup-1.0.0-a1b2c3d4.zip
+ */
+function scrambledFilename(name) {
+  const token = newToken(4); // 8 hex chars
+  const dot = name.lastIndexOf('.');
+  if (dot < 1) return `${name}-${token}`;
+  return `${name.slice(0, dot)}-${token}${name.slice(dot)}`;
+}
 
 const DOWNLOAD_META = {
   sha256: installer.sha256,
@@ -126,9 +140,11 @@ function register(app) {
 
   app.get('/download', (c) => c.html(views.downloadPage(c.get('view'), { downloadMeta: DOWNLOAD_META })));
 
-  app.get('/upgrade', (c) => c.html(views.upgradePage(c.get('view'), {
+  const buyPage = (c) => c.html(views.upgradePage(c.get('view'), {
     pay: paymentConfig(c.get('cfg')),
-  })));
+  }));
+  app.get('/upgrade', buyPage);
+  app.get('/buy', buyPage); // same page, friendlier URL
 
   // Paid members only: anonymous visitors are sent to log in, and a signed-in
   // Free account gets a clear "upgrade" message — the artifact is never
@@ -149,11 +165,12 @@ function register(app) {
       }), 503);
     }
 
-    await audit(c, 'download', { userId: user.id, username: user.username, detail: installer.name });
+    const filename = scrambledFilename(installer.name);
+    await audit(c, 'download', { userId: user.id, username: user.username, detail: filename });
     return new Response(body, {
       headers: {
         'Content-Type': 'application/zip',
-        'Content-Disposition': `attachment; filename="${installer.name}"`,
+        'Content-Disposition': `attachment; filename="${filename}"`,
         'Cache-Control': 'no-store',
       },
     });
@@ -191,4 +208,4 @@ async function loadInstaller(c) {
   return null;
 }
 
-export { register, siteStats, tooMany, safePath, paymentConfig, DOWNLOAD_META };
+export { register, siteStats, tooMany, safePath, paymentConfig, scrambledFilename, DOWNLOAD_META };

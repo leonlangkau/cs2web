@@ -61,4 +61,18 @@ function pagination(page, pages, hrefFor, label = 'Pages') {
 /** Joins a list through a render function. */
 const map = (items, fn) => items.map(fn).join('');
 
-export { esc, timeAgo, pageWindow, pagination, map };
+/**
+ * Scraper-resistant contact-email link. The address never appears joined in
+ * the HTML source: user and domain sit in separate data attributes and
+ * main.js assembles the real mailto link client-side. No-JS visitors see a
+ * human-readable "user [at] domain".
+ */
+function emailLink(email) {
+  const at = String(email ?? '').indexOf('@');
+  if (at < 1) return esc(email);
+  const user = String(email).slice(0, at);
+  const domain = String(email).slice(at + 1);
+  return `<a class="email-protect" data-u="${esc(user)}" data-d="${esc(domain)}">${esc(user)}&#8203;&nbsp;[at]&nbsp;${esc(domain)}</a>`;
+}
+
+export { esc, timeAgo, pageWindow, pagination, map, emailLink };

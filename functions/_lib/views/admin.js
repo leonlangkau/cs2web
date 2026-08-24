@@ -89,24 +89,40 @@ function users(ctx, { users: rows, q, page: current, pages, total, tiers, tierLa
   const canManageTiers = isFullAdmin(ctx.user);
 
   const actions = (u) => {
-    if (u.id === ctx.user.id) return '<span class="muted">you</span>';
+    const profileLink = `<a class="btn btn-ghost btn-xs" href="/u/${encodeURIComponent(u.username)}">Profile</a>`;
+    if (u.id === ctx.user.id) return `<span class="muted">you</span> ${profileLink}`;
     const banBtn = u.banned
       ? `<form method="post" action="/admin/users/${esc(u.id)}/unban" class="inline-form">${csrf}<button class="btn btn-ghost btn-xs" type="submit">Unban</button></form>`
       : `<form method="post" action="/admin/users/${esc(u.id)}/ban" class="inline-form" data-confirm="Ban ${esc(u.username)}? They will be signed out everywhere.">${csrf}<button class="btn btn-warn btn-xs" type="submit">Ban</button></form>`;
 
-    if (!canManageTiers) return banBtn;
+    if (!canManageTiers) return `${profileLink} ${banBtn}`;
 
     const tierSelect = `<form method="post" action="/admin/users/${esc(u.id)}/tier" class="inline-form"
           data-confirm="Set ${esc(u.username)}'s tier to the selected value?">${csrf}
         <select name="tier" aria-label="Tier for ${esc(u.username)}">
           ${map(tiers, (t) => `<option value="${esc(t)}" ${u.tier === t ? 'selected' : ''}>${esc(tierLabels[t] || t)}</option>`)}
         </select>
+        <input type="number" name="paid_days" min="1" max="3650" placeholder="days"
+               title="Paid duration in days — leave empty for lifetime (Paid tier only)" class="paid-days-input">
         <button class="btn btn-ghost btn-xs" type="submit">Set</button></form>`;
 
-    return `${banBtn} ${tierSelect}
+    const moreTools = `<details class="admin-user-tools"><summary class="muted">More</summary>
+      <form method="post" action="/admin/users/${esc(u.id)}/password" class="inline-form"
+            data-confirm="Set a new password for ${esc(u.username)}? Their sessions will be signed out.">${csrf}
+        <input type="password" name="password" minlength="8" maxlength="128" required
+               placeholder="new password" aria-label="New password for ${esc(u.username)}" autocomplete="new-password">
+        <button class="btn btn-warn btn-xs" type="submit">Set password</button></form>
+      <form method="post" action="/admin/users/${esc(u.id)}/uid" class="inline-form"
+            data-confirm="Move ${esc(u.username)} to the entered UID?">${csrf}
+        <input type="number" name="uid" min="0" max="1001" required placeholder="UID 0–1001"
+               aria-label="New UID for ${esc(u.username)}">
+        <button class="btn btn-ghost btn-xs" type="submit">Set UID</button></form>
       <form method="post" action="/admin/users/${esc(u.id)}/delete" class="inline-form"
             data-confirm="Permanently delete ${esc(u.username)}? Their threads and posts stay on the forum, reattributed to [deleted].">${csrf}
-        <button class="btn btn-danger btn-xs" type="submit">Delete</button></form>`;
+        <button class="btn btn-danger btn-xs" type="submit">Delete</button></form>
+    </details>`;
+
+    return `${profileLink} ${banBtn} ${tierSelect} ${moreTools}`;
   };
 
   const body = `
@@ -126,8 +142,15 @@ function users(ctx, { users: rows, q, page: current, pages, total, tiers, tierLa
       <tbody>${map(rows, (u) => `<tr class="${u.banned ? 'row-banned' : ''}">
         <td><strong>${esc(u.username)}</strong>${tierTag(u.tier)}
           ${u.banned ? '<span class="tag tag-banned">BANNED</span>' : ''}
-          <div class="muted">#${esc(u.id)} · joined ${esc(timeAgo(u.created_at))}</div></td>
-        <td>${esc(u.email)}</td>
+          <div class="muted"><span class="uid-badge${u.id <= 1001 ? ' uid-reserved' : ''}">UID ${esc(u.id)}</span>
+            · joined ${esc(timeAgo(u.created_at))}
+            ${u.tier === 'paid' ? (u.paid_until
+              ? ` · Paid ${Number(u.paid_until) > Date.now()
+                  ? `until ${esc(new Date(Number(u.paid_until)).toISOString().slice(0, 10))}`
+                  : '<span class="tag tag-banned">EXPIRED</span>'}`
+              : ' · Paid (lifetime)') : ''}</div></td>
+        <td>${esc(u.email)}
+          <div class="muted">${u.email_verified_at ? '✓ verified' : 'unverified'}</div></td>
         <td class="mono">${esc(u.signup_ip || '—')}</td>
         <td><span class="mono">${esc(u.last_login_ip || '—')}</span><div class="muted">${esc(timeAgo(u.last_login_at))}</div></td>
         <td>${esc(u.post_count)}</td>
@@ -265,7 +288,13 @@ function forumAdmin(ctx, { categories, threads }) {
         <div class="table-wrap"><table>
           <thead><tr><th>Name</th><th>Slug</th><th>Threads</th><th></th></tr></thead>
           <tbody>${map(categories, (c) => `<tr>
-            <td><strong>${esc(c.name)}</strong><div class="muted">${esc(c.description)}</div></td>
+            <td><strong>${esc(c.name)}</strong><div class="muted">${esc(c.description)}</div>
+              ${canManageCategories ? `<details class="admin-user-tools"><summary class="muted">Edit</summary>
+                <form method="post" action="/admin/categories/${esc(c.id)}/edit" class="stack cat-edit-form">${csrf}
+                  <input type="text" name="name" required minlength="2" maxlength="50" value="${esc(c.name)}" aria-label="Category name">
+                  <input type="text" name="description" maxlength="300" value="${esc(c.description)}" aria-label="Category description">
+                  <button class="btn btn-primary btn-xs" type="submit">Save</button>
+                </form></details>` : ''}</td>
             <td class="mono">${esc(c.slug)}</td>
             <td>${esc(c.thread_count)}</td>
             <td class="actions-cell">${canManageCategories ? `

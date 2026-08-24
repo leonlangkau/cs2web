@@ -12,6 +12,8 @@ import { leadingZeroBits } from "../functions/_lib/captcha.js";
 import { seed } from "../functions/_lib/bootstrap.js";
 import { verifyPassword } from "../functions/_lib/crypto.js";
 import { verifyLicense } from "../functions/_lib/license.js";
+import { verifyTurnstile } from "../functions/_lib/turnstile.js";
+import { scrambledFilename } from "../functions/_lib/routes-main.js";
 import buildSchema from "../scripts/build-schema.cjs";
 import buildInstaller from "../scripts/build-installer.cjs";
 
@@ -283,7 +285,14 @@ test("public pages, forum, legal, gate, auth, captcha, admin, moderation, downlo
   assert.equal(Number((await db.get("SELECT COUNT(*) AS n FROM ip_logs WHERE event = 'download'")).n), 0, "anon download not logged");
   res = await admin.get("/download/file");
   const buf = await res.arrayBuffer();
-  assert.ok(res.status === 200 && buf.byteLength > 0 && String(res.headers.get("content-disposition")).includes(".zip"), "member download");
+  const disp = String(res.headers.get("content-disposition"));
+  assert.ok(res.status === 200 && buf.byteLength > 0 && disp.includes(".zip"), "member download");
+  // Filename is scrambled per-download: real base kept, random token injected.
+  assert.ok(/filename="GoyHub-Setup-1\.0\.0-[a-f0-9]{8}\.zip"/.test(disp), "download filename is scrambled");
+  const res2 = await admin.get("/download/file");
+  await res2.arrayBuffer();
+  assert.notEqual(res.headers.get("content-disposition"), res2.headers.get("content-disposition"),
+    "each download gets a different filename");
   assert.ok(await db.get("SELECT id FROM ip_logs WHERE event = 'download' AND username = 'admin'"), "download logged");
 
   html = await (await anon.get("/")).text();
@@ -896,8 +905,291 @@ test("admin IP privacy: admins' addresses are hidden from other staff in the pan
   const ownHtml = await (await admin.get("/admin/users")).text();
   assert.ok(ownHtml.includes("198.51.100.7"), "admins still see their own IP");
 
-  // Non-admin staff IPs stay visible to staff — only admin-tier rows are masked.
+  // ALL staff tiers are masked from other viewers — the admin can't read the
+  // developer's IP either; the developer still sees their own.
   await db.run("UPDATE users SET signup_ip = '203.0.113.99' WHERE username = 'dev_staff'");
   const adminView = await (await admin.get("/admin/users")).text();
-  assert.ok(adminView.includes("203.0.113.99"), "staff (non-admin) IPs remain visible");
+  assert.ok(!adminView.includes("203.0.113.99"), "staff IPs are hidden from other staff, admins included");
+  const devOwnView = await (await dev.get("/admin/users")).text();
+  assert.ok(devOwnView.includes("203.0.113.99"), "staff still see their own IP");
+});
+
+test("vanity UIDs: goyim=0 goy=1 omelette=2, reserved block, signups start at 1002", async () => {
+  const { app, db } = await buildTestApp(ENV);
+
+  for (const [name, uid] of [["goyim", 0], ["goy", 1], ["omelette", 2]]) {
+    const row = await db.get("SELECT id, tier FROM users WHERE username = ?", name);
+    assert.ok(row, `${name} account seeded`);
+    assert.equal(Number(row.id), uid, `${name} holds UID ${uid}`);
+  }
+  const admin = await db.get("SELECT id FROM users WHERE username = 'admin'");
+  assert.equal(Number(admin.id), 3, "seeded admin relocated to UID 3 (omelette took 2)");
+  const deleted = await db.get("SELECT id FROM users WHERE username = '[deleted]'");
+  assert.equal(Number(deleted.id), 1001, "[deleted] anchors the top of the reserved block");
+
+  // Ordinary signups start above the reserved block.
+  const c = makeClient(app);
+  await c.get("/auth/signup");
+  await c.post("/auth/signup", { username: "uid_fresh", email: "uidf@example.com", password: "supersecret1", confirm: "supersecret1", ...(await solveCaptcha(c)) });
+  const fresh = await db.get("SELECT id FROM users WHERE username = 'uid_fresh'");
+  assert.ok(Number(fresh.id) >= 1002, `fresh signup got UID ${fresh.id} (>= 1002)`);
+
+  // Vanity names are reserved at signup.
+  await c.get("/auth/signup"); // signed in -> redirected, use new client
+  const c2 = makeClient(app);
+  await c2.get("/auth/signup");
+  const res = await c2.post("/auth/signup", { username: "goyim", email: "fake-goyim@example.com", password: "supersecret1", confirm: "supersecret1", ...(await solveCaptcha(c2)) });
+  assert.equal(res.status, 400, "vanity usernames cannot be registered");
+
+  // The welcome thread still belongs to the (relocated) admin and renders.
+  const adminC = makeClient(app);
+  await adminC.get("/auth/login");
+  await adminC.post("/auth/login", { identifier: "admin", password: "admin-test-password-1", next: "/" });
+  const html = await (await adminC.get("/forum/t/1")).text();
+  assert.ok(html.includes("Welcome to the GoyHub") && html.includes("UID 3"), "welcome thread survived relocation with UID shown");
+});
+
+test("admin tools: set password, set UID (relocation keeps sessions/content), paid expiry", async () => {
+  const { app, db } = await buildTestApp(ENV);
+  const admin = makeClient(app);
+  const member = makeClient(app);
+
+  await admin.get("/auth/login");
+  await admin.post("/auth/login", { identifier: "admin", password: "admin-test-password-1", next: "/" });
+
+  await member.get("/auth/signup");
+  await member.post("/auth/signup", { username: "uid_member", email: "uidm@example.com", password: "supersecret1", confirm: "supersecret1", ...(await solveCaptcha(member)) });
+  const before = await db.get("SELECT id FROM users WHERE username = 'uid_member'");
+
+  // Admin grants Paid with a 30-day expiry.
+  await admin.get("/admin/users");
+  let res = await admin.post(`/admin/users/${before.id}/tier`, { tier: "paid", paid_days: "30" });
+  assert.equal(res.status, 302);
+  let row = await db.get("SELECT tier, paid_until FROM users WHERE id = ?", before.id);
+  assert.ok(row.tier === "paid" && Number(row.paid_until) > Date.now(), "paid_until set ~30 days out");
+
+  // Member re-logs (tier change killed sessions), posts a thread.
+  await member.get("/auth/login");
+  await member.post("/auth/login", { identifier: "uid_member", password: "supersecret1", next: "/" });
+  res = await member.post("/forum/new", { category: "general", title: "UID relocation survivor", body: "hold my posts" });
+  assert.equal(res.status, 302, "paid member posts");
+
+  // Admin moves them to vanity UID 5 — content and live session must follow.
+  await admin.get("/admin/users");
+  res = await admin.post(`/admin/users/${before.id}/uid`, { uid: "5" });
+  assert.equal(res.status, 302);
+  assert.ok(!(await db.get("SELECT id FROM users WHERE id = ?", before.id)), "old UID row gone");
+  row = await db.get("SELECT id, tier FROM users WHERE username = 'uid_member'");
+  assert.equal(Number(row.id), 5, "member now at UID 5");
+  assert.ok(await db.get("SELECT id FROM threads WHERE user_id = 5 AND title = 'UID relocation survivor'"), "threads followed");
+  assert.equal((await member.get("/profile")).status, 200, "member's session survived the UID move");
+
+  // Taken UID and out-of-range UID are refused.
+  res = await admin.post(`/admin/users/5/uid`, { uid: "0" });
+  assert.equal((await db.get("SELECT id FROM users WHERE username = 'uid_member'")).id, 5, "taken UID refused");
+  await admin.post(`/admin/users/5/uid`, { uid: "5000" });
+  assert.equal((await db.get("SELECT id FROM users WHERE username = 'uid_member'")).id, 5, "out-of-range UID refused");
+
+  // Admin sets goy's password; goy can now log in.
+  const goy = await db.get("SELECT id FROM users WHERE username = 'goy'");
+  await admin.post(`/admin/users/${goy.id}/password`, { password: "goy-password-123" });
+  const goyClient = makeClient(app);
+  await goyClient.get("/auth/login");
+  res = await goyClient.post("/auth/login", { identifier: "goy", password: "goy-password-123", next: "/" });
+  assert.equal(res.status, 302, "vanity account logs in with the admin-set password");
+
+  // Paid expiry: back-date it and the account is Free everywhere, loader included.
+  await db.run("UPDATE users SET paid_until = ? WHERE id = 5", Date.now() - 1000);
+  await member.get("/auth/login");
+  await member.post("/auth/login", { identifier: "uid_member", password: "supersecret1", next: "/" });
+  res = await member.get("/forum");
+  assert.equal(res.status, 403, "expired Paid is gated out of the forum");
+  const api = (path, body) => app.fetch(new Request("http://local" + path, {
+    method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body),
+  }), ENV);
+  const auth = await (await api("/api/loader/auth", { username: "uid_member", password: "supersecret1" })).json();
+  assert.ok(auth.ok && auth.tier === "user" && auth.paid === false && auth.subscription.expired === true,
+    "loader API reports the expired subscription");
+});
+
+test("email: verification flow + posting gate, password reset, disposable domains, obfuscation", async () => {
+  const EMAIL_ENV = { ...ENV, EMAIL_PROVIDER: "test", EMAIL_FROM: "no-reply@goyhub.test" };
+  globalThis.__testEmails = [];
+  const { app, db } = await buildTestApp(EMAIL_ENV);
+  const emailClient = () => {
+    const c = makeClient(app);
+    const wrap = (fn) => async (...args) => {
+      // makeClient closes over ENV; re-dispatch with EMAIL_ENV instead.
+      const res = await fn(...args);
+      return res;
+    };
+    return c;
+  };
+
+  // makeClient hardcodes ENV in fetch — build a local client bound to EMAIL_ENV.
+  const jarClient = () => {
+    const jar = new Map();
+    const store = (res) => {
+      for (const line of res.headers.getSetCookie()) {
+        const [pair] = line.split(";");
+        const i = pair.indexOf("=");
+        if (pair.slice(i + 1).trim() === "") jar.delete(pair.slice(0, i).trim());
+        else jar.set(pair.slice(0, i).trim(), pair.slice(i + 1).trim());
+      }
+    };
+    const req = async (method, path, body) => {
+      const headers = { cookie: [...jar].map(([k, v]) => `${k}=${v}`).join("; ") };
+      let payload;
+      if (body) {
+        headers["content-type"] = "application/x-www-form-urlencoded";
+        payload = new URLSearchParams(body).toString();
+      }
+      const res = await app.fetch(new Request("http://local" + path, { method, headers, body: payload }), EMAIL_ENV);
+      store(res);
+      return res;
+    };
+    return {
+      jar,
+      get: (p) => req("GET", p),
+      post: (p, b = {}) => req("POST", p, { _csrf: jar.get("ghcsrf") || "", ...b }),
+    };
+  };
+
+  // Disposable domains are rejected outright.
+  const spam = jarClient();
+  await spam.get("/auth/signup");
+  let res = await spam.post("/auth/signup", { username: "spammy", email: "x@mailinator.com", password: "supersecret1", confirm: "supersecret1", ...(await solveCaptcha(spam)) });
+  assert.equal(res.status, 400, "disposable email rejected at signup");
+
+  // Signup sends a verification email.
+  const u = jarClient();
+  await u.get("/auth/signup");
+  res = await u.post("/auth/signup", { username: "mail_user", email: "mail@example.com", password: "supersecret1", confirm: "supersecret1", ...(await solveCaptcha(u)) });
+  assert.equal(res.status, 302, "signup ok");
+  const verifyMail = globalThis.__testEmails.find((m) => m.to === "mail@example.com" && /verify/i.test(m.subject));
+  assert.ok(verifyMail, "verification email captured");
+
+  // Unverified paid member cannot post; the gate points at the profile.
+  await db.run("UPDATE users SET tier = 'paid' WHERE username = 'mail_user'");
+  await u.get("/auth/login");
+  await u.post("/auth/login", { identifier: "mail_user", password: "supersecret1", next: "/" });
+  res = await u.post("/forum/new", { category: "general", title: "Should be blocked", body: "unverified" });
+  assert.ok(res.status === 302 && res.headers.get("location") === "/profile", "unverified member redirected to profile");
+  assert.ok(!(await db.get("SELECT id FROM threads WHERE title = 'Should be blocked'")), "no thread created");
+
+  // Follow the emailed link -> verified -> posting works.
+  const token = verifyMail.text.match(/\/auth\/verify\/([a-f0-9]{64})/)[1];
+  res = await u.get(`/auth/verify/${token}`);
+  assert.equal(res.status, 302, "verification link works");
+  assert.ok((await db.get("SELECT email_verified_at FROM users WHERE username = 'mail_user'")).email_verified_at, "verified stamp set");
+  res = await u.post("/forum/new", { category: "general", title: "Now allowed", body: "verified!" });
+  assert.equal(res.status, 302, "verified member posts");
+  assert.equal((await u.get(`/auth/verify/${token}`)).status, 302, "re-using the link is harmless");
+
+  // Password reset end-to-end.
+  globalThis.__testEmails = [];
+  const anon = jarClient();
+  await anon.get("/auth/forgot");
+  res = await anon.post("/auth/forgot", { identifier: "mail_user" });
+  assert.equal(res.status, 302, "forgot always succeeds outwardly");
+  const resetMail = globalThis.__testEmails.find((m) => /reset/i.test(m.subject));
+  assert.ok(resetMail, "reset email captured");
+  const resetToken = resetMail.text.match(/\/auth\/reset\/([a-f0-9]{64})/)[1];
+  assert.equal((await anon.get(`/auth/reset/${resetToken}`)).status, 200, "reset form renders");
+  res = await anon.post(`/auth/reset/${resetToken}`, { password: "brand-new-pass-9", confirm: "brand-new-pass-9" });
+  assert.equal(res.status, 302, "password reset");
+  assert.ok(!(await db.get("SELECT id FROM sessions WHERE user_id = (SELECT id FROM users WHERE username = 'mail_user')")),
+    "reset kills existing sessions");
+  await anon.get("/auth/login");
+  assert.equal((await anon.post("/auth/login", { identifier: "mail_user", password: "brand-new-pass-9", next: "/" })).status, 302, "new password works");
+  res = await anon.get(`/auth/reset/${resetToken}`);
+  assert.equal(res.status, 302, "used reset token is dead");
+
+  // Unknown account: same outward response, no email.
+  globalThis.__testEmails = [];
+  const probe = jarClient();
+  await probe.get("/auth/forgot");
+  res = await probe.post("/auth/forgot", { identifier: "who_is_this" });
+  assert.equal(res.status, 302, "no enumeration signal");
+  assert.equal(globalThis.__testEmails.length, 0, "no email for unknown accounts");
+
+  // Contact-email obfuscation: raw addresses never appear in HTML source.
+  const faqHtml = await (await jarClient().get("/faq")).text();
+  assert.ok(!faqHtml.includes("support@goyhub.com"), "raw contact email absent from source");
+  assert.ok(faqHtml.includes('data-u="support"') && faqHtml.includes('data-d="goyhub.com"'), "obfuscated parts present");
+});
+
+test("forum: title rename, category edit, shout delete + 3/min limit, /buy alias", async () => {
+  const { app, db } = await buildTestApp(ENV);
+  const admin = makeClient(app);
+  const author = makeClient(app);
+  const other = makeClient(app);
+
+  await admin.get("/auth/login");
+  await admin.post("/auth/login", { identifier: "admin", password: "admin-test-password-1", next: "/" });
+  for (const [c, name, mail] of [[author, "rename_author", "ra@example.com"], [other, "rename_other", "ro@example.com"]]) {
+    await c.get("/auth/signup");
+    await c.post("/auth/signup", { username: name, email: mail, password: "supersecret1", confirm: "supersecret1", ...(await solveCaptcha(c)) });
+  }
+  await db.run("UPDATE users SET tier = 'paid' WHERE username IN ('rename_author', 'rename_other')");
+
+  let res = await author.post("/forum/new", { category: "general", title: "Original title", body: "text" });
+  const threadId = res.headers.get("location").split("/").pop();
+
+  // Author renames within the window; a stranger cannot.
+  res = await other.post(`/forum/t/${threadId}/edit-title`, { title: "Hijacked" });
+  assert.equal(res.status, 404, "non-author cannot rename");
+  res = await author.post(`/forum/t/${threadId}/edit-title`, { title: "Renamed by author" });
+  assert.equal(res.status, 302);
+  assert.equal((await db.get("SELECT title FROM threads WHERE id = ?", threadId)).title, "Renamed by author");
+
+  // Category edit: admin only; slug stays stable.
+  const cat = await db.get("SELECT * FROM categories WHERE slug = 'general'");
+  res = await admin.post(`/admin/categories/${cat.id}/edit`, { name: "General Chat", description: "All things GoyHub." });
+  assert.equal(res.status, 302);
+  const after = await db.get("SELECT * FROM categories WHERE id = ?", cat.id);
+  assert.ok(after.name === "General Chat" && after.slug === "general", "name changed, slug stable");
+
+  // Shoutbox: limit 3/min, staff delete, non-staff can't delete.
+  for (let i = 1; i <= 3; i += 1) {
+    res = await author.post("/forum/shoutbox", { body: `shout ${i}` });
+    assert.equal(res.status, 302, `shout ${i} allowed`);
+  }
+  res = await author.post("/forum/shoutbox", { body: "shout 4" });
+  assert.equal(res.status, 429, "4th shout in a minute is limited");
+
+  const shout = await db.get("SELECT id FROM shouts ORDER BY id DESC LIMIT 1");
+  res = await other.post(`/forum/shouts/${shout.id}/delete`);
+  assert.equal(res.status, 404, "non-staff cannot delete shouts");
+  res = await admin.post(`/forum/shouts/${shout.id}/delete`);
+  assert.equal(res.status, 302, "staff deletes a shout");
+  assert.ok(!(await db.get("SELECT id FROM shouts WHERE id = ?", shout.id)), "shout gone");
+
+  // /buy is the upgrade page.
+  const buyHtml = await (await other.get("/buy")).text();
+  assert.ok(buyHtml.includes("Upgrade to Paid"), "/buy serves the upgrade page");
+});
+
+test("turnstile: optional layer verifies server-side and fails closed", async () => {
+  const cfgOn = { TURNSTILE_SITE_KEY: "sk", TURNSTILE_SECRET_KEY: "secret" };
+  const pass = await verifyTurnstile(cfgOn, "tok", "1.2.3.4",
+    async () => ({ json: async () => ({ success: true }) }));
+  assert.ok(pass.ok, "valid token accepted");
+  const fail = await verifyTurnstile(cfgOn, "tok", "1.2.3.4",
+    async () => ({ json: async () => ({ success: false, "error-codes": ["invalid-input-response"] }) }));
+  assert.ok(!fail.ok, "rejected token fails");
+  const missing = await verifyTurnstile(cfgOn, "", "1.2.3.4", async () => { throw new Error("never called"); });
+  assert.ok(!missing.ok, "missing token fails without a network call");
+  const down = await verifyTurnstile(cfgOn, "tok", "1.2.3.4", async () => { throw new Error("network down"); });
+  assert.ok(!down.ok, "verification outage fails closed");
+  const off = await verifyTurnstile({}, undefined, "1.2.3.4", async () => { throw new Error("never called"); });
+  assert.ok(off.ok && off.skipped, "unconfigured Turnstile is a no-op");
+});
+
+test("download filename scrambler keeps base+ext, injects a unique token", () => {
+  const a = scrambledFilename("GoyHub-Setup-1.0.0.zip");
+  const b = scrambledFilename("GoyHub-Setup-1.0.0.zip");
+  assert.ok(/^GoyHub-Setup-1\.0\.0-[a-f0-9]{8}\.zip$/.test(a), "shape preserved with token");
+  assert.notEqual(a, b, "two calls differ");
+  assert.equal(scrambledFilename("noext").slice(0, 6), "noext-", "extensionless names still get a token");
 });

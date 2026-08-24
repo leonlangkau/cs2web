@@ -44,6 +44,124 @@ async function ensurePostEditColumns(db) {
   }
 }
 
+/** And for users.email_verified_at (email verification shipped after launch). */
+async function ensureEmailVerifiedColumn(db) {
+  const columns = await db.all('PRAGMA table_info(users)');
+  if (columns.some((c) => c.name === 'email_verified_at')) return;
+  await db.run('ALTER TABLE users ADD COLUMN email_verified_at TEXT');
+}
+
+/** And for users.paid_until (Paid subscriptions gained an optional expiry). */
+async function ensurePaidUntilColumn(db) {
+  const columns = await db.all('PRAGMA table_info(users)');
+  if (columns.some((c) => c.name === 'paid_until')) return;
+  await db.run('ALTER TABLE users ADD COLUMN paid_until INTEGER');
+}
+
+/**
+ * Vanity / reserved UIDs. UIDs 0–1001 are a reserved block handed out by
+ * admins; regular signups start at 1002. The brand accounts are pinned:
+ * goyim=0, goy=1, omelette=2; the seeded admin gets the first free slot from
+ * 3; the [deleted] placeholder anchors the top of the block at 1001 — which
+ * also pushes SQLite's AUTOINCREMENT sequence past the block, so ordinary
+ * inserts can never collide with a reserved UID.
+ */
+const VANITY_UIDS = [['goyim', 0], ['goy', 1], ['omelette', 2]];
+const DELETED_UID = 1001;
+const RESERVED_UID_MAX = 1001;
+const VANITY_MARKER = 'vanity_uids_v1';
+
+const USER_REF_COLUMNS = [
+  ['threads', 'user_id'], ['posts', 'user_id'], ['shouts', 'user_id'],
+  ['sessions', 'user_id'], ['auth_tokens', 'user_id'],
+  ['ip_logs', 'user_id'], ['reports', 'reporter_id'],
+];
+
+/**
+ * Moves a user to a new id without ever violating UNIQUE or FK constraints,
+ * and without needing a transaction (the D1 adapter runs statements
+ * individually): copy the row under a temp name at the new id, repoint every
+ * referencing row, delete the original, then restore the real name/email.
+ * A crash mid-way is resumed safely on the next boot because every step of
+ * the caller is guarded by current database state.
+ */
+async function relocateUserId(db, fromId, toId) {
+  const original = await db.get('SELECT username, email FROM users WHERE id = ?', fromId);
+  if (!original) return;
+  const tempName = `__uidmove_${toId}`;
+  await db.run('DELETE FROM users WHERE username = ?', tempName); // stale temp from a crashed run
+  await db.run(
+    `INSERT INTO users (id, username, email, password_hash, role, tier, banned,
+                        email_verified_at, paid_until, signup_ip, last_login_ip, last_login_at, created_at)
+     SELECT ?, ?, ?, password_hash, role, tier, banned,
+            email_verified_at, paid_until, signup_ip, last_login_ip, last_login_at, created_at
+     FROM users WHERE id = ?`,
+    toId, tempName, `${tempName}@goyhub.invalid`, fromId
+  );
+  for (const [table, column] of USER_REF_COLUMNS) {
+    await db.run(`UPDATE ${table} SET ${column} = ? WHERE ${column} = ?`, toId, fromId);
+  }
+  await db.run('DELETE FROM users WHERE id = ?', fromId);
+  await db.run('UPDATE users SET username = ?, email = ? WHERE id = ?', original.username, original.email, toId);
+}
+
+/** First unoccupied UID in the reserved block from 3 upward (for displaced rows). */
+async function firstFreeUid(db) {
+  const taken = new Set((await db.all('SELECT id FROM users WHERE id BETWEEN 3 AND ?', RESERVED_UID_MAX - 1))
+    .map((r) => Number(r.id)));
+  for (let i = 3; i < RESERVED_UID_MAX; i += 1) {
+    if (!taken.has(i)) return i;
+  }
+  return null;
+}
+
+async function ensureVanityUids(db) {
+  if (await db.get('SELECT value FROM settings WHERE key = ?', VANITY_MARKER)) return;
+
+  // [deleted] anchors the top of the reserved block (and the autoinc sequence).
+  const del = await db.get('SELECT id FROM users WHERE username = ?', DELETED_USERNAME);
+  if (del && del.id !== DELETED_UID && !(await db.get('SELECT id FROM users WHERE id = ?', DELETED_UID))) {
+    await relocateUserId(db, del.id, DELETED_UID);
+  }
+
+  for (const [name, uid] of VANITY_UIDS) {
+    // Whoever currently holds the slot (e.g. the seeded admin at id 2) moves
+    // to the first free reserved UID — never deleted, never renamed.
+    const occupant = await db.get('SELECT id, username FROM users WHERE id = ?', uid);
+    if (occupant && String(occupant.username).toLowerCase() !== name) {
+      const free = await firstFreeUid(db);
+      if (free === null) continue; // block full — leave things as they are
+      await relocateUserId(db, occupant.id, free);
+    }
+    const existing = await db.get('SELECT id FROM users WHERE username = ?', name);
+    if (existing && existing.id !== uid) {
+      if (!(await db.get('SELECT id FROM users WHERE id = ?', uid))) {
+        await relocateUserId(db, existing.id, uid);
+      }
+    } else if (!existing) {
+      // Random password — an admin assigns a real one from the Users tab.
+      await db.run(
+        'INSERT INTO users (id, username, email, password_hash, tier) VALUES (?, ?, ?, ?, ?)',
+        uid, name, `${name}@goyhub.local`, await hashPassword(newToken(24)), 'user'
+      );
+    }
+  }
+
+  // Only mark done once the layout is actually in place, so partial runs
+  // (crash mid-relocation) retry on the next boot.
+  const anchored = await db.get('SELECT id FROM users WHERE username = ? AND id = ?', DELETED_USERNAME, DELETED_UID);
+  const vanityOk = Number((await db.get(
+    "SELECT COUNT(*) AS n FROM users WHERE (username = 'goyim' AND id = 0) OR (username = 'goy' AND id = 1) OR (username = 'omelette' AND id = 2)"
+  )).n) === 3;
+  if (anchored && vanityOk) {
+    await db.run(
+      `INSERT INTO settings (key, value, updated_at) VALUES (?, 'done', datetime('now'))
+       ON CONFLICT(key) DO NOTHING`,
+      VANITY_MARKER
+    );
+  }
+}
+
 /** Runs the DDL once per process/isolate. */
 const schemaReady = new WeakMap();
 
@@ -54,6 +172,8 @@ function ensureSchema(db) {
       await ensureTierColumn(db);
       await ensureIpBanExpiryColumn(db);
       await ensurePostEditColumns(db);
+      await ensureEmailVerifiedColumn(db);
+      await ensurePaidUntilColumn(db);
     })());
   }
   return schemaReady.get(db);
@@ -143,6 +263,8 @@ async function seed(db, env = {}) {
     );
   }
 
+  await ensureVanityUids(db);
+
   const hasCategories = await db.get('SELECT id FROM categories LIMIT 1');
   if (!hasCategories) {
     for (const [name, slug, description, position] of CATEGORIES) {
@@ -176,6 +298,10 @@ async function cleanup(db) {
   await db.run('DELETE FROM rate_limits WHERE reset_at <= ?', now);
   await db.run('DELETE FROM captcha_used WHERE expires_at <= ?', now);
   await db.run('DELETE FROM ip_bans WHERE expires_at IS NOT NULL AND expires_at <= ?', now);
+  await db.run('DELETE FROM auth_tokens WHERE expires_at <= ? OR used = 1', now);
 }
 
-export { ensureSchema, seed, cleanup, deletedUserId, DELETED_USERNAME };
+export {
+  ensureSchema, seed, cleanup, deletedUserId, relocateUserId,
+  DELETED_USERNAME, RESERVED_UID_MAX,
+};

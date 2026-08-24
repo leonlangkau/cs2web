@@ -1,7 +1,7 @@
 import * as views from "./views/forum.js";
 import * as site from "./views/site.js";
 import * as limits from "./limits.js";
-import { requireAuth, requireTier, formBody, setFlash, clientIp, audit } from "./middleware.js";
+import { requireAuth, requireTier, requireVerifiedEmail, formBody, setFlash, clientIp, audit } from "./middleware.js";
 import { isStaff } from "./tiers.js";
 import { canEditPost, EDIT_WINDOW_MS } from "./post-rules.js";
 import { tooMany } from "./routes-main.js";
@@ -95,7 +95,7 @@ function register(app) {
   });
 
   app.post('/forum/new', async (c) => {
-    const gate = requireAuth(c);
+    const gate = requireAuth(c) || requireVerifiedEmail(c);
     if (gate) return gate;
     const db = c.get('db');
     const user = c.get('user');
@@ -168,7 +168,7 @@ function register(app) {
   });
 
   app.post('/forum/t/:id/reply', async (c) => {
-    const gate = requireAuth(c);
+    const gate = requireAuth(c) || requireVerifiedEmail(c);
     if (gate) return gate;
     const db = c.get('db');
     const user = c.get('user');
@@ -241,6 +241,29 @@ function register(app) {
     await db.run('DELETE FROM posts WHERE id = ?', id);
     setFlash(c, 'success', 'Post deleted.');
     return c.redirect(`/forum/t/${post.thread_id}`, 302);
+  });
+
+  // Thread titles: editable by the author within the edit window (measured
+  // from the thread's creation) or staff at any time.
+  app.post('/forum/t/:id/edit-title', async (c) => {
+    const gate = requireAuth(c);
+    if (gate) return gate;
+    const db = c.get('db');
+    const user = c.get('user');
+    const id = intParam(c.req.param('id'), 0);
+    const thread = id > 0 ? await db.get('SELECT * FROM threads WHERE id = ?', id) : null;
+    if (!thread) return notFound(c);
+    if (!canEditPost(user, { user_id: thread.user_id, created_at: thread.created_at })) return notFound(c);
+
+    const body = await formBody(c);
+    const title = String(body.title || '').trim().replace(/\s+/g, ' ');
+    if (title.length < 3 || title.length > MAX_TITLE) {
+      setFlash(c, 'error', `Title must be 3–${MAX_TITLE} characters.`);
+      return c.redirect(`/forum/t/${id}`, 302);
+    }
+    await db.run('UPDATE threads SET title = ? WHERE id = ?', title, id);
+    setFlash(c, 'success', 'Thread title updated.');
+    return c.redirect(`/forum/t/${id}`, 302);
   });
 
   // Post editing: the author within EDIT_WINDOW_MS, or staff at any time.
@@ -368,6 +391,24 @@ function register(app) {
     return c.html(views.memberProfile(c.get('view'), { member, stats, recentThreads, recentPosts }));
   });
 
+  // Staff moderation for the shoutbox.
+  app.post('/forum/shouts/:id/delete', async (c) => {
+    const gate = requireAuth(c);
+    if (gate) return gate;
+    if (!isStaff(c.get('user'))) return notFound(c);
+    const db = c.get('db');
+    const id = intParam(c.req.param('id'), 0);
+    const shout = id > 0 ? await db.get('SELECT * FROM shouts WHERE id = ?', id) : null;
+    if (!shout) return notFound(c);
+    await db.run('DELETE FROM shouts WHERE id = ?', id);
+    await audit(c, 'admin_action', {
+      userId: c.get('user').id, username: c.get('user').username,
+      detail: `deleted shout #${id} ("${String(shout.body).slice(0, 60)}")`,
+    });
+    setFlash(c, 'success', 'Shout deleted.');
+    return c.redirect('/forum', 302);
+  });
+
   // Shoutbox: a short-lived, JS-polled chat strip on the forum index. The GET
   // endpoint is used by the client to pull anything newer than `after`; POST
   // is progressively enhanced — with JS it returns JSON, without it falls
@@ -389,8 +430,12 @@ function register(app) {
   app.post('/forum/shoutbox', async (c) => {
     const wantsJson = c.req.header('x-requested-with') === 'fetch';
     if (wantsJson && !c.get('user')) return c.json({ ok: false, error: 'You need to sign in to do that.' }, 401);
-    const gate = requireAuth(c);
-    if (gate) return gate;
+    const gate = requireAuth(c) || requireVerifiedEmail(c);
+    if (gate) {
+      return wantsJson
+        ? c.json({ ok: false, error: 'Verify your email before posting (see your profile).' }, 403)
+        : gate;
+    }
 
     const db = c.get('db');
     const user = c.get('user');

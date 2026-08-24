@@ -1,5 +1,5 @@
 import { page } from "./layout.js";
-import { esc, map } from "./util.js";
+import { esc, map, emailLink } from "./util.js";
 
 const FAQ_ITEMS = [
   ['What is GoyHub?',
@@ -54,7 +54,7 @@ function faq(ctx) {
       </details>`)}
     </div>
     <p class="muted">Still stuck? Ask in the <a href="/forum/c/support">Support forum</a> or email
-      <a href="mailto:${esc(ctx.company.contactEmail)}">${esc(ctx.company.contactEmail)}</a>.</p>
+      ${emailLink(ctx.company.contactEmail)}.</p>
   </div>
 </div>`;
   return page(ctx, { title: 'FAQ', body });

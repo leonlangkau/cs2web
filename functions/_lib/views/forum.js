@@ -11,17 +11,21 @@ function errorList(errors) {
 /** Linked username for anywhere a member is named. */
 const memberLink = (username) => `<a class="member-link" href="/u/${encodeURIComponent(username)}">${esc(username)}</a>`;
 
-const shoutRow = (s) => `<div class="shout-row" data-id="${esc(s.id)}">
+const shoutRow = (s, ctx) => `<div class="shout-row" data-id="${esc(s.id)}">
   <span class="shout-user">${esc(s.username)}${STAFF_TIERS.has(s.author_tier) ? ' <span class="tag tag-admin">STAFF</span>' : ''}</span>
   <span class="shout-body">${esc(s.body)}</span>
   <span class="shout-time muted">${esc(timeAgo(s.created_at))}</span>
+  ${ctx && isStaff(ctx.user) ? `<form method="post" action="/forum/shouts/${esc(s.id)}/delete" class="inline-form shout-del-form"
+      data-confirm="Delete this shout?">
+      <input type="hidden" name="_csrf" value="${esc(ctx.csrfToken)}">
+      <button class="shout-del" type="submit" aria-label="Delete shout">✕</button></form>` : ''}
 </div>`;
 
 function shoutbox(ctx, shouts) {
   const lastId = shouts.length ? shouts[shouts.length - 1].id : 0;
   const list = shouts.length === 0
     ? '<p class="muted shout-empty">No shouts yet. Say hi!</p>'
-    : map(shouts, shoutRow);
+    : map(shouts, (s) => shoutRow(s, ctx));
   const form = ctx.user
     ? `<form method="post" action="/forum/shoutbox" class="shout-form" id="shout-form">
         <input type="hidden" name="_csrf" value="${esc(ctx.csrfToken)}">
@@ -31,7 +35,7 @@ function shoutbox(ctx, shouts) {
       </form>`
     : '<p class="muted shout-login-note"><a href="/auth/login?next=%2Fforum">Log in</a> to join the shoutbox.</p>';
 
-  return `<div class="shoutbox" id="shoutbox" data-last-id="${esc(lastId)}">
+  return `<div class="shoutbox" id="shoutbox" data-last-id="${esc(lastId)}"${isStaff(ctx.user) ? ` data-staff="1" data-csrf="${esc(ctx.csrfToken)}"` : ''}>
     <h2>Shoutbox</h2>
     <div class="shout-list" id="shout-list">${list}</div>
     ${form}
@@ -138,8 +142,17 @@ function thread(ctx, { thread: t, posts, firstPostId, page: current, pages, post
       <form method="post" action="/forum/t/${esc(t.id)}/delete" class="inline-form"
             data-confirm="Delete this thread and all its replies?">${csrf}
         <button class="btn btn-danger btn-sm" type="submit">Delete</button></form>` : '';
-  const threadActions = (modActions || deleteThreadBtn)
-    ? `<div class="thread-actions">${modActions}${deleteThreadBtn}</div>` : '';
+  const canEditTitle = canEditPost(ctx.user, { user_id: t.user_id, created_at: t.created_at });
+  const titleEdit = canEditTitle ? `
+      <details class="title-edit"><summary class="btn btn-ghost btn-sm">Rename</summary>
+        <form method="post" action="/forum/t/${esc(t.id)}/edit-title" class="title-edit-form">${csrf}
+          <input type="text" name="title" required minlength="3" maxlength="120" value="${esc(t.title)}"
+                 aria-label="New thread title">
+          <button class="btn btn-primary btn-sm" type="submit">Save</button>
+        </form>
+      </details>` : '';
+  const threadActions = (modActions || deleteThreadBtn || titleEdit)
+    ? `<div class="thread-actions">${titleEdit}${modActions}${deleteThreadBtn}</div>` : '';
 
   const postList = map(posts, (p, i) => {
     const canDelete = (staff || (ctx.user && ctx.user.id === p.user_id)) && p.id !== firstPostId;
@@ -160,6 +173,7 @@ function thread(ctx, { thread: t, posts, firstPostId, page: current, pages, post
     <aside class="post-author">
       <span class="avatar avatar-lg" aria-hidden="true">${esc(String(p.username || '?')[0].toUpperCase())}</span>
       <span class="post-username">${memberLink(p.username)}${STAFF_TIERS.has(p.author_tier) ? ' <span class="tag tag-admin">STAFF</span>' : ''}</span>
+      <span class="uid-badge${p.user_id <= 1001 ? ' uid-reserved' : ''}">UID ${esc(p.user_id)}</span>
       <span class="muted">joined ${esc(timeAgo(p.author_since))}</span>
       <span class="muted">${esc(p.author_posts)} posts</span>
     </aside>
@@ -333,6 +347,7 @@ function memberProfile(ctx, { member, stats, recentThreads, recentPosts }) {
         <span class="avatar avatar-lg" aria-hidden="true">${esc(member.username[0].toUpperCase())}</span>
         <div>
           <div class="profile-name">${esc(member.username)}
+            <span class="uid-badge${member.id <= 1001 ? ' uid-reserved' : ''}">UID ${esc(member.id)}</span>
             <span class="tag tag-tier tag-tier-${esc(tier)}">${esc(TIER_LABELS[tier])}</span>
             ${member.banned ? '<span class="tag tag-banned">BANNED</span>' : ''}</div>
           <div class="muted">Member since ${esc(timeAgo(member.created_at))}</div>

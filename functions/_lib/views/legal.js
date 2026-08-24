@@ -1,5 +1,5 @@
 import { page } from "./layout.js";
-import { esc, map } from "./util.js";
+import { esc, map, emailLink } from "./util.js";
 
 /**
  * Both documents are defined as an ordered list of sections. The table of
@@ -62,15 +62,15 @@ function contactBlock(c, extra) {
     ${esc(c.city)}, ${esc(c.jurisdiction)}<br>
     Registration number: ${esc(c.registrationNumber)}<br>
     ${extra.includes('privacy') || extra.includes('rights')
-      ? `Privacy: <a href="mailto:${esc(c.privacyEmail)}">${esc(c.privacyEmail)}</a><br>General: <a href="mailto:${esc(c.contactEmail)}">${esc(c.contactEmail)}</a>`
-      : `General: <a href="mailto:${esc(c.contactEmail)}">${esc(c.contactEmail)}</a><br>Legal &amp; arbitration opt-out: <a href="mailto:${esc(c.legalEmail)}">${esc(c.legalEmail)}</a>`}
+      ? `Privacy: ${emailLink(c.privacyEmail)}<br>General: ${emailLink(c.contactEmail)}`
+      : `General: ${emailLink(c.contactEmail)}<br>Legal &amp; arbitration opt-out: ${emailLink(c.legalEmail)}`}
   </address>`;
 }
 
 function terms(ctx) {
   const c = ctx.company;
-  const mailLegal = `<a href="mailto:${esc(c.legalEmail)}">${esc(c.legalEmail)}</a>`;
-  const mailContact = `<a href="mailto:${esc(c.contactEmail)}">${esc(c.contactEmail)}</a>`;
+  const mailLegal = `${emailLink(c.legalEmail)}`;
+  const mailContact = `${emailLink(c.contactEmail)}`;
   const j = esc(c.jurisdiction);
 
   const sections = [
@@ -358,7 +358,7 @@ function terms(ctx) {
 
 function privacy(ctx) {
   const c = ctx.company;
-  const mailPrivacy = `<a href="mailto:${esc(c.privacyEmail)}">${esc(c.privacyEmail)}</a>`;
+  const mailPrivacy = `${emailLink(c.privacyEmail)}`;
   const j = esc(c.jurisdiction);
 
   const sections = [

@@ -13,3 +13,12 @@ ADMIN_PASSWORD=choose-a-strong-password
 # Signs the /account/license token the desktop loader verifies a member's
 # tier with. Optional — falls back to CAPTCHA_SECRET if unset.
 # LICENSE_SECRET=replace_me_with_a_different_long_random_string
+
+# Outbound email (optional in dev). Use provider "test" to capture messages
+# in-process (the smoke tests do), or a real provider + key.
+# EMAIL_PROVIDER=test
+# EMAIL_FROM=no-reply@goyhub.local
+
+# Cloudflare Turnstile (optional). Cloudflare's public ALWAYS-PASS test keys:
+# TURNSTILE_SITE_KEY=1x00000000000000000000AA
+# TURNSTILE_SECRET_KEY=1x0000000000000000000000000000000AA

@@ -6,21 +6,38 @@ export default `-- GoyHub schema. Shared by the node:sqlite adapter and Cloudfla
 -- \`role\` ('user'/'admin') is legacy and kept only so an already-deployed
 -- database never needs its CHECK constraint migrated in place; \`tier\` is the
 -- single source of truth for access control everywhere in the app now (see
--- functions/_lib/tiers.js). Fresh installs get the column here; an existing
--- database gets it via the guarded ALTER TABLE in bootstrap.js.
+-- functions/_lib/tiers.js). Fresh installs get the columns here; an existing
+-- database gets tier/email_verified_at via the guarded ALTER TABLEs in
+-- bootstrap.js.
 CREATE TABLE IF NOT EXISTS users (
-  id            INTEGER PRIMARY KEY AUTOINCREMENT,
-  username      TEXT NOT NULL UNIQUE COLLATE NOCASE,
-  email         TEXT NOT NULL UNIQUE COLLATE NOCASE,
-  password_hash TEXT NOT NULL,
-  role          TEXT NOT NULL DEFAULT 'user' CHECK (role IN ('user','admin')),
-  tier          TEXT NOT NULL DEFAULT 'user',
-  banned        INTEGER NOT NULL DEFAULT 0,
-  signup_ip     TEXT,
-  last_login_ip TEXT,
-  last_login_at TEXT,
-  created_at    TEXT NOT NULL DEFAULT (datetime('now'))
+  id                INTEGER PRIMARY KEY AUTOINCREMENT,
+  username          TEXT NOT NULL UNIQUE COLLATE NOCASE,
+  email             TEXT NOT NULL UNIQUE COLLATE NOCASE,
+  password_hash     TEXT NOT NULL,
+  role              TEXT NOT NULL DEFAULT 'user' CHECK (role IN ('user','admin')),
+  tier              TEXT NOT NULL DEFAULT 'user',
+  banned            INTEGER NOT NULL DEFAULT 0,
+  email_verified_at TEXT,
+  paid_until        INTEGER,
+  signup_ip         TEXT,
+  last_login_ip     TEXT,
+  last_login_at     TEXT,
+  created_at        TEXT NOT NULL DEFAULT (datetime('now'))
 );
+
+-- Single-use, expiring tokens for password resets and email verification.
+-- Only a hash of the token is stored, like sessions.
+CREATE TABLE IF NOT EXISTS auth_tokens (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  kind       TEXT NOT NULL CHECK (kind IN ('reset','verify')),
+  token_hash TEXT NOT NULL UNIQUE,
+  user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  used       INTEGER NOT NULL DEFAULT 0,
+  expires_at INTEGER NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_auth_tokens_user ON auth_tokens(user_id);
+CREATE INDEX IF NOT EXISTS idx_auth_tokens_expires ON auth_tokens(expires_at);
 
 CREATE TABLE IF NOT EXISTS sessions (
   id         INTEGER PRIMARY KEY AUTOINCREMENT,

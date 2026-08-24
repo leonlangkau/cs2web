@@ -17,6 +17,25 @@ import { audit, clientIp, formBody } from "./middleware.js";
 import { issueLicense, verifyLicense } from "./license.js";
 import { tierOf, meetsTier, paidExpired } from "./tiers.js";
 
+/**
+ * Subscription block for API responses. Deliberately over-explicit — the two
+ * expiries in this API are easy to confuse:
+ *   license.expiresAt      = the signed TOKEN's expiry (24h, rolling)
+ *   subscription.paidUntil = when the MEMBERSHIP ends (ms epoch; null = none)
+ * daysLeft / paidUntilIso are provided so clients never have to do epoch
+ * math (and can't misread milliseconds as seconds).
+ */
+function subscriptionInfo(row) {
+  const raw = row.paid_until === null || row.paid_until === undefined ? null : Number(row.paid_until);
+  return {
+    paidUntil: raw,
+    paidUntilIso: raw === null ? null : new Date(raw).toISOString(),
+    daysLeft: raw === null ? null : Math.max(0, Math.ceil((raw - Date.now()) / 86_400_000)),
+    lifetime: row.tier === 'paid' && raw === null,
+    expired: paidExpired(row),
+  };
+}
+
 /** Reads the request body as form fields or JSON, whichever the client sent. */
 async function apiBody(c) {
   const form = await formBody(c);
@@ -73,10 +92,7 @@ function register(app) {
       username: user.username,
       tier: tierOf(user),          // already reflects an expired Paid as "user"
       paid: meetsTier(user, 'paid'),
-      subscription: {
-        paidUntil: user.paid_until === null || user.paid_until === undefined ? null : Number(user.paid_until),
-        expired: paidExpired(user),
-      },
+      subscription: subscriptionInfo(user),
       license,
     });
   });
@@ -103,10 +119,7 @@ function register(app) {
       valid: live,
       tier: live ? tierOf(row) : null,
       paid: live ? meetsTier(row, 'paid') : false,
-      subscription: live ? {
-        paidUntil: row.paid_until === null || row.paid_until === undefined ? null : Number(row.paid_until),
-        expired: paidExpired(row),
-      } : null,
+      subscription: live ? subscriptionInfo(row) : null,
     });
   });
 }

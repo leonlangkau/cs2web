@@ -203,6 +203,63 @@ function register(app) {
     return c.redirect(backTo(c, '/admin/users'), 302);
   });
 
+  // Adjust one Paid member's remaining days (full admin). Positive extends,
+  // negative shortens; time is added on top of what's left (or from now if
+  // already expired). Works on lifetime subs too — they become dated.
+  app.post('/admin/users/:id/paid-days', async (c) => {
+    const gate = requireAdmin(c);
+    if (gate) return gate;
+    const db = c.get('db');
+    const user = await findUser(c);
+    if (!user) return notFound(c, 'No such user.');
+    if (user.tier !== 'paid') {
+      setFlash(c, 'error', `${user.username} is not on the Paid tier — set their tier first.`);
+      return c.redirect(backTo(c, '/admin/users'), 302);
+    }
+    const body = await formBody(c);
+    const delta = Number(body.delta_days);
+    if (!Number.isFinite(delta) || delta === 0 || Math.abs(delta) > 3650) {
+      setFlash(c, 'error', 'Enter a non-zero number of days (±3650).');
+      return c.redirect(backTo(c, '/admin/users'), 302);
+    }
+    const now = Date.now();
+    const base = user.paid_until === null || user.paid_until === undefined
+      ? now
+      : Math.max(now, Number(user.paid_until));
+    const next = Math.max(now, base + Math.round(delta) * 86_400_000);
+    await db.run('UPDATE users SET paid_until = ? WHERE id = ?', next, user.id);
+    const left = Math.max(0, Math.round((next - now) / 86_400_000));
+    await adminAudit(c, `adjusted #${user.id} (${user.username}) subscription by ${delta}d — ${left}d left`);
+    setFlash(c, 'success', `${user.username}: ${delta > 0 ? '+' : ''}${Math.round(delta)} days — ${left} day${left === 1 ? '' : 's'} remaining.`);
+    return c.redirect(backTo(c, '/admin/users'), 302);
+  });
+
+  // Mass adjustment: every DATED Paid subscription shifts by N days (e.g.
+  // "+3 to everyone" after downtime). Lifetime subscriptions are untouched.
+  app.post('/admin/subscriptions/adjust', async (c) => {
+    const gate = requireAdmin(c);
+    if (gate) return gate;
+    const db = c.get('db');
+    const body = await formBody(c);
+    const delta = Number(body.delta_days);
+    if (!Number.isFinite(delta) || delta === 0 || Math.abs(delta) > 3650) {
+      setFlash(c, 'error', 'Enter a non-zero number of days (±3650).');
+      return c.redirect(backTo(c, '/admin/users'), 302);
+    }
+    const now = Date.now();
+    const deltaMs = Math.round(delta) * 86_400_000;
+    // Expired subs count from now, active ones from their current expiry.
+    const result = await db.run(
+      `UPDATE users
+       SET paid_until = MAX(?, (CASE WHEN paid_until < ? THEN ? ELSE paid_until END) + ?)
+       WHERE tier = 'paid' AND paid_until IS NOT NULL`,
+      now, now, now, deltaMs
+    );
+    await adminAudit(c, `mass-adjusted ${result.changes} dated subscriptions by ${delta}d`);
+    setFlash(c, 'success', `${delta > 0 ? 'Extended' : 'Shortened'} ${result.changes} dated subscription${result.changes === 1 ? '' : 's'} by ${Math.abs(Math.round(delta))} days (lifetime subs untouched).`);
+    return c.redirect(backTo(c, '/admin/users'), 302);
+  });
+
   // Set a member's password directly (full admin only) — how the owner gives
   // the seeded vanity accounts (goyim/goy/omelette) usable credentials, and
   // the recovery path for members without a working email.

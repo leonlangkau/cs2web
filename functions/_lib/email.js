@@ -3,15 +3,20 @@
  *
  * Cloudflare Workers/Pages cannot speak raw SMTP (outbound port 25 is
  * blocked, and Cloudflare's Email Routing is inbound-only), so transactional
- * mail goes out through an HTTP email API instead. The provider is chosen by
- * env so it can be switched without a code change:
+ * mail goes out through an HTTP email API — or, with provider "cloudflare",
+ * through Cloudflare's own Email Service SMTPS relay (smtp.mx.cloudflare.net,
+ * implicit TLS on 465, reachable from Workers via cloudflare:sockets). The
+ * provider is chosen by env so it can be switched without a code change:
  *
- *   EMAIL_PROVIDER  "resend" | "sendgrid" | "mailchannels" | "test" | unset
- *   EMAIL_API_KEY   the provider's API key (not needed for mailchannels/test)
+ *   EMAIL_PROVIDER  "cloudflare" | "resend" | "sendgrid" | "mailchannels" | "test" | unset
+ *   EMAIL_API_KEY   the provider's API key (for "cloudflare": an API token
+ *                   with the "Email Sending: Edit" permission)
  *   EMAIL_FROM      e.g. no-reply@goyhub.com — must be a sender the provider
  *                   has verified for your domain (SPF/DKIM), or mail lands in
  *                   spam or is rejected outright
  *   EMAIL_FROM_NAME optional display name, defaults to GoyHub
+ *   EMAIL_SMTP_HOST / EMAIL_SMTP_PORT  cloudflare-provider overrides
+ *                   (default smtp.mx.cloudflare.net:465)
  *
  * With nothing configured, isEmailConfigured() is false and features that
  * need email (password reset, verification) degrade with honest messaging
@@ -24,6 +29,7 @@ function isEmailConfigured(env = {}) {
   if (!provider) return false;
   if (provider === 'test') return true;
   if (provider === 'mailchannels') return Boolean(env.EMAIL_FROM);
+  // "cloudflare" and the HTTP APIs all need a key + verified sender.
   return Boolean(env.EMAIL_API_KEY && env.EMAIL_FROM);
 }
 
@@ -46,6 +52,17 @@ async function sendEmail(env, { to, subject, text }, fetcher = fetch) {
       globalThis.__testEmails = globalThis.__testEmails || [];
       globalThis.__testEmails.push({ to, subject, text });
       return { ok: true };
+    }
+
+    if (provider === 'cloudflare') {
+      const { sendViaSmtp } = await import('./smtp.js');
+      return await sendViaSmtp({
+        host: String(env.EMAIL_SMTP_HOST || 'smtp.mx.cloudflare.net'),
+        port: Number(env.EMAIL_SMTP_PORT) > 0 ? Number(env.EMAIL_SMTP_PORT) : 465,
+        username: String(env.EMAIL_SMTP_USERNAME || 'api_token'),
+        password: env.EMAIL_API_KEY,
+        from, fromName, to, subject, text,
+      });
     }
 
     let res;

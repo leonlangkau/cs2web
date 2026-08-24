@@ -117,6 +117,8 @@ Set as `[vars]`/secrets in `wrangler.toml` / the Pages dashboard (see DEPLOY.md)
 | `AUTO_IP_BAN_MINUTES` | `60` | How long automatic flood bans last |
 | `SIGNUP_SURGE_LIMIT` | `30` | Site-wide signups per 10 min before registration pauses |
 | `CRYPTO_PAY_URL` / `CRYPTO_PAY_ADDRESSES` / `PAID_PRICE` | unset | Upgrade-page checkout config (page shows "coming soon" until set) |
+| `EMAIL_PROVIDER` + `EMAIL_API_KEY` + `EMAIL_FROM` | unset (disabled) | Outbound email: `cloudflare` (Email Service SMTPS relay) / `resend` / `sendgrid` / `mailchannels` |
+| `TURNSTILE_SITE_KEY` / `TURNSTILE_SECRET_KEY` | unset | Optional Cloudflare Turnstile on signup |
 | `LICENSE_SECRET` | falls back to `CAPTCHA_SECRET` | Signs loader license tokens |
 | `COMPANY_*` | placeholders | Registered entity on the legal pages |
 | `TRUST_PROXY` | unset | Non-Cloudflare proxies only |

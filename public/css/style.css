@@ -603,6 +603,15 @@ textarea { resize: vertical; min-height: 90px; }
 .admin-user-tools .inline-form { display: flex; gap: 0.3rem; margin-top: 0.4rem; align-items: center; }
 .admin-user-tools input { width: 160px; padding: 0.35rem 0.6rem; font-size: 0.82rem; }
 .paid-days-input { width: 70px; padding: 0.35rem 0.5rem; font-size: 0.82rem; }
+/* Users tab: narrower page, compact 4-column table, inline subscription tools */
+.admin-narrow { max-width: 1020px; }
+.users-table table { font-size: 0.85rem; }
+.users-table th, .users-table td { padding: 0.55rem 0.8rem; }
+.sub-cell { min-width: 150px; }
+.sub-adjust { display: flex; gap: 0.3rem; margin-top: 0.35rem; align-items: center; }
+.sub-adjust input { width: 70px; padding: 0.3rem 0.45rem; font-size: 0.8rem; }
+.sub-mass-panel { margin-bottom: 1.3rem; }
+.sub-mass-panel .filter-bar { margin-bottom: 0; }
 .cat-edit-form { gap: 0.4rem; margin-top: 0.5rem; max-width: 320px; }
 .cat-edit-form input { padding: 0.4rem 0.6rem; font-size: 0.85rem; }
 .cf-turnstile { margin: 0.4rem 0; }

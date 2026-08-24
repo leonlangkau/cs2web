@@ -56,13 +56,17 @@ SIGNUP_SURGE_LIMIT = "30"
 # CRYPTO_PAY_ADDRESSES = ""
 # PAID_PRICE = ""
 
-# Outbound email (password reset + verification). Cloudflare has no outbound
-# SMTP — Workers can't open SMTP connections — so mail goes through an HTTP
-# email API. Set the secrets in the Pages dashboard:
-#   EMAIL_PROVIDER   "resend" | "sendgrid" | "mailchannels"  (unset = disabled)
-#   EMAIL_API_KEY    the provider's API key (secret!)
-#   EMAIL_FROM       verified sender, e.g. no-reply@goyhub.com
+# Outbound email (password reset + verification). Preferred: Cloudflare's own
+# Email Service SMTPS relay (smtp.mx.cloudflare.net:465, spoken natively via
+# cloudflare:sockets). HTTP API providers are supported as alternatives.
+# Set the secrets in the Pages dashboard:
+#   EMAIL_PROVIDER   "cloudflare" | "resend" | "sendgrid" | "mailchannels"  (unset = disabled)
+#   EMAIL_API_KEY    for "cloudflare": an API token with the
+#                    "Email Sending: Edit" permission; otherwise the
+#                    provider's API key (secret!)
+#   EMAIL_FROM       verified sender on your Email Service / provider domain
 #   EMAIL_FROM_NAME  optional display name (default "GoyHub")
+#   EMAIL_SMTP_HOST / EMAIL_SMTP_PORT  cloudflare overrides (defaults shown above)
 # With email configured, forum posting requires a verified address
 # (REQUIRE_VERIFIED_EMAIL = "0" turns that gate off).
 # DISPOSABLE_EMAIL_DOMAINS = ""   # extra comma-separated throwaway domains to block

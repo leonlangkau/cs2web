@@ -14,6 +14,8 @@ import { verifyPassword } from "../functions/_lib/crypto.js";
 import { verifyLicense } from "../functions/_lib/license.js";
 import { verifyTurnstile } from "../functions/_lib/turnstile.js";
 import { scrambledFilename } from "../functions/_lib/routes-main.js";
+import { smtpConversation, buildMessage } from "../functions/_lib/smtp.js";
+import { isEmailConfigured } from "../functions/_lib/email.js";
 import buildSchema from "../scripts/build-schema.cjs";
 import buildInstaller from "../scripts/build-installer.cjs";
 
@@ -1192,4 +1194,124 @@ test("download filename scrambler keeps base+ext, injects a unique token", () =>
   assert.ok(/^GoyHub-Setup-1\.0\.0-[a-f0-9]{8}\.zip$/.test(a), "shape preserved with token");
   assert.notEqual(a, b, "two calls differ");
   assert.equal(scrambledFilename("noext").slice(0, 6), "noext-", "extensionless names still get a token");
+});
+
+test("smtp client: correct SMTPS conversation for Cloudflare's Email Service relay", async () => {
+  const wire = [];
+  const replies = ["220 smtp.mx.cloudflare.net ESMTP", "250-smtp.mx.cloudflare.net", "250 8BITMIME",
+    "235 2.7.0 accepted", "250 2.1.0 ok", "250 2.1.5 ok", "354 go ahead", "250 2.0.0 queued", "221 bye"];
+  const transport = {
+    readLine: async () => replies.shift(),
+    write: async (data) => { wire.push(data); },
+    close: async () => {},
+  };
+  await smtpConversation(transport, {
+    username: "api_token", password: "cf_secret_token",
+    from: "no-reply@goyhub.com", fromName: "GoyHub",
+    to: "member@example.com", subject: "Verify your GoyHub email",
+    text: "Hello — verify here.\n.starts with a dot\n",
+  });
+  const all = wire.join("");
+  assert.ok(wire[0].startsWith("EHLO "), "EHLO first");
+  const authB64 = wire[1].match(/^AUTH PLAIN (\S+)/)[1];
+  assert.equal(Buffer.from(authB64, "base64").toString("utf8"), "\u0000api_token\u0000cf_secret_token",
+    "SASL PLAIN is NUL-separated user/token");
+  assert.ok(all.includes("MAIL FROM:<no-reply@goyhub.com>\r\n"), "MAIL FROM");
+  assert.ok(all.includes("RCPT TO:<member@example.com>\r\n"), "RCPT TO");
+  assert.ok(all.includes("Subject: Verify your GoyHub email"), "subject header");
+  assert.ok(all.includes("Content-Transfer-Encoding: base64"), "UTF-8-safe body encoding");
+  assert.ok(/\r\n\.\r\nQUIT/.test(all), "terminating dot then QUIT");
+
+  // The multiline EHLO reply above (250- then 250 space) was consumed as ONE
+  // reply — otherwise AUTH would have been matched against the wrong line.
+  assert.equal(replies.length, 0, "every scripted reply consumed exactly once");
+
+  // Message building: dot-stuffing applies to the encoded payload lines.
+  const msg = buildMessage({ from: "a@b.c", fromName: 'Bad"Name', to: "x@y.z", subject: "Line\nbreak", text: "hi" });
+  assert.ok(msg.includes("From: \"Bad'Name\" <a@b.c>"), "quote-safe display name");
+  assert.ok(msg.includes("Subject: Line break"), "header injection neutralised");
+
+  // Provider wiring: cloudflare counts as configured only with key + sender.
+  assert.ok(isEmailConfigured({ EMAIL_PROVIDER: "cloudflare", EMAIL_API_KEY: "k", EMAIL_FROM: "a@b.c" }));
+  assert.ok(!isEmailConfigured({ EMAIL_PROVIDER: "cloudflare", EMAIL_FROM: "a@b.c" }), "no key = not configured");
+});
+
+test("subscriptions: per-user day adjustment, mass adjustment, unambiguous API fields", async () => {
+  const { app, db } = await buildTestApp(ENV);
+  const admin = makeClient(app);
+  await admin.get("/auth/login");
+  await admin.post("/auth/login", { identifier: "admin", password: "admin-test-password-1", next: "/" });
+
+  // Three paid members: dated-active, dated-expired, lifetime.
+  for (const [name, mail] of [["sub_active", "sa2@example.com"], ["sub_expired", "se2@example.com"], ["sub_life", "sl2@example.com"]]) {
+    const c = makeClient(app);
+    await c.get("/auth/signup");
+    await c.post("/auth/signup", { username: name, email: mail, password: "supersecret1", confirm: "supersecret1", ...(await solveCaptcha(c)) });
+  }
+  const DAY = 86_400_000;
+  const now = Date.now();
+  await db.run("UPDATE users SET tier='paid', role='user', paid_until=? WHERE username='sub_active'", now + 10 * DAY);
+  await db.run("UPDATE users SET tier='paid', role='user', paid_until=? WHERE username='sub_expired'", now - 5 * DAY);
+  await db.run("UPDATE users SET tier='paid', role='user', paid_until=NULL WHERE username='sub_life'");
+  const id = async (n) => (await db.get("SELECT id FROM users WHERE username = ?", n)).id;
+
+  // Individual: +5 days on an active sub extends from its current end.
+  await admin.get("/admin/users");
+  let res = await admin.post(`/admin/users/${await id("sub_active")}/paid-days`, { delta_days: "5" });
+  assert.equal(res.status, 302);
+  let row = await db.get("SELECT paid_until FROM users WHERE username='sub_active'");
+  assert.ok(Math.abs(Number(row.paid_until) - (now + 15 * DAY)) < 60_000, "active sub extended from its end date");
+
+  // Individual: +7 on an EXPIRED sub counts from now, not from the past.
+  res = await admin.post(`/admin/users/${await id("sub_expired")}/paid-days`, { delta_days: "7" });
+  row = await db.get("SELECT paid_until FROM users WHERE username='sub_expired'");
+  assert.ok(Math.abs(Number(row.paid_until) - (now + 7 * DAY)) < 60_000, "expired sub restarts from now");
+
+  // Individual: negative below zero clamps to expired-now, never negative time.
+  res = await admin.post(`/admin/users/${await id("sub_expired")}/paid-days`, { delta_days: "-500" });
+  row = await db.get("SELECT paid_until FROM users WHERE username='sub_expired'");
+  assert.ok(Number(row.paid_until) <= Date.now() + 1000, "clamped to now (expired)");
+
+  // Non-paid target refused.
+  const freeC = makeClient(app);
+  await freeC.get("/auth/signup");
+  await freeC.post("/auth/signup", { username: "sub_free", email: "sf2@example.com", password: "supersecret1", confirm: "supersecret1", ...(await solveCaptcha(freeC)) });
+  res = await admin.post(`/admin/users/${await id("sub_free")}/paid-days`, { delta_days: "5" });
+  row = await db.get("SELECT paid_until FROM users WHERE username='sub_free'");
+  assert.equal(row.paid_until, null, "non-paid accounts untouched");
+
+  // Mass: +3 days to every DATED sub; lifetime stays NULL.
+  const before = Number((await db.get("SELECT paid_until FROM users WHERE username='sub_active'")).paid_until);
+  res = await admin.post("/admin/subscriptions/adjust", { delta_days: "3" });
+  assert.equal(res.status, 302);
+  row = await db.get("SELECT paid_until FROM users WHERE username='sub_active'");
+  assert.ok(Math.abs(Number(row.paid_until) - (before + 3 * DAY)) < 60_000, "mass adjust extended the dated sub");
+  assert.equal((await db.get("SELECT paid_until FROM users WHERE username='sub_life'")).paid_until, null, "lifetime untouched by mass adjust");
+  // The expired-then-clamped one restarts from ~now + 3d.
+  row = await db.get("SELECT paid_until FROM users WHERE username='sub_expired'");
+  assert.ok(Number(row.paid_until) > Date.now() + 2 * DAY, "expired sub included, counted from now");
+
+  // Staff below admin cannot use either control.
+  const dev = makeClient(app);
+  await dev.get("/auth/signup");
+  await dev.post("/auth/signup", { username: "sub_dev", email: "sd2@example.com", password: "supersecret1", confirm: "supersecret1", ...(await solveCaptcha(dev)) });
+  await db.run("UPDATE users SET tier='developer' WHERE username='sub_dev'");
+  await dev.get("/auth/login");
+  await dev.post("/auth/login", { identifier: "sub_dev", password: "supersecret1", next: "/" });
+  await dev.get("/admin/users");
+  assert.equal((await dev.post("/admin/subscriptions/adjust", { delta_days: "9" })).status, 404, "mass adjust is full-admin only");
+  assert.equal((await dev.post(`/admin/users/${await id("sub_active")}/paid-days`, { delta_days: "9" })).status, 404, "per-user adjust is full-admin only");
+
+  // API: both expiries clearly distinguishable; daysLeft/ISO provided.
+  const api = (path, body) => app.fetch(new Request("http://local" + path, {
+    method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body),
+  }), ENV);
+  const auth = await (await api("/api/loader/auth", { username: "sub_active", password: "supersecret1" })).json();
+  assert.ok(auth.subscription.daysLeft >= 17 && auth.subscription.daysLeft <= 19, `daysLeft ≈ 18 (got ${auth.subscription.daysLeft})`);
+  assert.ok(/^\d{4}-\d{2}-\d{2}T/.test(auth.subscription.paidUntilIso), "ISO expiry provided");
+  assert.equal(auth.subscription.lifetime, false);
+  assert.ok(auth.license.expiresAt - auth.license.issuedAt === 24 * 3600 * 1000, "token TTL is 24h — distinct from the subscription");
+  const life = await (await api("/api/loader/auth", { username: "sub_life", password: "supersecret1" })).json();
+  assert.ok(life.subscription.lifetime === true && life.subscription.daysLeft === null && life.paid === true,
+    "lifetime is explicit: paid=true, daysLeft=null, lifetime=true");
 });

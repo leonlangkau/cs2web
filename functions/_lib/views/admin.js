@@ -87,6 +87,26 @@ function dashboard(ctx, { stats, recentLogs, recentUsers }) {
 function users(ctx, { users: rows, q, page: current, pages, total, tiers, tierLabels }) {
   const csrf = `<input type="hidden" name="_csrf" value="${esc(ctx.csrfToken)}">`;
   const canManageTiers = isFullAdmin(ctx.user);
+  const DAY = 86_400_000;
+
+  const subCell = (u) => {
+    if (u.tier !== 'paid') return '<span class="muted">—</span>';
+    let state;
+    if (u.paid_until === null || u.paid_until === undefined) {
+      state = '<strong>Lifetime</strong>';
+    } else if (Number(u.paid_until) <= Date.now()) {
+      state = '<span class="tag tag-banned">EXPIRED</span>';
+    } else {
+      const left = Math.ceil((Number(u.paid_until) - Date.now()) / DAY);
+      state = `<strong>${esc(left)}d</strong> <span class="muted">left · ends ${esc(new Date(Number(u.paid_until)).toISOString().slice(0, 10))}</span>`;
+    }
+    const adjust = canManageTiers && u.id !== ctx.user.id ? `
+      <form method="post" action="/admin/users/${esc(u.id)}/paid-days" class="inline-form sub-adjust">${csrf}
+        <input type="number" name="delta_days" min="-3650" max="3650" required placeholder="±days"
+               aria-label="Adjust days for ${esc(u.username)}">
+        <button class="btn btn-ghost btn-xs" type="submit">Apply</button></form>` : '';
+    return `${state}${adjust}`;
+  };
 
   const actions = (u) => {
     const profileLink = `<a class="btn btn-ghost btn-xs" href="/u/${encodeURIComponent(u.username)}">Profile</a>`;
@@ -97,16 +117,15 @@ function users(ctx, { users: rows, q, page: current, pages, total, tiers, tierLa
 
     if (!canManageTiers) return `${profileLink} ${banBtn}`;
 
-    const tierSelect = `<form method="post" action="/admin/users/${esc(u.id)}/tier" class="inline-form"
-          data-confirm="Set ${esc(u.username)}'s tier to the selected value?">${csrf}
+    const manage = `<details class="admin-user-tools"><summary class="muted">Manage</summary>
+      <form method="post" action="/admin/users/${esc(u.id)}/tier" class="inline-form"
+            data-confirm="Set ${esc(u.username)}'s tier to the selected value?">${csrf}
         <select name="tier" aria-label="Tier for ${esc(u.username)}">
           ${map(tiers, (t) => `<option value="${esc(t)}" ${u.tier === t ? 'selected' : ''}>${esc(tierLabels[t] || t)}</option>`)}
         </select>
         <input type="number" name="paid_days" min="1" max="3650" placeholder="days"
                title="Paid duration in days — leave empty for lifetime (Paid tier only)" class="paid-days-input">
-        <button class="btn btn-ghost btn-xs" type="submit">Set</button></form>`;
-
-    const moreTools = `<details class="admin-user-tools"><summary class="muted">More</summary>
+        <button class="btn btn-ghost btn-xs" type="submit">Set tier</button></form>
       <form method="post" action="/admin/users/${esc(u.id)}/password" class="inline-form"
             data-confirm="Set a new password for ${esc(u.username)}? Their sessions will be signed out.">${csrf}
         <input type="password" name="password" minlength="8" maxlength="128" required
@@ -122,12 +141,24 @@ function users(ctx, { users: rows, q, page: current, pages, total, tiers, tierLa
         <button class="btn btn-danger btn-xs" type="submit">Delete</button></form>
     </details>`;
 
-    return `${profileLink} ${banBtn} ${tierSelect} ${moreTools}`;
+    return `${profileLink} ${banBtn} ${manage}`;
   };
+
+  const massPanel = canManageTiers ? `
+    <div class="panel sub-mass-panel">
+      <form method="post" action="/admin/subscriptions/adjust" class="filter-bar panel-form"
+            data-confirm="Adjust EVERY dated Paid subscription by the entered number of days?">${csrf}
+        <strong>All subscriptions:</strong>
+        <input type="number" name="delta_days" min="-3650" max="3650" required placeholder="±days"
+               aria-label="Days to add to every dated Paid subscription" class="paid-days-input">
+        <button class="btn btn-outline btn-sm" type="submit">Apply to all Paid</button>
+        <span class="muted">Positive extends, negative shortens. Lifetime subscriptions are untouched.</span>
+      </form>
+    </div>` : '';
 
   const body = `
 <div class="section admin-page">
-  <div class="container">
+  <div class="container admin-narrow">
     ${head(ctx, 'Users')}
     <form method="get" action="/admin/users" class="filter-bar">
       <input type="search" name="q" value="${esc(q)}" aria-label="Search users by username, email or IP"
@@ -136,24 +167,20 @@ function users(ctx, { users: rows, q, page: current, pages, total, tiers, tierLa
       ${q ? '<a class="btn btn-ghost" href="/admin/users">Clear</a>' : ''}
       <span class="muted">${esc(total)} user${total === 1 ? '' : 's'}</span>
     </form>
-    ${!canManageTiers ? '<p class="muted">Tier changes and account deletion require full Admin access.</p>' : ''}
-    <div class="panel"><div class="table-wrap"><table>
-      <thead><tr><th>User</th><th>Email</th><th>Signup IP</th><th>Last login</th><th>Posts</th><th>Actions</th></tr></thead>
+    ${massPanel}
+    ${!canManageTiers ? '<p class="muted">Tier changes, subscriptions and account tools require full Admin access.</p>' : ''}
+    <div class="panel users-table"><div class="table-wrap"><table>
+      <thead><tr><th>User</th><th>IPs</th><th>Subscription</th><th>Actions</th></tr></thead>
       <tbody>${map(rows, (u) => `<tr class="${u.banned ? 'row-banned' : ''}">
         <td><strong>${esc(u.username)}</strong>${tierTag(u.tier)}
           ${u.banned ? '<span class="tag tag-banned">BANNED</span>' : ''}
           <div class="muted"><span class="uid-badge${u.id <= 1001 ? ' uid-reserved' : ''}">UID ${esc(u.id)}</span>
-            · joined ${esc(timeAgo(u.created_at))}
-            ${u.tier === 'paid' ? (u.paid_until
-              ? ` · Paid ${Number(u.paid_until) > Date.now()
-                  ? `until ${esc(new Date(Number(u.paid_until)).toISOString().slice(0, 10))}`
-                  : '<span class="tag tag-banned">EXPIRED</span>'}`
-              : ' · Paid (lifetime)') : ''}</div></td>
-        <td>${esc(u.email)}
-          <div class="muted">${u.email_verified_at ? '✓ verified' : 'unverified'}</div></td>
-        <td class="mono">${esc(u.signup_ip || '—')}</td>
-        <td><span class="mono">${esc(u.last_login_ip || '—')}</span><div class="muted">${esc(timeAgo(u.last_login_at))}</div></td>
-        <td>${esc(u.post_count)}</td>
+            · joined ${esc(timeAgo(u.created_at))}</div>
+          <div class="muted">${esc(u.email)} ${u.email_verified_at ? '✓' : '<span title="email unverified">✗</span>'}</div></td>
+        <td><div class="mono">${esc(u.signup_ip || '—')}</div>
+          <div class="mono muted">${esc(u.last_login_ip || '—')}</div>
+          <div class="muted">${esc(timeAgo(u.last_login_at))}</div></td>
+        <td class="sub-cell">${subCell(u)}</td>
         <td class="actions-cell">${actions(u)}</td></tr>`)}
       </tbody></table></div></div>
     ${pagination(current, pages, (p) => `/admin/users?page=${p}&q=${encodeURIComponent(q)}`)}

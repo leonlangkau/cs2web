@@ -156,3 +156,29 @@ CREATE TABLE IF NOT EXISTS ip_bans (
   expires_at INTEGER,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
+
+-- Client-reported device/browser fingerprints, captured once per browser
+-- session (see public/js/fingerprint.js) and linked to the signed-in user, if
+-- any. fp_hash groups sightings of the same device together so each device
+-- accumulates its own history here — useful for spotting a banned user or
+-- multi-accounter returning behind a new IP or account.
+CREATE TABLE IF NOT EXISTS fingerprints (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  fp_hash     TEXT NOT NULL,
+  user_id     INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  username    TEXT,
+  email       TEXT,
+  ip          TEXT NOT NULL,
+  user_agent  TEXT,
+  device      TEXT,
+  browser     TEXT,
+  os          TEXT,
+  screen      TEXT,
+  language    TEXT,
+  timezone    TEXT,
+  canvas_hash TEXT,
+  created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_fingerprints_hash ON fingerprints(fp_hash);
+CREATE INDEX IF NOT EXISTS idx_fingerprints_user ON fingerprints(user_id);
+CREATE INDEX IF NOT EXISTS idx_fingerprints_created ON fingerprints(created_at);

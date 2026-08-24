@@ -21,6 +21,7 @@ const DEFAULTS = {
   report: { limit: 5, windowMs: 60 * 60 * 1000 },     // per user
   reset: { limit: 3, windowMs: 60 * 60 * 1000 },      // per IP (password-reset emails)
   verify: { limit: 3, windowMs: 60 * 60 * 1000 },     // per user (verification emails)
+  fingerprint: { limit: 20, windowMs: 10 * 60 * 1000 }, // per IP (client fingerprint beacon)
 };
 
 const ENV_KEYS = {
@@ -34,6 +35,7 @@ const ENV_KEYS = {
   report: 'RATE_LIMIT_REPORT',
   reset: 'RATE_LIMIT_RESET',
   verify: 'RATE_LIMIT_VERIFY',
+  fingerprint: 'RATE_LIMIT_FINGERPRINT',
 };
 
 function limitFor(name, env = {}) {

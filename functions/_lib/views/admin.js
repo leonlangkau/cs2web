@@ -15,6 +15,7 @@ function head(ctx, heading) {
     ${tab('/admin', 'Dashboard', p === '/admin')}
     ${tab('/admin/users', 'Users', p.startsWith('/admin/users'))}
     ${tab('/admin/logs', 'IP logs', p.startsWith('/admin/logs'))}
+    ${tab('/admin/fingerprints', 'Fingerprints', p.startsWith('/admin/fingerprints'))}
     ${tab('/admin/reports', 'Reports', p.startsWith('/admin/reports'))}
     ${tab('/admin/forum', 'Forum', p.startsWith('/admin/forum'))}
   </nav>`;
@@ -58,6 +59,7 @@ function dashboard(ctx, { stats, recentLogs, recentUsers }) {
       ${card(stats.banned, 'Banned users', stats.banned > 0)}
       ${card(stats.ipBans, 'IP bans', stats.ipBans > 0)}
       ${card(stats.openReports, 'Open reports', stats.openReports > 0)}
+      ${card(stats.fingerprints, 'Fingerprints')}
     </div>
     <div class="admin-columns">
       <div class="panel">
@@ -110,12 +112,13 @@ function users(ctx, { users: rows, q, page: current, pages, total, tiers, tierLa
 
   const actions = (u) => {
     const profileLink = `<a class="btn btn-ghost btn-xs" href="/u/${encodeURIComponent(u.username)}">Profile</a>`;
-    if (u.id === ctx.user.id) return `<span class="muted">you</span> ${profileLink}`;
+    const fpLink = `<a class="btn btn-ghost btn-xs" href="/admin/fingerprints?q=${encodeURIComponent(u.username)}">Fingerprints</a>`;
+    if (u.id === ctx.user.id) return `<span class="muted">you</span> ${profileLink} ${fpLink}`;
     const banBtn = u.banned
       ? `<form method="post" action="/admin/users/${esc(u.id)}/unban" class="inline-form">${csrf}<button class="btn btn-ghost btn-xs" type="submit">Unban</button></form>`
       : `<form method="post" action="/admin/users/${esc(u.id)}/ban" class="inline-form" data-confirm="Ban ${esc(u.username)}? They will be signed out everywhere.">${csrf}<button class="btn btn-warn btn-xs" type="submit">Ban</button></form>`;
 
-    if (!canManageTiers) return `${profileLink} ${banBtn}`;
+    if (!canManageTiers) return `${profileLink} ${fpLink} ${banBtn}`;
 
     const manage = `<details class="admin-user-tools"><summary class="muted">Manage</summary>
       <form method="post" action="/admin/users/${esc(u.id)}/tier" class="inline-form"
@@ -141,7 +144,7 @@ function users(ctx, { users: rows, q, page: current, pages, total, tiers, tierLa
         <button class="btn btn-danger btn-xs" type="submit">Delete</button></form>
     </details>`;
 
-    return `${profileLink} ${banBtn} ${manage}`;
+    return `${profileLink} ${fpLink} ${banBtn} ${manage}`;
   };
 
   const massPanel = canManageTiers ? `
@@ -262,6 +265,96 @@ function logs(ctx, { logs: rows, q, event, events, important, page: current, pag
   return page(ctx, { title: 'Admin · IP logs', body });
 }
 
+const fpBadge = (device) => `<span class="tag tag-device">${esc(device || 'Unknown')}</span>`;
+
+function fingerprintRow(f) {
+  const shortHash = String(f.fp_hash).slice(0, 12);
+  return `<tr>
+    <td><a class="mono" href="/admin/fingerprints/${encodeURIComponent(f.fp_hash)}">${esc(shortHash)}</a>
+      <div class="muted">${esc(f.sightings)} sighting${Number(f.sightings) === 1 ? '' : 's'}${Number(f.user_count) > 0 ? ` · ${esc(f.user_count)} account${Number(f.user_count) === 1 ? '' : 's'}` : ''}</div></td>
+    <td>${fpBadge(f.device)}</td>
+    <td>${esc(f.browser || '—')}</td>
+    <td>${esc(f.os || '—')}</td>
+    <td class="mono">${esc(f.screen || '—')}</td>
+    <td class="muted">${esc(f.language || '—')} · ${esc(f.timezone || '—')}</td>
+    <td>${f.username ? esc(f.username) : '<span class="muted">anonymous</span>'}
+      ${f.email ? `<div class="muted">${esc(f.email)}</div>` : ''}</td>
+    <td class="mono">${f.ipHidden
+      ? `<span class="muted" title="Admin accounts' IPs are hidden from other staff">${esc(f.ip)}</span>`
+      : `<a href="/admin/fingerprints?q=${encodeURIComponent(f.ip)}">${esc(f.ip)}</a>`}</td>
+    <td class="muted nowrap">${esc(timeAgo(f.last_seen))}</td>
+    <td class="actions-cell"><a class="btn btn-ghost btn-xs" href="/admin/fingerprints/${encodeURIComponent(f.fp_hash)}">View log</a></td></tr>`;
+}
+
+function fingerprints(ctx, { rows, q, page: current, pages, total }) {
+  const body = `
+<div class="section admin-page">
+  <div class="container">
+    ${head(ctx, 'Fingerprints')}
+    <p class="muted">Every visitor's browser reports a device fingerprint (device type, browser, OS, screen,
+      language, timezone and a canvas-rendering signature) once per session. The same fingerprint returning under
+      a different account or IP can reveal ban evasion or multi-accounting — open a row for its full log.</p>
+    <form method="get" action="/admin/fingerprints" class="filter-bar">
+      <input type="search" name="q" value="${esc(q)}" aria-label="Search fingerprints by hash, IP, user, email, device, browser or OS"
+             placeholder="Search hash, IP, user, email, device, browser or OS…">
+      <button class="btn btn-outline" type="submit">Search</button>
+      ${q ? '<a class="btn btn-ghost" href="/admin/fingerprints">Clear</a>' : ''}
+      <span class="muted">${esc(total)} distinct fingerprint${total === 1 ? '' : 's'}</span>
+    </form>
+    <div class="panel"><div class="table-wrap"><table>
+      <thead><tr><th>Fingerprint</th><th>Device</th><th>Browser</th><th>OS</th><th>Screen</th><th>Language / TZ</th><th>Last user</th><th>Last IP</th><th>Last seen</th><th></th></tr></thead>
+      <tbody>${rows.length === 0
+        ? '<tr><td colspan="10" class="muted center">No fingerprints captured yet.</td></tr>'
+        : map(rows, fingerprintRow)}
+      </tbody></table></div></div>
+    ${pagination(current, pages, (p) => `/admin/fingerprints?page=${p}&q=${encodeURIComponent(q)}`)}
+  </div>
+</div>`;
+  return page(ctx, { title: 'Admin · Fingerprints', body });
+}
+
+function fingerprintDetail(ctx, { hash, sightings }) {
+  const csrf = `<input type="hidden" name="_csrf" value="${esc(ctx.csrfToken)}">`;
+  const users = [...new Set(sightings.filter((s) => s.username).map((s) => s.username))];
+  const ips = [...new Set(sightings.map((s) => s.ip))];
+
+  const row = (s) => `<tr>
+    <td class="muted nowrap">${esc(s.created_at)} UTC</td>
+    <td class="mono">${s.ipHidden
+      ? `<span class="muted" title="Admin accounts' IPs are hidden from other staff">${esc(s.ip)}</span>`
+      : esc(s.ip)}</td>
+    <td>${s.username ? esc(s.username) : '<span class="muted">anonymous</span>'}</td>
+    <td class="muted">${esc(s.email || '—')}</td>
+    <td>${fpBadge(s.device)}</td>
+    <td>${esc(s.browser || '—')}</td>
+    <td>${esc(s.os || '—')}</td>
+    <td class="mono">${esc(s.screen || '—')}</td>
+    <td class="muted">${esc(s.language || '—')}</td>
+    <td class="muted">${esc(s.timezone || '—')}</td>
+    <td class="actions-cell">${s.ipHidden ? '' : `<form method="post" action="/admin/ip-bans" class="inline-form"
+          data-confirm="Ban ${esc(s.ip)} from GoyHub entirely?">${csrf}
+        <input type="hidden" name="ip" value="${esc(s.ip)}">
+        <button class="btn btn-warn btn-xs" type="submit">Ban IP</button></form>`}</td></tr>`;
+
+  const body = `
+<div class="section admin-page">
+  <div class="container">
+    ${head(ctx, 'Fingerprint log')}
+    <div class="page-head">
+      <div><p class="section-kicker muted">FINGERPRINT <span class="mono">${esc(hash)}</span></p>
+        <p class="muted">${esc(sightings.length)} sighting${sightings.length === 1 ? '' : 's'} across
+          ${esc(ips.length)} IP${ips.length === 1 ? '' : 's'}
+          ${users.length ? `and ${esc(users.length)} account${users.length === 1 ? '' : 's'}: ${esc(users.join(', '))}` : '— seen only while signed out'}.</p></div>
+      <a class="btn btn-ghost btn-sm" href="/admin/fingerprints">← All fingerprints</a>
+    </div>
+    <div class="panel"><div class="table-wrap"><table>
+      <thead><tr><th>When</th><th>IP</th><th>User</th><th>Email</th><th>Device</th><th>Browser</th><th>OS</th><th>Screen</th><th>Language</th><th>Timezone</th><th></th></tr></thead>
+      <tbody>${map(sightings, row)}</tbody></table></div></div>
+  </div>
+</div>`;
+  return page(ctx, { title: `Admin · Fingerprint ${hash.slice(0, 12)}`, body });
+}
+
 function reports(ctx, { reports: rows }) {
   const csrf = `<input type="hidden" name="_csrf" value="${esc(ctx.csrfToken)}">`;
   const row = (r) => {
@@ -366,4 +459,4 @@ function forumAdmin(ctx, { categories, threads }) {
   return page(ctx, { title: 'Admin · Forum', body });
 }
 
-export { dashboard, users, logs, reports, forumAdmin };
+export { dashboard, users, logs, fingerprints, fingerprintDetail, reports, forumAdmin };

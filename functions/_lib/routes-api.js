@@ -12,10 +12,15 @@
  *   POST /api/loader/verify  {license object from /auth}   -> {ok, valid, tier}
  */
 import * as limits from "./limits.js";
-import { verifyPassword } from "./crypto.js";
-import { audit, clientIp, formBody } from "./middleware.js";
+import { verifyPassword, sha256hex } from "./crypto.js";
+import { audit, clientIp, userAgent, formBody } from "./middleware.js";
 import { issueLicense, verifyLicense } from "./license.js";
 import { tierOf, meetsTier, paidExpired } from "./tiers.js";
+
+/** Trims/truncates a client-reported fingerprint field to a sane length. */
+function fpField(value) {
+  return String(value ?? '').replace(/[\r\n\t]+/g, ' ').trim().slice(0, 80);
+}
 
 /**
  * Subscription block for API responses. Deliberately over-explicit — the two
@@ -121,6 +126,41 @@ function register(app) {
       paid: live ? meetsTier(row, 'paid') : false,
       subscription: live ? subscriptionInfo(row) : null,
     });
+  });
+
+  // Client-side device/browser fingerprint beacon (see public/js/fingerprint.js).
+  // Fires once per browser session; no CSRF token is required — the JSON
+  // content-type forces a CORS preflight, which blocks a cross-site page from
+  // triggering it, and this only ever appends a log row rather than acting on
+  // cookie authority. Always answers 204 so a rate-limited or malformed beacon
+  // never surfaces anything to the page.
+  app.post('/api/fingerprint', async (c) => {
+    c.header('Cache-Control', 'no-store');
+    const db = c.get('db');
+
+    const verdict = await limits.check(db, 'fingerprint', clientIp(c), c.get('cfg'));
+    if (!verdict.ok) return c.text(null, 204);
+
+    const body = await apiBody(c);
+    const device = fpField(body.device);
+    const browser = fpField(body.browser);
+    const os = fpField(body.os);
+    const screenInfo = fpField(body.screen);
+    const language = fpField(body.language);
+    const timezone = fpField(body.timezone);
+    const canvasHash = fpField(body.canvasHash);
+    const fpHash = await sha256hex([device, os, browser, screenInfo, language, timezone, canvasHash].join('|'));
+
+    const user = c.get('user');
+    await db.run(
+      `INSERT INTO fingerprints
+         (fp_hash, user_id, username, email, ip, user_agent, device, browser, os, screen, language, timezone, canvas_hash)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      fpHash, user ? user.id : null, user ? user.username : null, user ? user.email : null,
+      clientIp(c) || 'unknown', userAgent(c), device, browser, os, screenInfo, language, timezone, canvasHash
+    );
+
+    return c.text(null, 204);
   });
 }
 

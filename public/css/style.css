@@ -554,10 +554,12 @@ textarea { resize: vertical; min-height: 90px; }
 .tag-lock { background: #e8eaee; color: var(--muted); }
 .tag-admin { background: #e1e7f6; color: var(--accent); }
 .tag-banned { background: #f7e3e5; color: var(--danger); }
+.tag-device { background: #e8eaee; color: var(--muted); }
 [data-theme="dark"] .tag-pin { background: var(--accent-soft); color: var(--accent); }
 [data-theme="dark"] .tag-lock { background: var(--panel-2); color: var(--muted); }
 [data-theme="dark"] .tag-admin { background: var(--accent-soft); color: var(--accent); }
 [data-theme="dark"] .tag-banned { background: rgba(255, 107, 122, 0.16); color: var(--danger); }
+[data-theme="dark"] .tag-device { background: var(--panel-2); color: var(--muted); }
 
 /* Tier badges */
 .tag-tier-paid { background: #e2efe9; color: var(--success); }

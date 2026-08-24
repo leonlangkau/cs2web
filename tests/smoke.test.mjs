@@ -490,6 +490,53 @@ test("IP bans block every route except for staff, who are exempt", async () => {
   assert.equal(res.status, 200, "unbanned IP can browse again");
 });
 
+test("fingerprint beacon groups anonymous and signed-in sightings under one device log", async () => {
+  const { app, db } = await buildTestApp(ENV);
+  const admin = makeClient(app);
+  const user = makeClient(app);
+  const anon = makeClient(app);
+
+  await admin.get("/auth/login");
+  await admin.post("/auth/login", { identifier: "admin", password: "admin-test-password-1", next: "/" });
+
+  await user.get("/auth/signup");
+  await user.post("/auth/signup", {
+    username: "fp_user", email: "fp@example.com", password: "supersecret1", confirm: "supersecret1",
+    ...(await solveCaptcha(user)),
+  });
+
+  const fields = {
+    device: "Desktop", browser: "Chrome 120", os: "Windows 10/11",
+    screen: "1920x1080x24", language: "en-US", timezone: "Europe/Berlin", canvasHash: "abc123",
+  };
+
+  let res = await anon.post("/api/fingerprint", fields);
+  assert.equal(res.status, 204, "anonymous fingerprint beacon accepted");
+  res = await user.post("/api/fingerprint", fields);
+  assert.equal(res.status, 204, "signed-in fingerprint beacon accepted");
+
+  const rows = await db.all("SELECT * FROM fingerprints ORDER BY id");
+  assert.equal(rows.length, 2, "two sightings recorded");
+  assert.equal(rows[0].fp_hash, rows[1].fp_hash, "identical device data hashes to the same fingerprint");
+  assert.equal(rows[0].user_id, null, "anonymous sighting has no user");
+  assert.equal(rows[1].username, "fp_user", "signed-in sighting is attributed");
+  assert.equal(rows[1].email, "fp@example.com", "signed-in sighting captures the account email");
+
+  assert.equal((await user.get("/admin/fingerprints")).status, 404, "fingerprints panel hidden from non-staff");
+
+  const listHtml = await (await admin.get("/admin/fingerprints")).text();
+  assert.ok(listHtml.includes("1 distinct fingerprint") && listHtml.includes("2 sightings") && listHtml.includes("1 account"),
+    "admin fingerprints list groups both sightings under one device");
+
+  const hash = rows[0].fp_hash;
+  const detailHtml = await (await admin.get(`/admin/fingerprints/${hash}`)).text();
+  assert.ok(detailHtml.includes("fp_user") && detailHtml.includes("fp@example.com") && detailHtml.includes("anonymous")
+    && detailHtml.includes("Chrome 120") && detailHtml.includes("Europe/Berlin"),
+    "per-fingerprint log shows every sighting, signed-in and anonymous");
+
+  assert.equal((await admin.get("/admin/fingerprints/doesnotexist")).status, 404, "unknown fingerprint hash 404s");
+});
+
 test("account switching: login stays reachable while signed in and swaps the session", async () => {
   const { app, db } = await buildTestApp(ENV);
   const browser = makeClient(app);

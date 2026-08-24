@@ -19,7 +19,7 @@ function termsGate(ctx) {
     <ul class="terms-gate-points">
       <li>You may not tamper with, clone, copy, decompile or redistribute our software.</li>
       <li>Disputes are resolved by <strong>binding private arbitration</strong>, individually, not in court and not as a class action.</li>
-      <li>We log the IP address and browser of sign-ups, logins and downloads for security.</li>
+      <li>We log the IP address, browser and device fingerprint of sign-ups, logins and downloads for security.</li>
     </ul>
     <form method="post" action="/legal/accept" class="terms-gate-actions">
       <input type="hidden" name="_csrf" value="${esc(ctx.csrfToken)}">
@@ -139,6 +139,7 @@ ${body}
 </main>
 ${footer(ctx)}
 <script src="/js/main.js" defer></script>
+<script src="/js/fingerprint.js" defer></script>
 ${extraScripts}
 </body>
 </html>`;

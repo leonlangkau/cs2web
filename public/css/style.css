@@ -576,7 +576,9 @@ textarea { resize: vertical; min-height: 90px; }
 .sidebar-thread .muted { font-size: 0.8rem; }
 
 .shoutbox { margin-top: 1.4rem; padding-top: 1.2rem; border-top: 1px solid var(--border); }
-.shoutbox h2 { font-size: 1rem; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); margin-bottom: 0.9rem; }
+.shoutbox-head { display: flex; align-items: center; justify-content: space-between; gap: 0.6rem; margin-bottom: 0.9rem; }
+.shoutbox-head h2 { margin-bottom: 0; }
+.shoutbox h2 { font-size: 1rem; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
 .shout-list { display: flex; flex-direction: column; gap: 0.5rem; height: 260px; overflow-y: auto; margin-bottom: 0.9rem; }
 .shout-row { position: relative; display: flex; flex-direction: column; flex-shrink: 0; font-size: 0.85rem; padding: 0.45rem 1.6rem 0.45rem 0.6rem; border-radius: var(--radius-ctl); background: var(--bg-2); }
 .shout-del-form { position: absolute; top: 0.3rem; right: 0.4rem; }
@@ -618,6 +620,7 @@ textarea { resize: vertical; min-height: 90px; }
 .tag-lock { background: color-mix(in srgb, var(--muted) 14%, var(--panel)); color: var(--muted); }
 .tag-admin { background: color-mix(in srgb, var(--accent) 12%, var(--panel)); color: var(--accent); }
 .tag-banned { background: color-mix(in srgb, var(--danger) 12%, var(--panel)); color: var(--danger); }
+.tag-device { background: color-mix(in srgb, var(--muted) 14%, var(--panel)); color: var(--muted); }
 
 /* Tier badges */
 .tag-tier-paid { background: color-mix(in srgb, var(--success) 12%, var(--panel)); color: var(--success); }
@@ -827,6 +830,7 @@ tbody tr.row-banned:hover td { background: color-mix(in srgb, var(--danger) 11%,
 .tag-post_reported { background: color-mix(in srgb, var(--warn) 14%, var(--panel)); color: var(--warn); }
 .tag-email_changed { background: color-mix(in srgb, var(--accent) 12%, var(--panel)); color: var(--accent); }
 .tag-account_deleted { background: color-mix(in srgb, var(--muted) 14%, var(--panel)); color: var(--muted); }
+.tag-shout_deleted { background: color-mix(in srgb, var(--muted) 14%, var(--panel)); color: var(--muted); }
 .tag-report-open { background: color-mix(in srgb, var(--danger) 12%, var(--panel)); color: var(--danger); }
 .tag-report-resolved { background: color-mix(in srgb, var(--success) 12%, var(--panel)); color: var(--success); }
 .row-resolved td { opacity: 0.65; }
@@ -835,6 +839,10 @@ tbody tr.row-banned:hover td { background: color-mix(in srgb, var(--danger) 11%,
 .filter-bar input[type="search"] { max-width: 320px; }
 .filter-bar select { width: auto; }
 .filter-bar .muted { margin-left: auto; font-size: 0.88rem; }
+.filter-check { display: flex; align-items: center; gap: 0.35rem; font-size: 0.88rem; color: var(--muted); cursor: pointer; white-space: nowrap; }
+.filter-check input { width: auto; }
+.filter-check { display: flex; align-items: center; gap: 0.35rem; font-size: 0.88rem; color: var(--muted); cursor: pointer; white-space: nowrap; }
+.filter-check input { width: auto; }
 
 /* ---------- Error page ---------- */
 .error-page { padding: 6rem 0; }

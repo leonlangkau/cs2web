@@ -447,7 +447,12 @@ function privacy(ctx) {
       administrator action against an account is itself logged. Where the Service runs behind a reverse proxy or
       content delivery network <em>and is configured to trust it</em>, the IP we record is the client address
       that proxy reports; otherwise it is the address of the system that connected to us, which in such a
-      deployment may be the proxy rather than you.</p>` },
+      deployment may be the proxy rather than you.</p>
+      <p>We also collect a device fingerprint from your browser once per browsing session: device type, browser
+      and operating system, screen size, language, timezone, and a canvas-rendering signature. This does not use
+      cookies and works whether or not you are signed in. We use it for the same purposes as IP logging above —
+      chiefly recognising a banned account or an evasion attempt that returns under a new IP or account — and it is
+      visible to our administrators alongside the IP logs.</p>` },
 
     { id: 'p7', title: 'Public content', html: `
       <p>The forum is public. Your username, your posts, the time you posted, your join date and your post count

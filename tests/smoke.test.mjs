@@ -490,6 +490,53 @@ test("IP bans block every route except for staff, who are exempt", async () => {
   assert.equal(res.status, 200, "unbanned IP can browse again");
 });
 
+test("fingerprint beacon groups anonymous and signed-in sightings under one device log", async () => {
+  const { app, db } = await buildTestApp(ENV);
+  const admin = makeClient(app);
+  const user = makeClient(app);
+  const anon = makeClient(app);
+
+  await admin.get("/auth/login");
+  await admin.post("/auth/login", { identifier: "admin", password: "admin-test-password-1", next: "/" });
+
+  await user.get("/auth/signup");
+  await user.post("/auth/signup", {
+    username: "fp_user", email: "fp@example.com", password: "supersecret1", confirm: "supersecret1",
+    ...(await solveCaptcha(user)),
+  });
+
+  const fields = {
+    device: "Desktop", browser: "Chrome 120", os: "Windows 10/11",
+    screen: "1920x1080x24", language: "en-US", timezone: "Europe/Berlin", canvasHash: "abc123",
+  };
+
+  let res = await anon.post("/api/fingerprint", fields);
+  assert.equal(res.status, 204, "anonymous fingerprint beacon accepted");
+  res = await user.post("/api/fingerprint", fields);
+  assert.equal(res.status, 204, "signed-in fingerprint beacon accepted");
+
+  const rows = await db.all("SELECT * FROM fingerprints ORDER BY id");
+  assert.equal(rows.length, 2, "two sightings recorded");
+  assert.equal(rows[0].fp_hash, rows[1].fp_hash, "identical device data hashes to the same fingerprint");
+  assert.equal(rows[0].user_id, null, "anonymous sighting has no user");
+  assert.equal(rows[1].username, "fp_user", "signed-in sighting is attributed");
+  assert.equal(rows[1].email, "fp@example.com", "signed-in sighting captures the account email");
+
+  assert.equal((await user.get("/admin/fingerprints")).status, 404, "fingerprints panel hidden from non-staff");
+
+  const listHtml = await (await admin.get("/admin/fingerprints")).text();
+  assert.ok(listHtml.includes("1 distinct fingerprint") && listHtml.includes("2 sightings") && listHtml.includes("1 account"),
+    "admin fingerprints list groups both sightings under one device");
+
+  const hash = rows[0].fp_hash;
+  const detailHtml = await (await admin.get(`/admin/fingerprints/${hash}`)).text();
+  assert.ok(detailHtml.includes("fp_user") && detailHtml.includes("fp@example.com") && detailHtml.includes("anonymous")
+    && detailHtml.includes("Chrome 120") && detailHtml.includes("Europe/Berlin"),
+    "per-fingerprint log shows every sighting, signed-in and anonymous");
+
+  assert.equal((await admin.get("/admin/fingerprints/doesnotexist")).status, 404, "unknown fingerprint hash 404s");
+});
+
 test("account switching: login stays reachable while signed in and swaps the session", async () => {
   const { app, db } = await buildTestApp(ENV);
   const browser = makeClient(app);
@@ -1166,6 +1213,34 @@ test("forum: title rename, category edit, shout delete + 3/min limit, /buy alias
   res = await admin.post(`/forum/shouts/${shout.id}/delete`);
   assert.equal(res.status, 302, "staff deletes a shout");
   assert.ok(!(await db.get("SELECT id FROM shouts WHERE id = ?", shout.id)), "shout gone");
+  assert.equal(
+    (await db.get("SELECT event FROM ip_logs WHERE detail LIKE 'deleted shout%' ORDER BY id DESC LIMIT 1")).event,
+    "shout_deleted", "shout delete logs under its own event, not admin_action"
+  );
+
+  // Purge: staff-only, clears every shout in one go, audited as shout_deleted.
+  for (let i = 1; i <= 2; i += 1) {
+    res = await other.post("/forum/shoutbox", { body: `purge fodder ${i}` });
+    assert.equal(res.status, 302, `purge fodder ${i} posted`);
+  }
+  res = await other.post("/forum/shouts/purge");
+  assert.equal(res.status, 404, "non-staff cannot purge the shoutbox");
+  assert.ok((await db.get("SELECT COUNT(*) AS n FROM shouts")).n > 0, "shouts survive a non-staff purge attempt");
+  res = await admin.post("/forum/shouts/purge");
+  assert.equal(res.status, 302, "staff purges the shoutbox");
+  assert.equal((await db.get("SELECT COUNT(*) AS n FROM shouts")).n, 0, "all shouts gone");
+  assert.ok(
+    await db.get("SELECT id FROM ip_logs WHERE event = 'shout_deleted' AND detail LIKE 'purged the shoutbox%' ORDER BY id DESC LIMIT 1"),
+    "purge is audited"
+  );
+
+  // "Important only" IP-log filter hides shout-deletion noise but keeps real
+  // moderation events (the category edit above logged as admin_action). The
+  // event-type <select> always lists every event name as an <option>, so
+  // check the per-row "tag-<event>" class rather than raw substring text.
+  const importantHtml = await (await admin.get("/admin/logs?important=1")).text();
+  assert.ok(!importantHtml.includes("tag-shout_deleted"), "important-only filter hides shout deletions");
+  assert.ok(importantHtml.includes("tag-admin_action"), "important-only filter keeps real moderation events");
 
   // /buy is the upgrade page.
   const buyHtml = await (await other.get("/buy")).text();

@@ -14,7 +14,7 @@ const TERMS_COOKIE = 'ghterms';
 const SESSION_DAYS = 7;
 
 /** Bump when the Terms change materially — everyone is asked to accept again. */
-const TERMS_VERSION = '2026-08-21';
+const TERMS_VERSION = '2026-08-24';
 const TERMS_GATE_EXEMPT = new Set(['/terms', '/privacy', '/legal/accept']);
 
 /** btoa()/atob() only accept Latin1, but flash messages carry arbitrary text

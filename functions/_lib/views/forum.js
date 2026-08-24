@@ -35,8 +35,13 @@ function shoutbox(ctx, shouts) {
       </form>`
     : '<p class="muted shout-login-note"><a href="/auth/login?next=%2Fforum">Log in</a> to join the shoutbox.</p>';
 
+  const purge = isStaff(ctx.user) ? `<form method="post" action="/forum/shouts/purge" class="inline-form shout-purge-form"
+      data-confirm="Delete every shout in the shoutbox? This cannot be undone.">
+      <input type="hidden" name="_csrf" value="${esc(ctx.csrfToken)}">
+      <button class="btn btn-ghost btn-xs" type="submit">Purge all</button></form>` : '';
+
   return `<div class="shoutbox" id="shoutbox" data-last-id="${esc(lastId)}"${isStaff(ctx.user) ? ` data-staff="1" data-csrf="${esc(ctx.csrfToken)}"` : ''}>
-    <h2>Shoutbox</h2>
+    <div class="shoutbox-head"><h2>Shoutbox</h2>${purge}</div>
     <div class="shout-list" id="shout-list">${list}</div>
     ${form}
   </div>`;

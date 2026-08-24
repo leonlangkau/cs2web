@@ -14,9 +14,9 @@ database_id = "1f2fd246-9cf1-46d0-a88a-629ad12f4243"
 [vars]
 # Registered entity shown on the legal pages. Replace before publishing —
 # until these are real, both legal pages show a "Setup required" banner.
-COMPANY_LEGAL_NAME = "[Registered Company Name]"
-COMPANY_REG_NUMBER = "[Registration Number]"
-COMPANY_ADDRESS = "[Registered Office Address]"
+COMPANY_LEGAL_NAME = "goyhub"
+COMPANY_REG_NUMBER = "69676420"
+COMPANY_ADDRESS = "1 Main RD"
 COMPANY_CITY = "Mutsamudu"
 COMPANY_CONTACT_EMAIL = "support@goyhub.com"
 COMPANY_PRIVACY_EMAIL = "privacy@goyhub.com"

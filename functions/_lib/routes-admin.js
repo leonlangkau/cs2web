@@ -8,10 +8,19 @@ import { setSetting, ANNOUNCEMENT_KEY } from "./settings.js";
 
 const LOGS_PER_PAGE = 50;
 const USERS_PER_PAGE = 25;
+const FINGERPRINTS_PER_PAGE = 25;
 const LOG_EVENTS = ['signup', 'login', 'login_failed', 'login_blocked', 'logout', 'download',
   'admin_action', 'captcha_failed', 'terms_accepted', 'password_changed', 'loader_auth', 'loader_auth_failed',
   'ip_autoban', 'signup_surge_blocked', 'post_reported', 'email_changed', 'account_deleted',
-  'password_reset_requested', 'password_reset', 'email_verified'];
+  'password_reset_requested', 'password_reset', 'email_verified', 'shout_deleted'];
+
+// High-volume, low-signal events — routine traffic rather than something an
+// admin needs to review. Excluded by the "Important only" log filter so a
+// spree of shout deletions (or ordinary logins) doesn't bury real
+// moderation/security events. An allowlist would rot silently as new event
+// types are added; this blacklist fails safe — anything new stays visible.
+const NOISY_EVENTS = new Set(['login', 'logout', 'download', 'captcha_failed', 'terms_accepted',
+  'loader_auth', 'shout_deleted']);
 
 const IP_HIDDEN = '(hidden)';
 
@@ -29,6 +38,9 @@ async function adminIpMask(c) {
   const adminIds = new Set(admins.map((a) => a.id));
   const adminNames = new Set(admins.map((a) => String(a.username).toLowerCase()));
 
+  const isAdminRow = (row) => (row.user_id !== null && row.user_id !== undefined && adminIds.has(row.user_id))
+    || (row.username && adminNames.has(String(row.username).toLowerCase()));
+
   const maskUser = (u) => {
     if (STAFF_TIERS.has(u.tier) && u.id !== viewer.id) {
       return { ...u, signup_ip: IP_HIDDEN, last_login_ip: IP_HIDDEN, ipHidden: true };
@@ -36,14 +48,21 @@ async function adminIpMask(c) {
     return u;
   };
   const maskLog = (l) => {
-    const isAdminRow = (l.user_id !== null && adminIds.has(l.user_id))
-      || (l.username && adminNames.has(String(l.username).toLowerCase()));
-    if (isAdminRow && l.user_id !== viewer.id) {
+    if (isAdminRow(l) && l.user_id !== viewer.id) {
       return { ...l, ip: IP_HIDDEN, user_agent: IP_HIDDEN, ipHidden: true };
     }
     return l;
   };
-  return { maskUser, maskLog };
+  // Fingerprint rows carry the same PII shape as ip_logs plus a canvas
+  // signature — masked under the same rule so one staff member's device
+  // isn't exposed to another.
+  const maskFingerprint = (f) => {
+    if (isAdminRow(f) && f.user_id !== viewer.id) {
+      return { ...f, ip: IP_HIDDEN, user_agent: IP_HIDDEN, canvas_hash: IP_HIDDEN, ipHidden: true };
+    }
+    return f;
+  };
+  return { maskUser, maskLog, maskFingerprint };
 }
 
 function intParam(value, fallback = 1) {
@@ -99,6 +118,7 @@ function register(app) {
       failedLogins24h: await one("SELECT COUNT(*) AS n FROM ip_logs WHERE event = 'login_failed' AND created_at > datetime('now', '-1 day')"),
       ipBans: await one('SELECT COUNT(*) AS n FROM ip_bans'),
       openReports: await one("SELECT COUNT(*) AS n FROM reports WHERE status = 'open'"),
+      fingerprints: await one('SELECT COUNT(DISTINCT fp_hash) AS n FROM fingerprints'),
     };
     const { maskUser, maskLog } = await adminIpMask(c);
     const recentLogs = (await db.all('SELECT * FROM ip_logs ORDER BY id DESC LIMIT 12')).map(maskLog);
@@ -354,10 +374,20 @@ function register(app) {
     const rawEvent = url.searchParams.get('event') || '';
     const event = LOG_EVENTS.includes(rawEvent) ? rawEvent : '';
     const q = String(url.searchParams.get('q') || '').trim().slice(0, 100);
+    const important = url.searchParams.get('important') === '1';
+    // A specific event already narrows the view — only apply the noise
+    // exclusion when browsing everything, so picking e.g. "shout_deleted"
+    // explicitly still works with "Important only" left checked.
+    const applyImportant = important && !event;
 
     const clauses = [];
     const params = [];
     if (event) { clauses.push('event = ?'); params.push(event); }
+    if (applyImportant) {
+      const noisy = [...NOISY_EVENTS];
+      clauses.push(`event NOT IN (${noisy.map(() => '?').join(', ')})`);
+      params.push(...noisy);
+    }
     if (q) { clauses.push('(ip LIKE ? OR username LIKE ? OR detail LIKE ?)'); params.push(`%${q}%`, `%${q}%`, `%${q}%`); }
     const where = clauses.length ? `WHERE ${clauses.join(' AND ')}` : '';
 
@@ -372,7 +402,7 @@ function register(app) {
     )).map(maskLog);
     const ipBans = await db.all('SELECT * FROM ip_bans ORDER BY created_at DESC LIMIT 100');
 
-    return c.html(views.logs(c.get('view'), { logs, q, event, events: LOG_EVENTS, page, pages, total, ipBans }));
+    return c.html(views.logs(c.get('view'), { logs, q, event, events: LOG_EVENTS, important, page, pages, total, ipBans }));
   });
 
   app.post('/admin/ip-bans', async (c) => {
@@ -396,6 +426,57 @@ function register(app) {
     await adminAudit(c, `banned IP ${ip}${reason ? ` (${reason})` : ''}`);
     setFlash(c, 'success', `${ip} has been banned.`);
     return c.redirect(backTo(c, '/admin/logs'), 302);
+  });
+
+  // Fingerprint log: one row per distinct device (fp_hash), latest sighting
+  // first. Each fingerprint has its own drill-down log at /admin/fingerprints/:hash.
+  app.get('/admin/fingerprints', async (c) => {
+    const db = c.get('db');
+    const url = new URL(c.req.url);
+    const q = String(url.searchParams.get('q') || '').trim().slice(0, 100);
+
+    const clauses = [];
+    const params = [];
+    if (q) {
+      clauses.push('(fp_hash LIKE ? OR ip LIKE ? OR username LIKE ? OR email LIKE ? OR device LIKE ? OR browser LIKE ? OR os LIKE ?)');
+      params.push(...Array(7).fill(`%${q}%`));
+    }
+    const where = clauses.length ? `WHERE ${clauses.join(' AND ')}` : '';
+
+    const total = Number((await db.get(
+      `SELECT COUNT(*) AS n FROM (SELECT fp_hash FROM fingerprints ${where} GROUP BY fp_hash)`, ...params
+    )).n);
+    const pages = Math.max(1, Math.ceil(total / FINGERPRINTS_PER_PAGE));
+    const page = Math.max(1, Math.min(pages, intParam(url.searchParams.get('page'))));
+
+    const { maskFingerprint } = await adminIpMask(c);
+    const rows = (await db.all(
+      `SELECT f.*, g.sightings, g.first_seen, g.last_seen, g.user_count
+       FROM fingerprints f
+       JOIN (
+         SELECT fp_hash, MAX(id) AS latest_id, COUNT(*) AS sightings,
+                MIN(created_at) AS first_seen, MAX(created_at) AS last_seen,
+                COUNT(DISTINCT CASE WHEN user_id IS NOT NULL THEN user_id END) AS user_count
+         FROM fingerprints ${where}
+         GROUP BY fp_hash
+       ) g ON g.latest_id = f.id
+       ORDER BY g.last_seen DESC LIMIT ? OFFSET ?`,
+      ...params, FINGERPRINTS_PER_PAGE, (page - 1) * FINGERPRINTS_PER_PAGE
+    )).map(maskFingerprint);
+
+    return c.html(views.fingerprints(c.get('view'), { rows, q, page, pages, total }));
+  });
+
+  // Full sighting history for one device fingerprint — the "own log" per fingerprint.
+  app.get('/admin/fingerprints/:hash', async (c) => {
+    const db = c.get('db');
+    const hash = String(c.req.param('hash') || '');
+    const { maskFingerprint } = await adminIpMask(c);
+    const sightings = (await db.all(
+      'SELECT * FROM fingerprints WHERE fp_hash = ? ORDER BY id DESC LIMIT 300', hash
+    )).map(maskFingerprint);
+    if (!sightings.length) return notFound(c, 'No such fingerprint.');
+    return c.html(views.fingerprintDetail(c.get('view'), { hash, sightings }));
   });
 
   app.post('/admin/ip-bans/:ip/unban', async (c) => {

@@ -23,9 +23,9 @@ function createCompany(env = {}) {
     jurisdiction: 'Autonomous Island of Anjouan, Union of the Comoros',
     country: 'Union of the Comoros',
 
-    contactEmail: env.COMPANY_CONTACT_EMAIL || 'support@goyhub.com',
-    privacyEmail: env.COMPANY_PRIVACY_EMAIL || 'privacy@goyhub.com',
-    legalEmail: env.COMPANY_LEGAL_EMAIL || 'legal@goyhub.com',
+    contactEmail: env.COMPANY_CONTACT_EMAIL || 'support@goyhub.st',
+    privacyEmail: env.COMPANY_PRIVACY_EMAIL || 'privacy@goyhub.st',
+    legalEmail: env.COMPANY_LEGAL_EMAIL || 'legal@goyhub.st',
 
     lastUpdated: env.LEGAL_LAST_UPDATED || '21 August 2026',
     minimumAge: 16,

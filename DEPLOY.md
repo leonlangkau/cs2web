@@ -95,7 +95,7 @@ site** → enter the domain → Cloudflare gives you two nameservers → set tho
 your registrar → wait for the zone to read **Active**.
 
 Then: **Workers & Pages → goyhub → Custom domains → Set up a custom domain** →
-enter `goyhub.com` (or `www.`, or any subdomain) → **Activate**. Cloudflare
+enter `goyhub.st` (or `www.`, or any subdomain) → **Activate**. Cloudflare
 creates the DNS record and issues the TLS certificate automatically. Do **not**
 add an A/CNAME by hand.
 

@@ -11,7 +11,7 @@
  *   EMAIL_PROVIDER  "cloudflare" | "resend" | "sendgrid" | "mailchannels" | "test" | unset
  *   EMAIL_API_KEY   the provider's API key (for "cloudflare": an API token
  *                   with the "Email Sending: Edit" permission)
- *   EMAIL_FROM      e.g. no-reply@goyhub.com — must be a sender the provider
+ *   EMAIL_FROM      e.g. no-reply@goyhub.st — must be a sender the provider
  *                   has verified for your domain (SPF/DKIM), or mail lands in
  *                   spam or is rejected outright
  *   EMAIL_FROM_NAME optional display name, defaults to GoyHub
@@ -39,7 +39,7 @@ function isEmailConfigured(env = {}) {
  */
 async function sendEmail(env, { to, subject, text }, fetcher = fetch) {
   const provider = String(env.EMAIL_PROVIDER || '').toLowerCase();
-  const from = String(env.EMAIL_FROM || 'no-reply@goyhub.local');
+  const from = String(env.EMAIL_FROM || 'no-reply@goyhub.st');
   const fromName = String(env.EMAIL_FROM_NAME || 'GoyHub');
 
   try {

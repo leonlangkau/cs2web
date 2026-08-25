@@ -874,7 +874,7 @@ test("account extras: email change, per-session revoke, self-serve deletion", as
   await phone.post("/profile/email", { email: "new@example.com", password: "wrong" });
   assert.equal((await db.get("SELECT email FROM users WHERE username = 'extra_user'")).email, "extra@example.com", "wrong password keeps old email");
   await phone.get("/profile");
-  await phone.post("/profile/email", { email: "admin@goyhub.local", password: "supersecret1" });
+  await phone.post("/profile/email", { email: "admin@goyhub.st", password: "supersecret1" });
   assert.equal((await db.get("SELECT email FROM users WHERE username = 'extra_user'")).email, "extra@example.com", "taken email rejected");
   await phone.get("/profile");
   await phone.post("/profile/email", { email: "new@example.com", password: "supersecret1" });
@@ -1164,8 +1164,8 @@ test("email: verification flow + posting gate, password reset, disposable domain
 
   // Contact-email obfuscation: raw addresses never appear in HTML source.
   const faqHtml = await (await jarClient().get("/faq")).text();
-  assert.ok(!faqHtml.includes("support@goyhub.com"), "raw contact email absent from source");
-  assert.ok(faqHtml.includes('data-u="support"') && faqHtml.includes('data-d="goyhub.com"'), "obfuscated parts present");
+  assert.ok(!faqHtml.includes("support@goyhub.st"), "raw contact email absent from source");
+  assert.ok(faqHtml.includes('data-u="support"') && faqHtml.includes('data-d="goyhub.st"'), "obfuscated parts present");
 });
 
 test("forum: title rename, category edit, shout delete + 3/min limit, /buy alias", async () => {
@@ -1282,7 +1282,7 @@ test("smtp client: correct SMTPS conversation for Cloudflare's Email Service rel
   };
   await smtpConversation(transport, {
     username: "api_token", password: "cf_secret_token",
-    from: "no-reply@goyhub.com", fromName: "GoyHub",
+    from: "no-reply@goyhub.st", fromName: "GoyHub",
     to: "member@example.com", subject: "Verify your GoyHub email",
     text: "Hello — verify here.\n.starts with a dot\n",
   });
@@ -1291,7 +1291,7 @@ test("smtp client: correct SMTPS conversation for Cloudflare's Email Service rel
   const authB64 = wire[1].match(/^AUTH PLAIN (\S+)/)[1];
   assert.equal(Buffer.from(authB64, "base64").toString("utf8"), "\u0000api_token\u0000cf_secret_token",
     "SASL PLAIN is NUL-separated user/token");
-  assert.ok(all.includes("MAIL FROM:<no-reply@goyhub.com>\r\n"), "MAIL FROM");
+  assert.ok(all.includes("MAIL FROM:<no-reply@goyhub.st>\r\n"), "MAIL FROM");
   assert.ok(all.includes("RCPT TO:<member@example.com>\r\n"), "RCPT TO");
   assert.ok(all.includes("Subject: Verify your GoyHub email"), "subject header");
   assert.ok(all.includes("Content-Transfer-Encoding: base64"), "UTF-8-safe body encoding");

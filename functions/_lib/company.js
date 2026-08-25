@@ -16,7 +16,7 @@ const PLACEHOLDER = /^\[.*\]$/;
 function createCompany(env = {}) {
   const company = {
     legalName: env.COMPANY_LEGAL_NAME || '[Registered Company Name]',
-    tradingName: env.COMPANY_TRADING_NAME || 'AimHub',
+    tradingName: env.COMPANY_TRADING_NAME || 'GoyHub',
     registrationNumber: env.COMPANY_REG_NUMBER || '[Registration Number]',
     addressLine: env.COMPANY_ADDRESS || '[Registered Office Address]',
     city: env.COMPANY_CITY || 'Mutsamudu',

@@ -14,8 +14,8 @@ import { tooMany } from "./routes-main.js";
 const USERNAME_RE = /^[A-Za-z0-9_]{3,20}$/;
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/; // also used by the profile email-change flow
 const RESERVED_USERNAMES = new Set([
-  'admin', 'administrator', 'moderator', 'system', 'aimhub', 'goyhub', 'root', 'support', 'staff',
-  'goy', 'goyim', // seeded brand accounts (UID 1 / UID 0); goyhub/goy/goyim kept so pre-rebrand seeds stay guarded
+  'admin', 'administrator', 'moderator', 'system', 'goyhub', 'root', 'support', 'staff',
+  'goy', 'goyim', // seeded brand accounts (UID 1 / UID 0)
 ]);
 
 /**
@@ -47,11 +47,11 @@ async function sendVerificationEmail(c, user) {
   const origin = new URL(c.req.url).origin;
   await sendEmail(cfg, {
     to: user.email,
-    subject: 'Verify your AimHub email',
+    subject: 'Verify your GoyHub email',
     text: `Hi ${user.username},\n\n`
-      + `Confirm this email address for your AimHub account by opening:\n\n`
+      + `Confirm this email address for your GoyHub account by opening:\n\n`
       + `${origin}/auth/verify/${raw}\n\n`
-      + `The link is valid for 24 hours. If you didn't create this account, ignore this email.\n\n- AimHub`,
+      + `The link is valid for 24 hours. If you didn't create this account, ignore this email.\n\n— GoyHub`,
   });
 }
 
@@ -108,11 +108,11 @@ function register(app) {
     const confirm = String(body.confirm || '');
 
     const errors = [];
-    if (!USERNAME_RE.test(username)) errors.push('Username must be 3-20 characters: letters, numbers and underscores only.');
+    if (!USERNAME_RE.test(username)) errors.push('Username must be 3–20 characters: letters, numbers and underscores only.');
     else if (RESERVED_USERNAMES.has(username.toLowerCase())) errors.push('That username is reserved.');
     if (!EMAIL_RE.test(email) || email.length > 254) errors.push('Enter a valid email address.');
-    else if (isDisposableEmail(email, c.get('cfg'))) errors.push('Disposable email addresses cannot be used. Use a real inbox.');
-    if (password.length < 8 || password.length > 128) errors.push('Password must be 8-128 characters.');
+    else if (isDisposableEmail(email, c.get('cfg'))) errors.push('Disposable email addresses cannot be used — use a real inbox.');
+    if (password.length < 8 || password.length > 128) errors.push('Password must be 8–128 characters.');
     if (password !== confirm) errors.push('Passwords do not match.');
 
     // Bot gates before the uniqueness query, so a scripted signup can't probe
@@ -157,8 +157,8 @@ function register(app) {
     await createSession(c, userId);
     await sendVerificationEmail(c, { id: userId, username, email });
     setFlash(c, 'success', isEmailConfigured(c.get('cfg'))
-      ? `Welcome to AimHub, ${username}! We've emailed you a verification link.`
-      : `Welcome to AimHub, ${username}! Your account is ready.`);
+      ? `Welcome to GoyHub, ${username}! We've emailed you a verification link.`
+      : `Welcome to GoyHub, ${username}! Your account is ready.`);
     return c.redirect('/', 302);
   });
 
@@ -188,12 +188,12 @@ function register(app) {
       await audit(c, 'password_reset_requested', { userId: user.id, username: user.username });
       await sendEmail(cfg, {
         to: user.email,
-        subject: 'Reset your AimHub password',
+        subject: 'Reset your GoyHub password',
         text: `Hi ${user.username},\n\n`
-          + `Someone (hopefully you) asked to reset the password for this AimHub account. Open:\n\n`
+          + `Someone (hopefully you) asked to reset the password for this GoyHub account. Open:\n\n`
           + `${origin}/auth/reset/${raw}\n\n`
-          + `The link works once and expires in 1 hour. If you didn't ask for this, ignore this email; `
-          + `your password is unchanged.\n\n- AimHub`,
+          + `The link works once and expires in 1 hour. If you didn't ask for this, ignore this email — `
+          + `your password is unchanged.\n\n— GoyHub`,
       });
     }
     setFlash(c, 'success', 'If that account exists, a reset link is on its way to its email address.');
@@ -218,7 +218,7 @@ function register(app) {
     const confirm = String(body.confirm || '');
 
     const errors = [];
-    if (password.length < 8 || password.length > 128) errors.push('Password must be 8-128 characters.');
+    if (password.length < 8 || password.length > 128) errors.push('Password must be 8–128 characters.');
     if (password !== confirm) errors.push('Passwords do not match.');
     if (errors.length > 0) {
       // Only validation failed — the token stays live for the retry.
@@ -239,7 +239,7 @@ function register(app) {
     await db.run('UPDATE users SET password_hash = ? WHERE id = ?', await hashPassword(password), row.user_id);
     await destroyUserSessions(db, row.user_id); // a reset means the old credentials can't be trusted
     await audit(c, 'password_reset', { userId: row.user_id, username: user ? user.username : null });
-    setFlash(c, 'success', 'Password updated. Log in with your new password.');
+    setFlash(c, 'success', 'Password updated — log in with your new password.');
     return c.redirect('/auth/login', 302);
   });
 
@@ -255,7 +255,7 @@ function register(app) {
     await db.run("UPDATE users SET email_verified_at = datetime('now') WHERE id = ?", row.user_id);
     const user = await db.get('SELECT username FROM users WHERE id = ?', row.user_id);
     await audit(c, 'email_verified', { userId: row.user_id, username: user ? user.username : null });
-    setFlash(c, 'success', 'Email verified. Thanks!');
+    setFlash(c, 'success', 'Email verified — thanks!');
     return c.redirect(c.get('user') ? '/profile' : '/auth/login', 302);
   });
 

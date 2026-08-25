@@ -56,7 +56,7 @@
       ctx.fillStyle = '#f60';
       ctx.fillRect(0, 0, 220, 30);
       ctx.fillStyle = '#069';
-      ctx.fillText('AimHub fp ⚔ 0123', 2, 2);
+      ctx.fillText('GoyHub fp ⚔ 0123', 2, 2);
       ctx.strokeStyle = 'rgba(102,204,0,0.7)';
       ctx.beginPath();
       ctx.arc(50, 15, 10, 0, Math.PI * 2);

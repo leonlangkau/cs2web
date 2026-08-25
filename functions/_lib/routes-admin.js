@@ -233,7 +233,7 @@ function register(app) {
     const user = await findUser(c);
     if (!user) return notFound(c, 'No such user.');
     if (user.tier !== 'paid') {
-      setFlash(c, 'error', `${user.username} is not on the Paid tier. Set their tier first.`);
+      setFlash(c, 'error', `${user.username} is not on the Paid tier — set their tier first.`);
       return c.redirect(backTo(c, '/admin/users'), 302);
     }
     const body = await formBody(c);
@@ -249,8 +249,8 @@ function register(app) {
     const next = Math.max(now, base + Math.round(delta) * 86_400_000);
     await db.run('UPDATE users SET paid_until = ? WHERE id = ?', next, user.id);
     const left = Math.max(0, Math.round((next - now) / 86_400_000));
-    await adminAudit(c, `adjusted #${user.id} (${user.username}) subscription by ${delta}d, ${left}d left`);
-    setFlash(c, 'success', `${user.username}: ${delta > 0 ? '+' : ''}${Math.round(delta)} days, ${left} day${left === 1 ? '' : 's'} remaining.`);
+    await adminAudit(c, `adjusted #${user.id} (${user.username}) subscription by ${delta}d — ${left}d left`);
+    setFlash(c, 'success', `${user.username}: ${delta > 0 ? '+' : ''}${Math.round(delta)} days — ${left} day${left === 1 ? '' : 's'} remaining.`);
     return c.redirect(backTo(c, '/admin/users'), 302);
   });
 
@@ -300,7 +300,7 @@ function register(app) {
     const body = await formBody(c);
     const password = String(body.password || '');
     if (password.length < 8 || password.length > 128) {
-      setFlash(c, 'error', 'Password must be 8-128 characters.');
+      setFlash(c, 'error', 'Password must be 8–128 characters.');
       return c.redirect(backTo(c, '/admin/users'), 302);
     }
     await db.run('UPDATE users SET password_hash = ? WHERE id = ?', await hashPassword(password), user.id);
@@ -310,7 +310,7 @@ function register(app) {
     return c.redirect(backTo(c, '/admin/users'), 302);
   });
 
-  // Assign a reserved vanity UID (0-1001, full admin only). Uses the same
+  // Assign a reserved vanity UID (0–1001, full admin only). Uses the same
   // FK-safe relocation as the boot migration.
   app.post('/admin/users/:id/uid', async (c) => {
     const gate = requireAdmin(c);
@@ -558,7 +558,7 @@ function register(app) {
     const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 50);
 
     if (name.length < 2 || name.length > 50 || !slug) {
-      setFlash(c, 'error', 'Category name must be 2-50 characters.');
+      setFlash(c, 'error', 'Category name must be 2–50 characters.');
       return c.redirect('/admin/forum', 302);
     }
     if (await db.get('SELECT id FROM categories WHERE slug = ?', slug)) {
@@ -591,7 +591,7 @@ function register(app) {
     const name = String(body.name || '').trim().replace(/\s+/g, ' ');
     const description = String(body.description || '').trim().slice(0, 300);
     if (name.length < 2 || name.length > 50) {
-      setFlash(c, 'error', 'Category name must be 2-50 characters.');
+      setFlash(c, 'error', 'Category name must be 2–50 characters.');
       return c.redirect('/admin/forum', 302);
     }
     await db.run('UPDATE categories SET name = ?, description = ? WHERE id = ?', name, description, id);
@@ -656,7 +656,7 @@ function register(app) {
     }
     const first = await db.get('SELECT MIN(id) AS m FROM posts WHERE thread_id = ?', post.thread_id);
     if (Number(first.m) === post.id) {
-      setFlash(c, 'error', 'That is the opening post. Delete the whole thread instead.');
+      setFlash(c, 'error', 'That is the opening post — delete the whole thread instead.');
       return c.redirect(backTo(c, `/forum/t/${post.thread_id}`), 302);
     }
     await db.run('DELETE FROM posts WHERE id = ?', id);

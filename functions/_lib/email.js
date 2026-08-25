@@ -14,7 +14,7 @@
  *   EMAIL_FROM      e.g. no-reply@goyhub.com — must be a sender the provider
  *                   has verified for your domain (SPF/DKIM), or mail lands in
  *                   spam or is rejected outright
- *   EMAIL_FROM_NAME optional display name, defaults to AimHub
+ *   EMAIL_FROM_NAME optional display name, defaults to GoyHub
  *   EMAIL_SMTP_HOST / EMAIL_SMTP_PORT  cloudflare-provider overrides
  *                   (default smtp.mx.cloudflare.net:465)
  *
@@ -39,8 +39,8 @@ function isEmailConfigured(env = {}) {
  */
 async function sendEmail(env, { to, subject, text }, fetcher = fetch) {
   const provider = String(env.EMAIL_PROVIDER || '').toLowerCase();
-  const from = String(env.EMAIL_FROM || 'no-reply@aimhub.local');
-  const fromName = String(env.EMAIL_FROM_NAME || 'AimHub');
+  const from = String(env.EMAIL_FROM || 'no-reply@goyhub.local');
+  const fromName = String(env.EMAIL_FROM_NAME || 'GoyHub');
 
   try {
     if (!isEmailConfigured(env)) {

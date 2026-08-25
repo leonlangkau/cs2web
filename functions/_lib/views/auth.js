@@ -43,7 +43,7 @@ function signup(ctx, { errors = [], values = {} } = {}) {
 <section class="section auth-page">
   <div class="container auth-card">
     <h1>Create your account</h1>
-    <p class="muted">Join the AimHub community. It only takes a minute.</p>
+    <p class="muted">Join the GoyHub community — it takes 20 seconds.</p>
     ${errorList(errors)}
     <form method="post" action="/auth/signup" class="stack">
       <input type="hidden" name="_csrf" value="${esc(ctx.csrfToken)}">
@@ -85,7 +85,7 @@ function forgot(ctx, { emailConfigured }) {
   const note = emailConfigured
     ? '<p class="muted">Enter your username or email and we\'ll send a one-hour reset link.</p>'
     : `<p class="form-errors">Email sending isn't configured on this site yet, so automatic resets are
-        unavailable. Contact ${emailLink(ctx.company.contactEmail)}
+        unavailable — contact ${emailLink(ctx.company.contactEmail)}
         instead.</p>`;
   const body = `
 <section class="section auth-page">

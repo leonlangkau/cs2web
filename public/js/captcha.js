@@ -1,4 +1,4 @@
-/* AimHub proof-of-work CAPTCHA widget.
+/* GoyHub proof-of-work CAPTCHA widget.
    Self-contained SHA-256 so it works outside a secure context (crypto.subtle
    is unavailable over plain http), and solves in yielded chunks so the page
    never freezes. */
@@ -95,7 +95,7 @@
   }
 
   // Exposed so the test suite can check this matches Node's SHA-256.
-  window.__aimhubSha256 = sha256hex;
+  window.__goyhubSha256 = sha256hex;
 
   function init(box) {
     var form = box.closest('form');
@@ -171,7 +171,7 @@
             tokenField.value = challenge.token;
             solutionField.value = String(counter);
             if (submitBtn) submitBtn.disabled = false;
-            setState('done', 'Verified. You can sign up now.');
+            setState('done', 'Verified — you can sign up now.');
             return;
           }
           counter++;

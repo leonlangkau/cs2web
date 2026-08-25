@@ -112,8 +112,8 @@ function register(app) {
     const category = categories.find((cat) => cat.slug === slug);
     const errors = [];
     if (!category) errors.push('Pick a valid category.');
-    if (title.length < 3 || title.length > MAX_TITLE) errors.push(`Title must be 3-${MAX_TITLE} characters.`);
-    if (text.length < 1 || text.length > MAX_BODY) errors.push(`Post body must be 1-${MAX_BODY} characters.`);
+    if (title.length < 3 || title.length > MAX_TITLE) errors.push(`Title must be 3–${MAX_TITLE} characters.`);
+    if (text.length < 1 || text.length > MAX_BODY) errors.push(`Post body must be 1–${MAX_BODY} characters.`);
 
     if (errors.length > 0) {
       return c.html(views.newThread(c.get('view'), {
@@ -189,7 +189,7 @@ function register(app) {
     const body = await formBody(c);
     const text = String(body.body || '').trim();
     if (text.length < 1 || text.length > MAX_BODY) {
-      setFlash(c, 'error', `Reply must be 1-${MAX_BODY} characters.`);
+      setFlash(c, 'error', `Reply must be 1–${MAX_BODY} characters.`);
       return c.redirect(`/forum/t/${id}`, 302);
     }
 
@@ -235,7 +235,7 @@ function register(app) {
 
     const first = await db.get('SELECT MIN(id) AS m FROM posts WHERE thread_id = ?', post.thread_id);
     if (Number(first.m) === post.id) {
-      setFlash(c, 'error', 'That is the opening post. Delete the whole thread instead.');
+      setFlash(c, 'error', 'That is the opening post — delete the whole thread instead.');
       return c.redirect(`/forum/t/${post.thread_id}`, 302);
     }
     await db.run('DELETE FROM posts WHERE id = ?', id);
@@ -258,7 +258,7 @@ function register(app) {
     const body = await formBody(c);
     const title = String(body.title || '').trim().replace(/\s+/g, ' ');
     if (title.length < 3 || title.length > MAX_TITLE) {
-      setFlash(c, 'error', `Title must be 3-${MAX_TITLE} characters.`);
+      setFlash(c, 'error', `Title must be 3–${MAX_TITLE} characters.`);
       return c.redirect(`/forum/t/${id}`, 302);
     }
     await db.run('UPDATE threads SET title = ? WHERE id = ?', title, id);
@@ -294,7 +294,7 @@ function register(app) {
       const thread = await db.get('SELECT id, title FROM threads WHERE id = ?', post.thread_id);
       return c.html(views.editPost(c.get('view'), {
         post: { ...post, body: text }, thread,
-        errors: [`Post must be 1-${MAX_BODY} characters.`],
+        errors: [`Post must be 1–${MAX_BODY} characters.`],
       }), 400);
     }
 
@@ -335,7 +335,7 @@ function register(app) {
       );
       await audit(c, 'post_reported', { userId: user.id, username: user.username, detail: `post #${id}: ${reason.slice(0, 120)}` });
     }
-    setFlash(c, 'success', 'Thanks, the moderators will take a look.');
+    setFlash(c, 'success', 'Thanks — the moderators will take a look.');
     return c.redirect(`/forum/t/${post.thread_id}#post-${id}`, 302);
   });
 
@@ -460,14 +460,14 @@ function register(app) {
 
     const verdict = await limits.check(db, 'shout', String(user.id), c.get('cfg'));
     if (!verdict.ok) {
-      if (wantsJson) return c.json({ ok: false, error: 'Slow down. Try again shortly.' }, 429);
+      if (wantsJson) return c.json({ ok: false, error: 'Slow down — try again shortly.' }, 429);
       return tooMany(c, verdict.retryAfterSec);
     }
 
     const body = await formBody(c);
     const text = String(body.body || '').trim().replace(/\s+/g, ' ');
     if (text.length < 1 || text.length > SHOUT_MAX) {
-      const message = `Shout must be 1-${SHOUT_MAX} characters.`;
+      const message = `Shout must be 1–${SHOUT_MAX} characters.`;
       if (wantsJson) return c.json({ ok: false, error: message }, 400);
       setFlash(c, 'error', message);
       return c.redirect('/forum', 302);

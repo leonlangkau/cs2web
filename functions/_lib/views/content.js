@@ -2,31 +2,31 @@ import { page } from "./layout.js";
 import { esc, map, emailLink } from "./util.js";
 
 const FAQ_ITEMS = [
-  ['What is AimHub?',
-    `AimHub is a companion app for Counter-Strike 2: automatic match stats and heatmaps, a crosshair and
-     config manager, FPS presets and a skin inventory tracker. One lightweight Windows app instead of six
+  ['What is GoyHub?',
+    `GoyHub is a companion app for Counter-Strike 2: automatic match stats and heatmaps, a crosshair and
+     config manager, FPS presets and a skin inventory tracker — one lightweight Windows app instead of six
      browser tabs.`],
   ['Is it safe to use with VAC?',
-    `Yes. AimHub never touches game memory, injects code or draws overlays in ranked play. It reads the
+    `Yes. GoyHub never touches game memory, injects code or draws overlays in ranked play. It reads the
      same public data the game client exposes to everyone. No VAC or trust-factor risk.`],
   ['What does a free account get me?',
     `A free account lets you sign in on the site and in the app. The community forum and the app download
-     are Paid-member benefits; see the upgrade page for what's included.`],
+     are Paid-member benefits — see the upgrade page for what's included.`],
   ['How do I upgrade to Paid?',
     `Head to the upgrade page while signed in. Crypto checkout is being set up; until it goes live the page
      shows exactly how to complete an upgrade with the support team.`],
   ['How does the app know I\'m a Paid member?',
     `The desktop app signs in with your website username and password and receives a short-lived signed
-     license that proves your tier. Upgrades, downgrades and bans apply within one launch. There is no
+     license that proves your tier. Upgrades, downgrades and bans apply within one launch — there is no
      separate licence key to manage.`],
   ['I forgot my password.',
     `If you're still signed in somewhere, change it from your profile page. Otherwise contact support from
      the email address on your account and we'll verify it's you.`],
   ['How do I report a rule-breaking post?',
-    `Every forum post has a Report control underneath it. Reports go straight to the moderation queue, and
+    `Every forum post has a Report control underneath it. Reports go straight to the moderation queue —
      you won't be named to the person you reported.`],
   ['Can I delete my account?',
-    `Yes: contact support, or ask any admin on the forum. Your posts stay (attributed to [deleted]) so
+    `Yes — contact support, or ask any admin on the forum. Your posts stay (attributed to [deleted]) so
      other members' conversations aren't destroyed; everything identifying you is removed. Details are in
      the Privacy Policy.`],
 ];
@@ -45,6 +45,7 @@ function faq(ctx) {
   const body = `
 <div class="section content-page">
   <div class="container narrow">
+    <p class="section-kicker">// SUPPORT</p>
     <h1 class="section-title">Frequently asked questions</h1>
     <div class="faq-list">
       ${map(FAQ_ITEMS, ([q, a]) => `<details class="faq-item">
@@ -63,9 +64,10 @@ function changelog(ctx) {
   const body = `
 <div class="section content-page">
   <div class="container narrow">
+    <p class="section-kicker">// RELEASES</p>
     <h1 class="section-title">Changelog</h1>
     ${map(CHANGELOG, ([version, date, title, items]) => `<article class="release">
-      <h2><span class="mono">v${esc(version)}</span>: ${esc(title)}</h2>
+      <h2><span class="mono">v${esc(version)}</span> — ${esc(title)}</h2>
       <p class="muted release-date">${esc(date)}</p>
       <ul>${map(items, (i) => `<li>${esc(i)}</li>`)}</ul>
     </article>`)}

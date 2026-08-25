@@ -140,7 +140,7 @@ const loadContext = async (c, next) => {
     needsTermsGate: false,
     termsVersion: TERMS_VERSION,
     company: c.get('company'),
-    appName: 'AimHub',
+    appName: 'GoyHub',
     appVersion: c.get('appVersion'),
     announcement: '',
     turnstileSiteKey: isTurnstileConfigured(c.get('cfg') || {}) ? c.get('cfg').TURNSTILE_SITE_KEY : '',
@@ -217,7 +217,7 @@ const ipBanGate = async (c, next) => {
       } else {
         return c.html(errorPage(c.get('view'), {
           code: 403, title: 'Access blocked',
-          message: 'This network has been blocked from AimHub.'
+          message: 'This network has been blocked from GoyHub.'
             + (ban.reason ? ` Reason: ${ban.reason}` : ''),
         }), 403);
       }
@@ -395,7 +395,7 @@ function requireVerifiedEmail(c) {
   if (!isEmailConfigured(cfg) || String(cfg.REQUIRE_VERIFIED_EMAIL || '') === '0') return null;
   const user = c.get('user');
   if (!user || user.email_verified_at || isStaff(user)) return null;
-  setFlash(c, 'error', 'Verify your email address before posting. There\'s a resend button on your profile.');
+  setFlash(c, 'error', 'Verify your email address before posting — there\'s a resend button on your profile.');
   return c.redirect('/profile', 302);
 }
 

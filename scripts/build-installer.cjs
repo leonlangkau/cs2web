@@ -1,7 +1,7 @@
 'use strict';
 
 /**
- * Generates src/installer-data.js from artifacts/AimHub-Setup-1.0.0.zip.
+ * Generates src/installer-data.js from artifacts/GoyHub-Setup-1.0.0.zip.
  *
  * Workers has no filesystem, so the download route needs the artifact from
  * somewhere else. Small builds are embedded directly in the bundle; anything
@@ -12,7 +12,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
 
-const NAME = 'AimHub-Setup-1.0.0.zip';
+const NAME = 'GoyHub-Setup-1.0.0.zip';
 const SRC = path.join(__dirname, '..', 'artifacts', NAME);
 const OUT = path.join(__dirname, '..', 'functions', '_lib', 'installer-data.js');
 

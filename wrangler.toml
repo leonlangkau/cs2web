@@ -18,9 +18,9 @@ COMPANY_LEGAL_NAME = "goyhub"
 COMPANY_REG_NUMBER = "69676420"
 COMPANY_ADDRESS = "1 Main RD"
 COMPANY_CITY = "Mutsamudu"
-COMPANY_CONTACT_EMAIL = "support@goyhub.com"
-COMPANY_PRIVACY_EMAIL = "privacy@goyhub.com"
-COMPANY_LEGAL_EMAIL = "legal@goyhub.com"
+COMPANY_CONTACT_EMAIL = "support@goyhub.st"
+COMPANY_PRIVACY_EMAIL = "privacy@goyhub.st"
+COMPANY_LEGAL_EMAIL = "legal@goyhub.st"
 
 # Proof-of-work difficulty in leading zero bits (8–24). Each +1 doubles the
 # client's work. Keep PBKDF2 modest on the free plan (10ms CPU/request).
@@ -67,7 +67,7 @@ SIGNUP_SURGE_LIMIT = "30"
 # Secret), exactly like ADMIN_PASSWORD and CAPTCHA_SECRET already are.
 # Email stays cleanly disabled until that secret exists.
 EMAIL_PROVIDER = "cloudflare"
-EMAIL_FROM = "welcome@noreply.repairs.digital"
+EMAIL_FROM = "welcome@noreply.goyhub.st"
 EMAIL_FROM_NAME = "GoyHub"
 # EMAIL_SMTP_HOST = "smtp.mx.cloudflare.net"   # default
 # EMAIL_SMTP_PORT = "465"                      # default

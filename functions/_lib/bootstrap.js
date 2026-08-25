@@ -142,7 +142,7 @@ async function ensureVanityUids(db) {
       // Random password — an admin assigns a real one from the Users tab.
       await db.run(
         'INSERT INTO users (id, username, email, password_hash, tier) VALUES (?, ?, ?, ?, ?)',
-        uid, name, `${name}@goyhub.local`, await hashPassword(newToken(24)), 'user'
+        uid, name, `${name}@goyhub.st`, await hashPassword(newToken(24)), 'user'
       );
     }
   }
@@ -240,7 +240,7 @@ async function seed(db, env = {}) {
       }
       await db.run(
         "INSERT INTO users (username, email, password_hash, role, tier) VALUES (?, ?, ?, 'admin', 'admin')",
-        username, env.ADMIN_EMAIL || 'admin@goyhub.local', await hashPassword(password)
+        username, env.ADMIN_EMAIL || 'admin@goyhub.st', await hashPassword(password)
       );
     }
   } else if (env.ADMIN_PASSWORD) {

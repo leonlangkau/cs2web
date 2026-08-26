@@ -158,10 +158,13 @@ list. A Secret is encrypted at rest and, once saved, is no longer readable
 from the dashboard either.
 
 Keep the version metadata honest: `functions/_lib/installer-data.js` (built
-from `artifacts/GoyHub-Setup-1.0.0.zip` — see below) is what the site shows
-as the download's name, size and SHA-256 checksum. When `DOWNLOAD_URL` points
-at a newer build, update that artifact and run `npm run build` too, so the
-checksum shown on `/download` still matches the file actually served.
+from `artifacts/GoyHub-Setup-1.0.0.exe` — see below) is what the site shows
+as the download's name, size and SHA-256 checksum — its filename's extension
+also drives the `Content-Disposition` name and `scripts/build-installer.cjs`'s
+`NAME` constant, so it must match whatever `DOWNLOAD_URL` actually serves.
+When `DOWNLOAD_URL` points at a newer build, replace that artifact (renaming
+it too, if the file type changes) and run `npm run build`, so the checksum
+and filename shown on `/download` still match the file actually served.
 
 ---
 

@@ -14,7 +14,7 @@ import { newToken } from "./crypto.js";
  * Per-download filename so the served attachment is never a predictable,
  * cacheable, shareable URL-to-name mapping. Keeps the real base name and
  * extension (installers must stay double-clickable) but injects a random,
- * per-request token: GoyHub-Setup-1.0.0.zip -> GoyHub-Setup-1.0.0-a1b2c3d4.zip
+ * per-request token: GoyHub-Setup-1.0.0.exe -> GoyHub-Setup-1.0.0-a1b2c3d4.exe
  */
 function scrambledFilename(name) {
   const token = newToken(4); // 8 hex chars
@@ -171,7 +171,10 @@ function register(app) {
     await audit(c, 'download', { userId: user.id, username: user.username, detail: filename });
     return new Response(body, {
       headers: {
-        'Content-Type': 'application/zip',
+        // Generic binary type rather than hardcoding to one extension — the
+        // actual file (and its extension) is whatever DOWNLOAD_URL serves,
+        // named per installer.name below.
+        'Content-Type': 'application/octet-stream',
         'Content-Disposition': `attachment; filename="${filename}"`,
         'Cache-Control': 'no-store',
       },

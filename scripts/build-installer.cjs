@@ -1,20 +1,23 @@
 'use strict';
 
 /**
- * Generates functions/_lib/installer-data.js from
- * artifacts/GoyHub-Setup-1.0.0.zip — published metadata only (name, sha256,
- * size), the numbers /download and the homepage show for the current build.
+ * Generates functions/_lib/installer-data.js from artifacts/${NAME} below —
+ * published metadata only (name, sha256, size), the numbers /download and
+ * the homepage show for the current build.
  *
  * The download route never serves this artifact's bytes: DOWNLOAD_URL is the
  * only source /download/file fetches from (see functions/_lib/routes-main.js),
- * with no fallback. When DOWNLOAD_URL points at a new build, replace this zip
- * and rerun `npm run build` too, so the published checksum stays honest.
+ * with no fallback. NAME's extension flows straight into the Content-Disposition
+ * filename members see, so it must match whatever DOWNLOAD_URL actually serves
+ * (currently a bare .exe, not a .zip). When DOWNLOAD_URL points at a new build,
+ * replace this artifact (renaming it too, if the file type changes) and rerun
+ * `npm run build`, so the published checksum and filename stay honest.
  */
 const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
 
-const NAME = 'GoyHub-Setup-1.0.0.zip';
+const NAME = 'GoyHub-Setup-1.0.0.exe';
 const SRC = path.join(__dirname, '..', 'artifacts', NAME);
 const OUT = path.join(__dirname, '..', 'functions', '_lib', 'installer-data.js');
 

@@ -144,4 +144,4 @@ code actually does.
 `npm test` fails if they drift.
 
 - `functions/_lib/schema-sql.js` from `schema.sql`
-- `functions/_lib/installer-data.js` from `artifacts/GoyHub-Setup-1.0.0.zip`
+- `functions/_lib/installer-data.js` from `artifacts/GoyHub-Setup-1.0.0.exe`

@@ -156,7 +156,7 @@ function downloadPage(ctx, { downloadMeta }) {
     <p class="muted">The installer is small, fast and clean. No bundled junk, no background miners, no nonsense.</p>
     <div class="download-box">
       <div>
-        <strong>GoyHub-Setup-1.0.0.zip</strong>
+        <strong>${esc(downloadMeta.name)}</strong>
         <span class="muted"> · Windows 10/11 (64-bit) · ${esc(downloadMeta.sizeKb)} KB</span>
         ${gateNote}
       </div>
@@ -168,7 +168,7 @@ function downloadPage(ctx, { downloadMeta }) {
     ${licenseBlock}
     <h2>Install in 3 steps</h2>
     <ol class="steps">
-      <li>Unzip the archive and run <span class="mono">GoyHubSetup.exe</span>.</li>
+      <li>Run the downloaded installer and follow the prompts.</li>
       <li>Sign in with your GoyHub account (or <a href="/auth/signup">create one free</a>).</li>
       <li>Launch CS2 — GoyHub picks up your matches automatically.</li>
     </ol>

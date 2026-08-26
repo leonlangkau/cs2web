@@ -1262,9 +1262,9 @@ test("turnstile: optional layer verifies server-side and fails closed", async ()
 });
 
 test("download filename scrambler keeps base+ext, injects a unique token", () => {
-  const a = scrambledFilename("GoyHub-Setup-1.0.0.zip");
-  const b = scrambledFilename("GoyHub-Setup-1.0.0.zip");
-  assert.ok(/^GoyHub-Setup-1\.0\.0-[a-f0-9]{8}\.zip$/.test(a), "shape preserved with token");
+  const a = scrambledFilename("GoyHub-Setup-1.0.0.exe");
+  const b = scrambledFilename("GoyHub-Setup-1.0.0.exe");
+  assert.ok(/^GoyHub-Setup-1\.0\.0-[a-f0-9]{8}\.exe$/.test(a), "shape preserved with token");
   assert.notEqual(a, b, "two calls differ");
   assert.equal(scrambledFilename("noext").slice(0, 6), "noext-", "extensionless names still get a token");
 });
@@ -1282,10 +1282,10 @@ test("loadInstaller: DOWNLOAD_URL is fetched server-side and streamed, with NO f
   // never inspected, so the route can pipe it straight to the client.
   let calledWith = null;
   const served = await loadInstaller(
-    { DOWNLOAD_URL: "https://cdn.example.com/builds/GoyHub-Setup-1.0.0.zip" },
+    { DOWNLOAD_URL: "https://cdn.example.com/builds/GoyHub-Setup-1.0.0.exe" },
     async (url) => { calledWith = url; return { ok: true, body: upstreamBody }; }
   );
-  assert.equal(calledWith, "https://cdn.example.com/builds/GoyHub-Setup-1.0.0.zip", "fetch targets DOWNLOAD_URL");
+  assert.equal(calledWith, "https://cdn.example.com/builds/GoyHub-Setup-1.0.0.exe", "fetch targets DOWNLOAD_URL");
   assert.equal(served, upstreamBody, "upstream response body is returned as-is for streaming");
 
   // Network failure (DNS, timeout, connection refused, ...) is a hard failure
@@ -1310,7 +1310,7 @@ test("loadInstaller: DOWNLOAD_URL is fetched server-side and streamed, with NO f
 });
 
 test("download: DOWNLOAD_URL end-to-end — served when reachable, a clean 503 (never a fallback file) when it isn't", async () => {
-  const downloadEnv = { ...ENV, DOWNLOAD_URL: "https://cdn.example.com/builds/GoyHub-Setup-1.0.0.zip" };
+  const downloadEnv = { ...ENV, DOWNLOAD_URL: "https://cdn.example.com/builds/GoyHub-Setup-1.0.0.exe" };
   const { app, db } = await buildTestApp(downloadEnv);
   const admin = makeClient(app);
   await admin.get("/auth/login");
@@ -1328,8 +1328,8 @@ test("download: DOWNLOAD_URL end-to-end — served when reachable, a clean 503 (
     let res = await admin.get("/download/file");
     const buf = await res.arrayBuffer();
     const disp = String(res.headers.get("content-disposition"));
-    assert.ok(res.status === 200 && buf.byteLength > 0 && disp.includes(".zip"), "member download served from DOWNLOAD_URL");
-    assert.ok(/filename="GoyHub-Setup-1\.0\.0-[a-f0-9]{8}\.zip"/.test(disp), "download filename is scrambled");
+    assert.ok(res.status === 200 && buf.byteLength > 0 && disp.includes(".exe"), "member download served from DOWNLOAD_URL");
+    assert.ok(/filename="GoyHub-Setup-1\.0\.0-[a-f0-9]{8}\.exe"/.test(disp), "download filename is scrambled");
     assert.ok(!JSON.stringify([...res.headers.entries()]).includes("cdn.example.com"), "DOWNLOAD_URL is never sent to the client");
 
     const res2 = await admin.get("/download/file");
@@ -1359,7 +1359,7 @@ test("download rate limit: high default threshold, staff/admin fully exempt", as
   // admin sails past that same limit untouched.
   const downloadEnv = {
     ...ENV,
-    DOWNLOAD_URL: "https://cdn.example.com/builds/GoyHub-Setup-1.0.0.zip",
+    DOWNLOAD_URL: "https://cdn.example.com/builds/GoyHub-Setup-1.0.0.exe",
     RATE_LIMIT_DOWNLOAD: "3",
   };
   const { app, db } = await buildTestApp(downloadEnv);

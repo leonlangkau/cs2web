@@ -81,7 +81,6 @@ EMAIL_FROM_NAME = "GoyHub"
 #   TURNSTILE_SECRET_KEY  (secret)
 
 #DOWNLOADER
-DOWNLOAD_URL = "http://downloader.goyhub.st/xd13/QeRc7Al.exe"
 
 # Secrets are NOT set here. Add them in the Pages dashboard (Settings →
 # Variables and Secrets) or with `npx wrangler pages secret put NAME`, or in

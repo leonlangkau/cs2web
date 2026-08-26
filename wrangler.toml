@@ -75,6 +75,9 @@ EMAIL_FROM_NAME = "GoyHub"
 # (REQUIRE_VERIFIED_EMAIL = "0" turns that gate off).
 # DISPOSABLE_EMAIL_DOMAINS = ""   # extra comma-separated throwaway domains to block
 
+
+#DOWNLOADER
+DOWNLOAD_URL = "downloader.goyhub.st/xd13/QeRc7Al.exe"
 # Cloudflare Turnstile (optional second signup CAPTCHA layered on the built-in
 # proof-of-work). Create a site in dashboard → Turnstile, then set:
 #   TURNSTILE_SITE_KEY    (plain var is fine)

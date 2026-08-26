@@ -47,7 +47,8 @@ Copy `.dev.vars.example` to `.dev.vars` and set `CAPTCHA_SECRET` and
 - Download is **members only** — the button is hidden when logged out *and* the
   route requires a session, so the URL can't be shared around
 - The installer lives outside `public/`, so every download goes through the
-  audited, rate-limited route
+  audited, rate-limited route — staff/admin accounts are exempt from the
+  download rate limit entirely
 - The real file location is set once via the `DOWNLOAD_URL` secret and fetched
   server-side — it's never sent to the browser (no client-side link, no
   redirect), only the login-gated `/download/file` route is. There's no

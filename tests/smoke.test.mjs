@@ -14,6 +14,7 @@ import { verifyPassword } from "../functions/_lib/crypto.js";
 import { verifyLicense } from "../functions/_lib/license.js";
 import { verifyTurnstile } from "../functions/_lib/turnstile.js";
 import { scrambledFilename, loadInstaller } from "../functions/_lib/routes-main.js";
+import { DEFAULTS as RATE_LIMIT_DEFAULTS } from "../functions/_lib/limits.js";
 import { smtpConversation, buildMessage } from "../functions/_lib/smtp.js";
 import { isEmailConfigured } from "../functions/_lib/email.js";
 import buildSchema from "../scripts/build-schema.cjs";
@@ -1345,6 +1346,55 @@ test("download: DOWNLOAD_URL end-to-end — served when reachable, a clean 503 (
     assert.equal(res.status, 503, "broken DOWNLOAD_URL is a clean 'unavailable', never a fallback file");
     assert.equal(Number((await db.get("SELECT COUNT(*) AS n FROM ip_logs WHERE event = 'download' AND username = 'admin'")).n), 2,
       "the failed attempt is not logged as a successful download");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("download rate limit: high default threshold, staff/admin fully exempt", async () => {
+  assert.equal(RATE_LIMIT_DEFAULTS.download.limit, 20, "download rate limit default is 20, not the old strict 3");
+
+  // A low override keeps this test fast while proving the mechanics: a
+  // regular Paid member is throttled past the configured limit, but an
+  // admin sails past that same limit untouched.
+  const downloadEnv = {
+    ...ENV,
+    DOWNLOAD_URL: "https://cdn.example.com/builds/GoyHub-Setup-1.0.0.zip",
+    RATE_LIMIT_DOWNLOAD: "3",
+  };
+  const { app, db } = await buildTestApp(downloadEnv);
+  const admin = makeClient(app);
+  const member = makeClient(app);
+
+  await admin.get("/auth/login");
+  await admin.post("/auth/login", { identifier: "admin", password: "admin-test-password-1", next: "/" });
+
+  await member.get("/auth/signup");
+  await member.post("/auth/signup", {
+    username: "download_member", email: "dlm@example.com",
+    password: "supersecret1", confirm: "supersecret1", ...(await solveCaptcha(member)),
+  });
+  await db.run("UPDATE users SET tier = 'paid' WHERE username = 'download_member'");
+
+  const originalFetch = globalThis.fetch;
+  try {
+    globalThis.fetch = async () => new Response(new TextEncoder().encode("fake-installer-bytes"), { status: 200 });
+
+    for (let i = 0; i < 3; i += 1) {
+      const res = await member.get("/download/file");
+      await res.arrayBuffer();
+      assert.equal(res.status, 200, `member download ${i + 1}/3 within RATE_LIMIT_DOWNLOAD succeeds`);
+    }
+    const throttled = await member.get("/download/file");
+    assert.equal(throttled.status, 429, "member is throttled past RATE_LIMIT_DOWNLOAD");
+
+    // Same low limit, but admin never gets the 429 — the gate is skipped for
+    // staff entirely, not just given a bigger allowance.
+    for (let i = 0; i < 5; i += 1) {
+      const res = await admin.get("/download/file");
+      await res.arrayBuffer();
+      assert.equal(res.status, 200, `admin download ${i + 1}/5 is never rate-limited`);
+    }
   } finally {
     globalThis.fetch = originalFetch;
   }

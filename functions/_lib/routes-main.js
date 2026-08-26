@@ -6,7 +6,7 @@ import * as captcha from "./captcha.js";
 import * as limits from "./limits.js";
 import { DELETED_USERNAME } from "./bootstrap.js";
 import { audit, clientIp, requireAuth, requireTier, acceptTerms, formBody, setFlash, TERMS_VERSION, } from "./middleware.js";
-import { meetsTier } from "./tiers.js";
+import { meetsTier, isStaff } from "./tiers.js";
 import { issueLicense } from "./license.js";
 import { newToken } from "./crypto.js";
 
@@ -153,10 +153,12 @@ function register(app) {
     const gate = requireTier(c, 'paid');
     if (gate) return gate;
 
-    const verdict = await limits.check(c.get('db'), 'download', clientIp(c), c.get('cfg'));
-    if (!verdict.ok) return tooMany(c, verdict.retryAfterSec);
-
     const user = c.get('user');
+    if (!isStaff(user)) {
+      const verdict = await limits.check(c.get('db'), 'download', clientIp(c), c.get('cfg'));
+      if (!verdict.ok) return tooMany(c, verdict.retryAfterSec);
+    }
+
     const body = await loadInstaller(c.get('cfg'));
     if (!body) {
       return c.html(views.errorPage(c.get('view'), {

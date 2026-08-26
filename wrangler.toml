@@ -27,11 +27,11 @@ COMPANY_LEGAL_EMAIL = "legal@goyhub.st"
 CAPTCHA_DIFFICULTY = "16"
 PBKDF2_ITERATIONS = "100000"
 
-# Rate limits: attempts per window (10 min / hour / minute / hour / minute).
+# Rate limits: attempts per window (10 min / hour / minute / 3 hours / minute).
 RATE_LIMIT_LOGIN = "10"
 RATE_LIMIT_SIGNUP = "5"
 RATE_LIMIT_POST = "6"
-RATE_LIMIT_DOWNLOAD = "3"
+RATE_LIMIT_DOWNLOAD = "20"  # per IP per 3h; staff/admin are exempt entirely (see routes-main.js)
 RATE_LIMIT_SHOUT = "3"
 RATE_LIMIT_REPORT = "5"
 

@@ -14,7 +14,7 @@ const DEFAULTS = {
   login: { limit: 10, windowMs: 10 * 60 * 1000 },     // per IP
   signup: { limit: 5, windowMs: 60 * 60 * 1000 },     // per IP
   post: { limit: 6, windowMs: 60 * 1000 },            // per user
-  download: { limit: 3, windowMs: 3 * 60 * 60 * 1000 }, // per IP (3 per 3 hours)
+  download: { limit: 20, windowMs: 3 * 60 * 60 * 1000 }, // per IP (20 per 3 hours; staff exempt)
   shout: { limit: 3, windowMs: 60 * 1000 },           // per user
   burst: { limit: 240, windowMs: 60 * 1000 },         // per IP, ALL dynamic routes (flood control)
   flood: { limit: 5, windowMs: 10 * 60 * 1000 },      // per IP, burst BREACHES before auto-ban

@@ -13,7 +13,7 @@ import { seed } from "../functions/_lib/bootstrap.js";
 import { verifyPassword } from "../functions/_lib/crypto.js";
 import { verifyLicense } from "../functions/_lib/license.js";
 import { verifyTurnstile } from "../functions/_lib/turnstile.js";
-import { scrambledFilename } from "../functions/_lib/routes-main.js";
+import { scrambledFilename, loadInstaller } from "../functions/_lib/routes-main.js";
 import { smtpConversation, buildMessage } from "../functions/_lib/smtp.js";
 import { isEmailConfigured } from "../functions/_lib/email.js";
 import buildSchema from "../scripts/build-schema.cjs";
@@ -1269,6 +1269,46 @@ test("download filename scrambler keeps base+ext, injects a unique token", () =>
   assert.ok(/^GoyHub-Setup-1\.0\.0-[a-f0-9]{8}\.zip$/.test(a), "shape preserved with token");
   assert.notEqual(a, b, "two calls differ");
   assert.equal(scrambledFilename("noext").slice(0, 6), "noext-", "extensionless names still get a token");
+});
+
+test("loadInstaller: DOWNLOAD_URL is fetched server-side and streamed, with graceful fallback", async () => {
+  const upstreamBody = new ReadableStream({
+    start(controller) {
+      controller.enqueue(new TextEncoder().encode("fake-installer-bytes"));
+      controller.close();
+    },
+  });
+
+  // Configured and reachable: the fetch goes to exactly DOWNLOAD_URL, and its
+  // response body is handed back untouched for streaming — never buffered,
+  // never inspected, so the route can pipe it straight to the client.
+  let calledWith = null;
+  const served = await loadInstaller(
+    { DOWNLOAD_URL: "https://cdn.example.com/builds/GoyHub-Setup-1.0.0.zip" },
+    async (url) => { calledWith = url; return { ok: true, body: upstreamBody }; }
+  );
+  assert.equal(calledWith, "https://cdn.example.com/builds/GoyHub-Setup-1.0.0.zip", "fetch targets DOWNLOAD_URL");
+  assert.equal(served, upstreamBody, "upstream response body is returned as-is for streaming");
+
+  // Network failure (DNS, timeout, connection refused, ...) falls back to the
+  // embedded build artifact instead of breaking the download route.
+  const onNetworkError = await loadInstaller(
+    { DOWNLOAD_URL: "https://cdn.example.com/unreachable.zip" },
+    async () => { throw new Error("network down"); }
+  );
+  assert.ok(onNetworkError && onNetworkError.length > 0, "falls back to the embedded installer on fetch failure");
+
+  // A non-OK upstream (404, 5xx, ...) also falls back rather than serving a
+  // broken/empty response.
+  const onNotOk = await loadInstaller(
+    { DOWNLOAD_URL: "https://cdn.example.com/missing.zip" },
+    async () => ({ ok: false, status: 404 })
+  );
+  assert.ok(onNotOk && onNotOk.length > 0, "falls back to the embedded installer on a non-OK upstream response");
+
+  // DOWNLOAD_URL unset: no network call is made at all, straight to fallback.
+  const unset = await loadInstaller({}, async () => { throw new Error("must not be called"); });
+  assert.ok(unset && unset.length > 0, "unset DOWNLOAD_URL skips the fetch and serves the embedded installer");
 });
 
 test("smtp client: correct SMTPS conversation for Cloudflare's Email Service relay", async () => {

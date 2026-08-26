@@ -14,6 +14,12 @@ ADMIN_PASSWORD=choose-a-strong-password
 # tier with. Optional — falls back to CAPTCHA_SECRET if unset.
 # LICENSE_SECRET=replace_me_with_a_different_long_random_string
 
+# Where the real installer lives. Fetched server-side by /download/file and
+# streamed straight through — the URL itself is never sent to the browser.
+# Optional in dev; without it the route falls back to the R2 binding, then
+# the build-embedded copy.
+# DOWNLOAD_URL=https://example.com/path/to/GoyHub-Setup-1.0.0.zip
+
 # Outbound email (optional in dev). Use provider "test" to capture messages
 # in-process (the smoke tests do), or a real provider + key.
 # EMAIL_PROVIDER=test

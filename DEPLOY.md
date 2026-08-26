@@ -57,6 +57,7 @@ No build command is needed — the Functions are committed ready to run.
 | `CAPTCHA_SECRET` | a long random string |
 | `ADMIN_PASSWORD` | password for the seeded admin account |
 | `ADMIN_USERNAME` | optional, defaults to `admin` |
+| `DOWNLOAD_URL` | optional — where the real installer lives (see "Shipping a real installer" below) |
 
 Generate a CAPTCHA secret:
 
@@ -122,7 +123,45 @@ the schema with `npm run db:local`.
 ## Shipping a real installer
 
 The placeholder zip is embedded in the Function bundle. A real installer will be
-too big (the bundle caps at ~1 MB free / 10 MB paid), so use R2:
+too big (the bundle caps at ~1 MB free / 10 MB paid), so point the download
+route at it instead of embedding it. Two ways to do that, in the order the
+route checks them:
+
+### Option A — `DOWNLOAD_URL` (simplest, no Cloudflare storage needed)
+
+Host the installer anywhere reachable over HTTPS — your own server, a CDN, a
+GitHub release asset, S3/B2, etc. — then set:
+
+```bash
+npx wrangler pages secret put DOWNLOAD_URL
+# paste the file's URL when prompted
+```
+
+`/download/file` (still behind the sign-in + Paid-tier gate and the download
+rate limit) fetches that URL **server-side** on each request and streams the
+response straight back to the browser. The URL itself is never sent to the
+client — not in the page HTML, not in a redirect's `Location` header, not in
+any script — the browser only ever talks to the same-site `/download/file`.
+That's the obfuscation: the value never leaves the server, which beats any
+client-side encoding of the link (Base64, split strings, etc. are all
+trivially readable from a browser's dev tools; a value the browser never
+receives can't be read from it at all).
+
+Always set it as a **Secret**, never as a plain `[vars]` entry in
+`wrangler.toml` — that file is committed, and a plain var would put the
+"hidden" URL in cleartext in git history and in the dashboard's variable
+list. A Secret is encrypted at rest and, once saved, is no longer readable
+from the dashboard either.
+
+Keep the version metadata honest: `functions/_lib/installer-data.js` (built
+from `artifacts/GoyHub-Setup-1.0.0.zip` — see below) is what the site shows
+as the download's name, size and SHA-256 checksum. When `DOWNLOAD_URL` points
+at a newer build, update that artifact and run `npm run build` too, so the
+checksum shown on `/download` still matches the file actually served.
+
+### Option B — R2
+
+Keeps the file inside Cloudflare instead of an external host:
 
 ```bash
 npx wrangler r2 bucket create goyhub-installer
@@ -130,9 +169,15 @@ npx wrangler r2 object put goyhub-installer/GoyHub-Setup-1.0.0.zip --file=./inst
 ```
 
 Uncomment the `[[r2_buckets]]` block in `wrangler.toml` (or add the binding in
-the dashboard as `INSTALLER`). The download route prefers R2 and falls back to
-the embedded copy. The artifact stays out of `public/`, so every download goes
-through the audited, rate-limited route.
+the dashboard as `INSTALLER`).
+
+---
+
+Resolution order: `DOWNLOAD_URL` → the `INSTALLER` R2 binding → the embedded
+copy — each one only used if the one before it is unset or fails, so the route
+degrades gracefully instead of breaking. Whichever is active, the artifact
+stays out of `public/`, so every download goes through the same audited,
+rate-limited, login-gated route.
 
 ---
 

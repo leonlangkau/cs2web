@@ -157,7 +157,7 @@ function register(app) {
     if (!verdict.ok) return tooMany(c, verdict.retryAfterSec);
 
     const user = c.get('user');
-    const body = await loadInstaller(c);
+    const body = await loadInstaller(c.get('cfg'));
     if (!body) {
       return c.html(views.errorPage(c.get('view'), {
         code: 503, title: 'Unavailable',
@@ -190,11 +190,32 @@ function register(app) {
 }
 
 /**
- * Resolves the installer bytes. Prefers an R2 binding (the right home for a
- * real, multi-megabyte build) and falls back to the copy embedded at build time.
+ * Resolves the installer bytes.
+ *
+ * Prefers DOWNLOAD_URL — fetched here, server-side, and its response body
+ * streamed straight back out through this Function. The real URL is never
+ * put in front of the browser: not in the page HTML, not in a client-side
+ * redirect's Location header, not in any script. The client only ever sees
+ * the same-site, login-gated /download/file — that's the whole obfuscation,
+ * and it's stronger than any client-side encoding of the URL would be, since
+ * the value never leaves the server at all.
+ *
+ * Falls back to an R2 binding, then to the copy embedded at build time, so
+ * an unset or unreachable DOWNLOAD_URL degrades instead of breaking the route.
  */
-async function loadInstaller(c) {
-  const bucket = c.get('cfg') && c.get('cfg').INSTALLER;
+async function loadInstaller(cfg, fetcher = fetch) {
+  const downloadUrl = String((cfg && cfg.DOWNLOAD_URL) || '').trim();
+  if (downloadUrl) {
+    try {
+      const upstream = await fetcher(downloadUrl);
+      if (upstream.ok && upstream.body) return upstream.body;
+      console.error('DOWNLOAD_URL fetch failed with status', upstream.status);
+    } catch (err) {
+      console.error('DOWNLOAD_URL fetch threw:', err);
+    }
+  }
+
+  const bucket = cfg && cfg.INSTALLER;
   if (bucket && typeof bucket.get === 'function') {
     const object = await bucket.get(installer.name);
     if (object) return object.body;
@@ -208,4 +229,4 @@ async function loadInstaller(c) {
   return null;
 }
 
-export { register, siteStats, tooMany, safePath, paymentConfig, scrambledFilename, DOWNLOAD_META };
+export { register, siteStats, tooMany, safePath, paymentConfig, scrambledFilename, loadInstaller, DOWNLOAD_META };

@@ -285,17 +285,14 @@ test("public pages, forum, legal, gate, auth, captcha, admin, moderation, downlo
   res = await anon.get("/download/file");
   assert.ok(res.status === 302 && res.headers.get("location").startsWith("/auth/login"), "anon download redirected");
   assert.equal(Number((await db.get("SELECT COUNT(*) AS n FROM ip_logs WHERE event = 'download'")).n), 0, "anon download not logged");
+  // No DOWNLOAD_URL configured in this test's env: a signed-in Paid member
+  // clears the gate, but there is no fallback file to serve — a clean
+  // "unavailable" response, not a silently-substituted placeholder, and
+  // nothing is logged as a successful download. The success path (with
+  // DOWNLOAD_URL configured) is covered end-to-end in its own test below.
   res = await admin.get("/download/file");
-  const buf = await res.arrayBuffer();
-  const disp = String(res.headers.get("content-disposition"));
-  assert.ok(res.status === 200 && buf.byteLength > 0 && disp.includes(".zip"), "member download");
-  // Filename is scrambled per-download: real base kept, random token injected.
-  assert.ok(/filename="GoyHub-Setup-1\.0\.0-[a-f0-9]{8}\.zip"/.test(disp), "download filename is scrambled");
-  const res2 = await admin.get("/download/file");
-  await res2.arrayBuffer();
-  assert.notEqual(res.headers.get("content-disposition"), res2.headers.get("content-disposition"),
-    "each download gets a different filename");
-  assert.ok(await db.get("SELECT id FROM ip_logs WHERE event = 'download' AND username = 'admin'"), "download logged");
+  assert.equal(res.status, 503, "member download with no DOWNLOAD_URL configured is a clean 'unavailable', not a fallback file");
+  assert.ok(!(await db.get("SELECT id FROM ip_logs WHERE event = 'download' AND username = 'admin'")), "unavailable download is not logged as a download");
 
   html = await (await anon.get("/")).text();
   assert.ok(!html.includes("/download/file") && html.includes("Create a free account"), "download hidden when logged out");
@@ -1271,7 +1268,7 @@ test("download filename scrambler keeps base+ext, injects a unique token", () =>
   assert.equal(scrambledFilename("noext").slice(0, 6), "noext-", "extensionless names still get a token");
 });
 
-test("loadInstaller: DOWNLOAD_URL is fetched server-side and streamed, with graceful fallback", async () => {
+test("loadInstaller: DOWNLOAD_URL is fetched server-side and streamed, with NO fallback", async () => {
   const upstreamBody = new ReadableStream({
     start(controller) {
       controller.enqueue(new TextEncoder().encode("fake-installer-bytes"));
@@ -1290,25 +1287,67 @@ test("loadInstaller: DOWNLOAD_URL is fetched server-side and streamed, with grac
   assert.equal(calledWith, "https://cdn.example.com/builds/GoyHub-Setup-1.0.0.zip", "fetch targets DOWNLOAD_URL");
   assert.equal(served, upstreamBody, "upstream response body is returned as-is for streaming");
 
-  // Network failure (DNS, timeout, connection refused, ...) falls back to the
-  // embedded build artifact instead of breaking the download route.
+  // Network failure (DNS, timeout, connection refused, ...) is a hard failure
+  // — null, not a silent substitute file.
   const onNetworkError = await loadInstaller(
     { DOWNLOAD_URL: "https://cdn.example.com/unreachable.zip" },
     async () => { throw new Error("network down"); }
   );
-  assert.ok(onNetworkError && onNetworkError.length > 0, "falls back to the embedded installer on fetch failure");
+  assert.equal(onNetworkError, null, "no fallback on fetch failure — null, so the route reports 'unavailable'");
 
-  // A non-OK upstream (404, 5xx, ...) also falls back rather than serving a
-  // broken/empty response.
+  // A non-OK upstream (404, 5xx, ...) is also a hard failure, not a fallback.
   const onNotOk = await loadInstaller(
     { DOWNLOAD_URL: "https://cdn.example.com/missing.zip" },
     async () => ({ ok: false, status: 404 })
   );
-  assert.ok(onNotOk && onNotOk.length > 0, "falls back to the embedded installer on a non-OK upstream response");
+  assert.equal(onNotOk, null, "no fallback on a non-OK upstream response");
 
-  // DOWNLOAD_URL unset: no network call is made at all, straight to fallback.
+  // DOWNLOAD_URL unset: no network call is made, and there is nothing to fall
+  // back to — null.
   const unset = await loadInstaller({}, async () => { throw new Error("must not be called"); });
-  assert.ok(unset && unset.length > 0, "unset DOWNLOAD_URL skips the fetch and serves the embedded installer");
+  assert.equal(unset, null, "unset DOWNLOAD_URL skips the fetch and returns null — no fallback file");
+});
+
+test("download: DOWNLOAD_URL end-to-end — served when reachable, a clean 503 (never a fallback file) when it isn't", async () => {
+  const downloadEnv = { ...ENV, DOWNLOAD_URL: "https://cdn.example.com/builds/GoyHub-Setup-1.0.0.zip" };
+  const { app, db } = await buildTestApp(downloadEnv);
+  const admin = makeClient(app);
+  await admin.get("/auth/login");
+  await admin.post("/auth/login", { identifier: "admin", password: "admin-test-password-1", next: "/" });
+
+  const originalFetch = globalThis.fetch;
+  try {
+    // Reachable: the route streams the upstream bytes straight through, with
+    // the usual per-download scrambled filename and audit log — the URL
+    // itself never appears anywhere in the response.
+    globalThis.fetch = async (url) => {
+      assert.equal(url, downloadEnv.DOWNLOAD_URL, "route fetches exactly DOWNLOAD_URL");
+      return new Response(new TextEncoder().encode("fake-installer-bytes"), { status: 200 });
+    };
+    let res = await admin.get("/download/file");
+    const buf = await res.arrayBuffer();
+    const disp = String(res.headers.get("content-disposition"));
+    assert.ok(res.status === 200 && buf.byteLength > 0 && disp.includes(".zip"), "member download served from DOWNLOAD_URL");
+    assert.ok(/filename="GoyHub-Setup-1\.0\.0-[a-f0-9]{8}\.zip"/.test(disp), "download filename is scrambled");
+    assert.ok(!JSON.stringify([...res.headers.entries()]).includes("cdn.example.com"), "DOWNLOAD_URL is never sent to the client");
+
+    const res2 = await admin.get("/download/file");
+    await res2.arrayBuffer();
+    assert.notEqual(res.headers.get("content-disposition"), res2.headers.get("content-disposition"),
+      "each download gets a different filename");
+    assert.equal(Number((await db.get("SELECT COUNT(*) AS n FROM ip_logs WHERE event = 'download' AND username = 'admin'")).n), 2,
+      "each successful download is logged");
+
+    // Now DOWNLOAD_URL is broken (host down, 404, whatever) — this must be a
+    // clean failure, NOT a silent fallback to the embedded placeholder.
+    globalThis.fetch = async () => { throw new Error("simulated network outage"); };
+    res = await admin.get("/download/file");
+    assert.equal(res.status, 503, "broken DOWNLOAD_URL is a clean 'unavailable', never a fallback file");
+    assert.equal(Number((await db.get("SELECT COUNT(*) AS n FROM ip_logs WHERE event = 'download' AND username = 'admin'")).n), 2,
+      "the failed attempt is not logged as a successful download");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });
 
 test("smtp client: correct SMTPS conversation for Cloudflare's Email Service relay", async () => {

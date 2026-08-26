@@ -16,8 +16,8 @@ ADMIN_PASSWORD=choose-a-strong-password
 
 # Where the real installer lives. Fetched server-side by /download/file and
 # streamed straight through — the URL itself is never sent to the browser.
-# Optional in dev; without it the route falls back to the R2 binding, then
-# the build-embedded copy.
+# Required for downloads to work — no fallback. Leave unset in dev and
+# /download/file will correctly return "unavailable" rather than fake content.
 # DOWNLOAD_URL=https://example.com/path/to/GoyHub-Setup-1.0.0.zip
 
 # Outbound email (optional in dev). Use provider "test" to capture messages

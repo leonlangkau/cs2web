@@ -57,7 +57,7 @@ No build command is needed — the Functions are committed ready to run.
 | `CAPTCHA_SECRET` | a long random string |
 | `ADMIN_PASSWORD` | password for the seeded admin account |
 | `ADMIN_USERNAME` | optional, defaults to `admin` |
-| `DOWNLOAD_URL` | optional — where the real installer lives (see "Shipping a real installer" below) |
+| `DOWNLOAD_URL` | required for the download to work (no fallback) — where the real installer lives (see "Shipping a real installer" below) |
 
 Generate a CAPTCHA secret:
 
@@ -122,15 +122,13 @@ the schema with `npm run db:local`.
 
 ## Shipping a real installer
 
-The placeholder zip is embedded in the Function bundle. A real installer will be
-too big (the bundle caps at ~1 MB free / 10 MB paid), so point the download
-route at it instead of embedding it. Two ways to do that, in the order the
-route checks them:
-
-### Option A — `DOWNLOAD_URL` (simplest, no Cloudflare storage needed)
+The download route serves whatever `DOWNLOAD_URL` points at — **required**,
+with **no fallback**. Without it (or if it's unreachable), `/download/file`
+returns a clean "unavailable" response rather than silently serving the
+placeholder zip embedded in the Function bundle.
 
 Host the installer anywhere reachable over HTTPS — your own server, a CDN, a
-GitHub release asset, S3/B2, etc. — then set:
+GitHub release asset, S3/B2, R2, etc. — then set:
 
 ```bash
 npx wrangler pages secret put DOWNLOAD_URL
@@ -145,7 +143,13 @@ any script — the browser only ever talks to the same-site `/download/file`.
 That's the obfuscation: the value never leaves the server, which beats any
 client-side encoding of the link (Base64, split strings, etc. are all
 trivially readable from a browser's dev tools; a value the browser never
-receives can't be read from it at all).
+receives can't be read from it at all). And because there's no fallback, a
+broken or misconfigured `DOWNLOAD_URL` fails loudly (a 503 on `/download/file`)
+instead of quietly handing members a stale placeholder.
+
+If hosting on Cloudflare R2, make the object itself the URL — either a public
+R2.dev/custom domain, or a signed/presigned URL — and set that as
+`DOWNLOAD_URL`; the route doesn't bind R2 directly, it only ever fetches a URL.
 
 Always set it as a **Secret**, never as a plain `[vars]` entry in
 `wrangler.toml` — that file is committed, and a plain var would put the
@@ -159,25 +163,10 @@ as the download's name, size and SHA-256 checksum. When `DOWNLOAD_URL` points
 at a newer build, update that artifact and run `npm run build` too, so the
 checksum shown on `/download` still matches the file actually served.
 
-### Option B — R2
-
-Keeps the file inside Cloudflare instead of an external host:
-
-```bash
-npx wrangler r2 bucket create goyhub-installer
-npx wrangler r2 object put goyhub-installer/GoyHub-Setup-1.0.0.zip --file=./installer.zip
-```
-
-Uncomment the `[[r2_buckets]]` block in `wrangler.toml` (or add the binding in
-the dashboard as `INSTALLER`).
-
 ---
 
-Resolution order: `DOWNLOAD_URL` → the `INSTALLER` R2 binding → the embedded
-copy — each one only used if the one before it is unset or fails, so the route
-degrades gracefully instead of breaking. Whichever is active, the artifact
-stays out of `public/`, so every download goes through the same audited,
-rate-limited, login-gated route.
+The artifact stays out of `public/` regardless, so every download goes
+through the same audited, rate-limited, login-gated route.
 
 ---
 

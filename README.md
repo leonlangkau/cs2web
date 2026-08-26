@@ -50,7 +50,9 @@ Copy `.dev.vars.example` to `.dev.vars` and set `CAPTCHA_SECRET` and
   audited, rate-limited route
 - The real file location is set once via the `DOWNLOAD_URL` secret and fetched
   server-side — it's never sent to the browser (no client-side link, no
-  redirect), only the login-gated `/download/file` route is
+  redirect), only the login-gated `/download/file` route is. There's no
+  fallback: unset or unreachable, the route fails clearly instead of quietly
+  serving a placeholder
 - Landing page stays fully readable with JavaScript disabled
 
 ### Accounts
@@ -113,7 +115,7 @@ Set as `[vars]`/secrets in `wrangler.toml` / the Pages dashboard (see DEPLOY.md)
 | Variable | Default | Purpose |
 | --- | --- | --- |
 | `ADMIN_USERNAME` / `ADMIN_PASSWORD` | `admin` / random | Seeded admin; `ADMIN_PASSWORD` stays the source of truth — rotate it and the admin's password syncs on the next request, even if the account already existed |
-| `DOWNLOAD_URL` | unset | Real installer location. Fetched server-side by `/download/file` (behind the Paid-tier login gate) and streamed straight through — the URL itself is never sent to the browser. Set as a **Secret**, not a plain var. Falls back to the `INSTALLER` R2 binding, then the build-embedded copy |
+| `DOWNLOAD_URL` | unset | Real installer location — **required** for downloads to work, **no fallback**. Fetched server-side by `/download/file` (behind the Paid-tier login gate) and streamed straight through — the URL itself is never sent to the browser. Set as a **Secret**, not a plain var. Unset or unreachable: the route returns a clean "unavailable" response instead of substituting a different file |
 | `CAPTCHA_SECRET` | insecure dev value | **Required** — signs CAPTCHA challenges |
 | `CAPTCHA_DIFFICULTY` | `16` | Proof-of-work leading zero bits (8–24) |
 | `PBKDF2_ITERATIONS` | `100000` | Hash cost; watch the free 10ms CPU limit |

@@ -92,21 +92,14 @@ EMAIL_FROM_NAME = "GoyHub"
 #                    verifies a member's tier with. Falls back to
 #                    CAPTCHA_SECRET if unset — set a dedicated one in
 #                    production so rotating one doesn't invalidate the other.
-
-# DOWNLOAD_URL: where the installer actually lives (your own host, a CDN, a
-# GitHub release asset, ...). The download route fetches it server-side and
-# streams the bytes straight through — the URL itself is never sent to the
-# browser. Set it as a SECRET (dashboard → Settings → Variables and Secrets,
-# or `npx wrangler pages secret put DOWNLOAD_URL`), never as a plain [vars]
-# entry here — this file is committed, and a plain var would put the "hidden"
-# URL in plaintext in git history and the dashboard's variable list.
-# Unset or unreachable: falls back to the INSTALLER R2 binding below, then to
-# the copy embedded in the Function bundle.
-
-# Optional: serve a real, multi-megabyte installer from R2 instead of the copy
-# embedded in the Function bundle. Create the bucket, upload the zip under its
-# exact filename, then uncomment. The download route prefers R2 automatically
-# when DOWNLOAD_URL is unset.
-# [[r2_buckets]]
-# binding = "INSTALLER"
-# bucket_name = "goyhub-installer"
+#   DOWNLOAD_URL     where the installer actually lives (your own host, a CDN,
+#                    a GitHub release asset, ...). REQUIRED for the download
+#                    to work — there is no fallback. The route fetches it
+#                    server-side and streams the bytes straight through, so
+#                    the URL itself is never sent to the browser. Unset, or
+#                    unreachable: /download/file serves a clean "unavailable"
+#                    response instead of silently substituting a different
+#                    file. Set it as a Secret, never as a plain [vars] entry
+#                    above — this file is committed, and a plain var would put
+#                    the "hidden" URL in plaintext in git history and the
+#                    dashboard's variable list.

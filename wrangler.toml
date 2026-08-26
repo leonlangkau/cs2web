@@ -80,8 +80,6 @@ EMAIL_FROM_NAME = "GoyHub"
 #   TURNSTILE_SITE_KEY    (plain var is fine)
 #   TURNSTILE_SECRET_KEY  (secret)
 
-#DOWNLOADER
-
 # Secrets are NOT set here. Add them in the Pages dashboard (Settings →
 # Variables and Secrets) or with `npx wrangler pages secret put NAME`, or in
 # .dev.vars for local dev:

@@ -68,7 +68,10 @@ Copy `.dev.vars.example` to `.dev.vars` and set `CAPTCHA_SECRET` and
   download are Paid+ benefits, staff tiers unlock the admin panel
 - `/profile`: tier + loader license, change password/email, per-session revoke,
   sign-out-everywhere, self-serve account deletion
-- `/upgrade`: env-configurable crypto checkout (honest "coming soon" until set)
+- `/upgrade`: automated **crypto-only** checkout via a self-hosted **BTCPay
+  Server** — one click creates an invoice, and a signed webhook upgrades the
+  account to Paid automatically once the payment confirms on-chain (honest
+  "coming soon" until configured). Setup: [BTCPAY-SETUP.md](BTCPAY-SETUP.md)
 - Loader API: `POST /api/loader/auth` (username+password → tier + signed
   license) and `POST /api/loader/verify` (server-side check, live tier)
 
@@ -123,7 +126,9 @@ Set as `[vars]`/secrets in `wrangler.toml` / the Pages dashboard (see DEPLOY.md)
 | `RATE_LIMIT_*` | see wrangler.toml | login / signup / post / download / shout / report / burst / flood |
 | `AUTO_IP_BAN_MINUTES` | `60` | How long automatic flood bans last |
 | `SIGNUP_SURGE_LIMIT` | `30` | Site-wide signups per 10 min before registration pauses |
-| `CRYPTO_PAY_URL` / `CRYPTO_PAY_ADDRESSES` / `PAID_PRICE` | unset | Upgrade-page checkout config (page shows "coming soon" until set) |
+| `BTCPAY_URL` / `BTCPAY_STORE_ID` / `BTCPAY_API_KEY`* / `BTCPAY_WEBHOOK_SECRET`* | unset | Self-hosted BTCPay Server checkout. All set → `/upgrade` shows a one-click crypto pay button and grants Paid automatically on a confirmed, signature-verified webhook. `*` = secret. See [BTCPAY-SETUP.md](BTCPAY-SETUP.md) |
+| `PAID_PRICE_AMOUNT` / `PAID_PRICE_CURRENCY` / `PAID_PERIOD_DAYS` | unset / `USD` / lifetime | Membership price, currency and length (days; empty = lifetime) for BTCPay invoices |
+| `CRYPTO_PAY_URL` / `CRYPTO_PAY_ADDRESSES` / `PAID_PRICE` | unset | Fallback checkout when BTCPay isn't configured (hosted link / manual addresses / price string) |
 | `EMAIL_PROVIDER` + `EMAIL_API_KEY` + `EMAIL_FROM` | unset (disabled) | Outbound email: `cloudflare` (Email Service SMTPS relay) / `resend` / `sendgrid` / `mailchannels` |
 | `TURNSTILE_SITE_KEY` / `TURNSTILE_SECRET_KEY` | unset | Optional Cloudflare Turnstile on signup |
 | `LICENSE_SECRET` | falls back to `CAPTCHA_SECRET` | Signs loader license tokens |

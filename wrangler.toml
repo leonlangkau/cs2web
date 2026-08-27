@@ -48,10 +48,33 @@ SIGNUP_SURGE_LIMIT = "30"
 
 # Crypto payments (the /upgrade page). All optional — with none set the page
 # shows an honest "payments coming soon" note with the support contact.
-#   CRYPTO_PAY_URL        hosted checkout link (Coinbase Commerce, NOWPayments,
-#                         BTCPay, …) once you set one up — shown as the pay button
-#   CRYPTO_PAY_ADDRESSES  manual fallback, e.g. "BTC:bc1qxy...,ETH:0xab...,LTC:ltc1..."
-#   PAID_PRICE            display string, e.g. "$10 / month"
+#
+# PREFERRED: a self-hosted BTCPay Server (crypto-only, no third party). When the
+# four BTCPAY_* values plus PAID_PRICE_AMOUNT are set, /upgrade shows a one-click
+# "Pay with crypto" button that creates an invoice and upgrades the account
+# automatically once the payment confirms on-chain (verified by a signed
+# webhook). Full setup guide: BTCPAY-SETUP.md.
+#   BTCPAY_URL           https base URL of your BTCPay Server, e.g. https://btcpay.goyhub.st
+#   BTCPAY_STORE_ID      the store's id (Store Settings → the id in the URL / General)
+#   PAID_PRICE_AMOUNT    numeric price per membership, e.g. "10.00"
+#   PAID_PRICE_CURRENCY  ISO currency the invoice is priced in (default "USD")
+#   PAID_PERIOD_DAYS     membership length in days; empty or "0" = lifetime
+# BTCPAY_URL = "https://btcpay.example.com"
+# BTCPAY_STORE_ID = ""
+# PAID_PRICE_AMOUNT = "10.00"
+# PAID_PRICE_CURRENCY = "USD"
+# PAID_PERIOD_DAYS = "30"
+# RATE_LIMIT_CHECKOUT = "8"   # invoices a member can create per hour (abuse cap)
+#
+# BTCPAY_API_KEY and BTCPAY_WEBHOOK_SECRET are SECRETS — never put them here.
+# Add them in the Pages dashboard (Settings → Variables and Secrets, type
+# Secret) or with `npx wrangler pages secret put NAME`, exactly like
+# ADMIN_PASSWORD. See the secrets note near the bottom of this file.
+#
+# FALLBACKS (used only when BTCPay is not configured):
+#   CRYPTO_PAY_URL        hosted checkout link (Coinbase Commerce, NOWPayments…)
+#   CRYPTO_PAY_ADDRESSES  manual addresses, e.g. "BTC:bc1qxy...,ETH:0xab...,LTC:ltc1..."
+#   PAID_PRICE            display string that overrides the composed price, e.g. "$10 / month"
 # CRYPTO_PAY_URL = ""
 # CRYPTO_PAY_ADDRESSES = ""
 # PAID_PRICE = ""
@@ -103,3 +126,9 @@ EMAIL_FROM_NAME = "GoyHub"
 #                    above — this file is committed, and a plain var would put
 #                    the "hidden" URL in plaintext in git history and the
 #                    dashboard's variable list.
+#   BTCPAY_API_KEY        BTCPay Greenfield API key with the
+#                         btcpay.store.cancreateinvoice + canviewinvoices
+#                         permissions on your store (creates checkout invoices)
+#   BTCPAY_WEBHOOK_SECRET the signing secret of the store webhook that points at
+#                         https://your-site/api/btcpay/webhook — every webhook is
+#                         HMAC-verified against this before it can grant Paid

@@ -22,6 +22,7 @@ const DEFAULTS = {
   reset: { limit: 3, windowMs: 60 * 60 * 1000 },      // per IP (password-reset emails)
   verify: { limit: 3, windowMs: 60 * 60 * 1000 },     // per user (verification emails)
   fingerprint: { limit: 20, windowMs: 10 * 60 * 1000 }, // per IP (client fingerprint beacon)
+  checkout: { limit: 8, windowMs: 60 * 60 * 1000 },   // per user (BTCPay invoice creation)
 };
 
 const ENV_KEYS = {
@@ -36,6 +37,7 @@ const ENV_KEYS = {
   reset: 'RATE_LIMIT_RESET',
   verify: 'RATE_LIMIT_VERIFY',
   fingerprint: 'RATE_LIMIT_FINGERPRINT',
+  checkout: 'RATE_LIMIT_CHECKOUT',
 };
 
 function limitFor(name, env = {}) {

@@ -173,6 +173,65 @@ through the same audited, rate-limited, login-gated route.
 
 ---
 
+## Crypto payments (BTCPay Server)
+
+The `/upgrade` page can run a fully automated, **crypto-only** checkout backed
+by your own **BTCPay Server** — no card processor, no third party, no personal
+data. A member clicks **Pay with crypto**, pays a Bitcoin (on-chain or
+Lightning) invoice on your BTCPay checkout, and the account is upgraded to
+**Paid** automatically once the payment confirms. There is no manual step and
+no admin action.
+
+**Setting up the server** (a small VPS) is documented end-to-end in
+[BTCPAY-SETUP.md](BTCPAY-SETUP.md) — swap, firewall, DNS, the one-line
+`btcpayserver-docker` install tuned for a 2‑core / 4 GB box (pruned node), and
+creating the store, API key and webhook.
+
+**Connecting it to this site** (the four values from that guide):
+
+1. In `wrangler.toml` `[vars]`, set the non-secret pieces:
+   ```toml
+   BTCPAY_URL = "https://btcpay.yourdomain.com"
+   BTCPAY_STORE_ID = "the-store-id"
+   PAID_PRICE_AMOUNT = "10.00"
+   PAID_PRICE_CURRENCY = "USD"
+   PAID_PERIOD_DAYS = "30"        # empty or "0" = lifetime
+   ```
+2. Add the two **secrets** in **Settings → Variables and Secrets** (type
+   **Secret**), or with wrangler:
+   ```bash
+   npx wrangler pages secret put BTCPAY_API_KEY
+   npx wrangler pages secret put BTCPAY_WEBHOOK_SECRET
+   ```
+3. In BTCPay, point the store **webhook** at
+   `https://yourdomain.com/api/btcpay/webhook` (the guide walks through this),
+   and paste that webhook's signing secret into `BTCPAY_WEBHOOK_SECRET`.
+4. Redeploy. The upgrade page switches from "coming soon" to a live pay button.
+
+**How the security holds up** (all enforced in `functions/_lib/`):
+
+- Price, currency and membership length are **server config** — the checkout
+  request from the browser carries none of them, so a tampered form can't buy a
+  cheaper or longer membership.
+- Every webhook is authenticated by an **HMAC‑SHA256 signature over the exact
+  raw body** using `BTCPAY_WEBHOOK_SECRET`; an unsigned or mis‑signed call is
+  rejected before it touches an account.
+- Before crediting, the handler **re‑fetches the invoice from BTCPay** with the
+  store key and re‑checks status (`Settled`), amount, currency and order id — a
+  forged "settled" body can't grant access even if it somehow passed the
+  signature check.
+- Crediting is **idempotent**: `payments.credited_at` is flipped once under a
+  `WHERE credited_at IS NULL` guard, so a replayed webhook can never grant a
+  second period.
+- Invoice creation is **rate‑limited per member** (`RATE_LIMIT_CHECKOUT`), and
+  every checkout, grant and rejection is written to the IP audit log.
+
+> Keep `BTCPAY_API_KEY` scoped to just `btcpay.store.cancreateinvoice` and
+> `btcpay.store.canviewinvoices` on the one store. It can create and read
+> invoices — it can't move funds.
+
+---
+
 ## How it's laid out
 
 ```

@@ -89,7 +89,8 @@ SIGNUP_SURGE_LIMIT = "30"
 # CRYPTO_PAY_URL = ""
 # CRYPTO_PAY_ADDRESSES = ""
 # PAID_PRICE = ""
-
+BTCPAY_URL = "https://btcpay.goyhub.st"
+BTCPAY_STORE_ID = "D67RM4RGe9SKTdqA7Au8kz37MaFTkb5oVzHhfHoJsh4v"
 # Outbound email (password reset + verification) via Cloudflare's Email
 # Service SMTPS relay (smtp.mx.cloudflare.net:465, spoken natively over
 # cloudflare:sockets). Alternatives: "resend" | "sendgrid" | "mailchannels".

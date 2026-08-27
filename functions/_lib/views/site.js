@@ -4,6 +4,26 @@ import { meetsTier, tierOf, TIER_LABELS } from "../tiers.js";
 import { planDuration } from "../plans.js";
 
 const DOWNLOAD_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m0 0l-5-5m5 5l5-5M4 19h16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+// Same arrow, but classed so the click choreography in fx.js can animate it
+// against a companion checkmark that draws in on success.
+const DL_ARROW_ICON = '<svg class="dl-arrow" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m0 0l-5-5m5 5l5-5M4 19h16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+const DL_CHECK_ICON = '<svg class="dl-check" viewBox="0 0 24 24" aria-hidden="true"><path d="M4.5 12.6l4.8 4.9L19.5 6.5" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+
+/**
+ * The one download button used across the site. Always points at the audited,
+ * server-side-streaming /download/file route — the choreography in fx.js only
+ * animates the button around the browser's own download, never intercepts it,
+ * so with no JavaScript this stays a plain working link.
+ *
+ * The arrow/check pair, label span and progress strip are the pieces fx.js
+ * drives; data-download is its hook.
+ */
+function downloadBtn(label) {
+  return `<a class="btn btn-primary btn-lg btn-download" href="/download/file" rel="nofollow" data-download`
+    + `><span class="dl-icon" aria-hidden="true">${DL_ARROW_ICON}${DL_CHECK_ICON}</span>`
+    + `<span class="dl-label">${label}</span>`
+    + `<span class="dl-progress" aria-hidden="true"></span></a>`;
+}
 
 const FEATURES = [
   ['<path d="M4 20V10m6 10V4m6 16v-7m4 7H2" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>',
@@ -31,13 +51,13 @@ function home(ctx, { stats, recentThreads, downloadMeta }) {
   const canViewForum = meetsTier(ctx.user, 'paid');
 
   const heroCta = canDownload
-    ? `<span class="star-border" data-magnet><a class="btn btn-primary btn-lg btn-download" href="/download/file" rel="nofollow">${DOWNLOAD_ICON}Download for Windows</a></span>`
+    ? `<span class="star-border" data-magnet>${downloadBtn('Download for Windows')}</span>`
     : ctx.user
       ? '<span class="star-border" data-magnet><a class="btn btn-primary btn-lg" href="/upgrade">Upgrade to download</a></span>'
       : '<span class="star-border" data-magnet><a class="btn btn-primary btn-lg" href="/auth/signup">Create a free account</a></span>';
 
   const bottomCta = canDownload
-    ? `<p class="reveal"><a class="btn btn-primary btn-lg btn-download" href="/download/file" rel="nofollow">${DOWNLOAD_ICON}Download for Windows</a></p>
+    ? `<p class="reveal">${downloadBtn('Download for Windows')}</p>
        <p class="fineprint mono reveal">SHA-256: ${esc(downloadMeta.sha256)}</p>`
     : ctx.user
       ? `<p class="reveal"><a class="btn btn-primary btn-lg" href="/upgrade">Upgrade to download</a></p>
@@ -123,7 +143,7 @@ function downloadPage(ctx, { downloadMeta }) {
   const canDownload = meetsTier(ctx.user, 'paid');
 
   const action = canDownload
-    ? `<a class="btn btn-primary btn-lg btn-download" href="/download/file" rel="nofollow">${DOWNLOAD_ICON}Download now</a>`
+    ? downloadBtn('Download now')
     : ctx.user
       ? `<span class="download-gate"><a class="btn btn-primary btn-lg" href="/upgrade">Upgrade to Paid</a></span>`
       : `<span class="download-gate">
@@ -149,7 +169,7 @@ function downloadPage(ctx, { downloadMeta }) {
   <div class="container narrow">
     <h1 class="section-title">Get GoyHub v${esc(ctx.appVersion)}</h1>
     <p class="muted">The installer is small, fast and clean. No bundled junk, no background miners, no nonsense.</p>
-    <div class="download-box">
+    <div class="download-box reveal">
       <div>
         <strong>${esc(downloadMeta.name)}</strong>
         <span class="muted"> · Windows 10/11 (64-bit), ${esc(downloadMeta.sizeKb)} KB</span>
@@ -162,10 +182,10 @@ function downloadPage(ctx, { downloadMeta }) {
     <pre class="mono code-block">SHA-256  ${esc(downloadMeta.sha256)}</pre>
     ${licenseBlock}
     <h2>Install in 3 steps</h2>
-    <ol class="steps">
-      <li>Run the downloaded installer and follow the prompts.</li>
-      <li>Sign in with your GoyHub account (or <a href="/auth/signup">create one free</a>).</li>
-      <li>Launch CS2. GoyHub picks up your matches automatically.</li>
+    <ol class="steps" data-stagger="90">
+      <li class="reveal">Run the downloaded installer and follow the prompts.</li>
+      <li class="reveal">Sign in with your GoyHub account (or <a href="/auth/signup">create one free</a>).</li>
+      <li class="reveal">Launch CS2. GoyHub picks up your matches automatically.</li>
     </ol>
     <h2>System requirements</h2>
     <ul class="muted"><li>Windows 10 or 11, 64-bit</li><li>2 GB RAM · 200 MB disk space</li><li>Counter-Strike 2 installed via Steam</li></ul>

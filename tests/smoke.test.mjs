@@ -303,6 +303,10 @@ test("public pages, forum, legal, gate, auth, captcha, admin, moderation, downlo
   assert.ok(!html.includes("/download/file") && html.includes("Create a free account"), "download hidden when logged out");
   html = await (await admin.get("/")).text();
   assert.ok(html.includes("/download/file"), "download shown when logged in");
+  // The click choreography in fx.js hangs off these hooks — losing them
+  // silently turns the animated button back into a plain link.
+  assert.ok(html.includes("data-download") && html.includes('class="dl-label"') && html.includes('class="dl-progress"'),
+    "download button carries the animation hooks");
 
   // Oversized body -> styled 413, no stack trace
   res = await anon.raw("POST", "/auth/login", { identifier: "x", password: "y".repeat(300 * 1024) });

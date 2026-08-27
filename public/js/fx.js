@@ -313,6 +313,92 @@
     }
   }
 
+  /* ---------- Download choreography ----------
+     The click is never intercepted: the browser downloads exactly as it would
+     with JS off, and this only animates the button around it. No percentage is
+     invented — a native download reports no bytes back, so the strip stays
+     indeterminate and the wording is honest: "Starting…" in flight, then
+     "Download started". The busy window doubles as a double-click guard, since
+     a second click would spend one of the downloads an IP gets per window. */
+  var downloadBtns = document.querySelectorAll('[data-download]');
+  if (downloadBtns.length) {
+    var DL_BUSY_MS = 1500;
+    var DL_DONE_MS = 4200;
+    var dlEscapes = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
+    var dlToastTimer = null;
+
+    function dlEscape(v) {
+      return String(v == null ? '' : v).replace(/[&<>"']/g, function (c) { return dlEscapes[c]; });
+    }
+
+    function dlSwapLabel(btn, text) {
+      var label = btn.querySelector('.dl-label');
+      if (!label) return;
+      if (reducedMotion) { label.textContent = text; return; }
+      btn.classList.add('is-swapping');
+      setTimeout(function () {
+        label.textContent = text;
+        btn.classList.remove('is-swapping');
+      }, 160);
+    }
+
+    function dlShowToast(name) {
+      var existing = document.querySelector('.dl-toast');
+      if (existing) existing.remove();
+      if (dlToastTimer) clearTimeout(dlToastTimer);
+
+      var toast = document.createElement('div');
+      toast.className = 'dl-toast';
+      toast.setAttribute('role', 'status');
+      toast.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4.5 12.6l4.8 4.9L19.5 6.5"'
+        + ' fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>'
+        + '<div><div class="dl-toast-title">Download started</div>'
+        + '<div class="dl-toast-body">' + dlEscape(name) + ' — check your browser downloads. '
+        + '<a href="/download">Verify the checksum</a> before installing.</div></div>'
+        + '<button type="button" class="dl-toast-close" aria-label="Dismiss">\u2715</button>';
+
+      function dismiss() {
+        toast.classList.add('out');
+        setTimeout(function () { toast.remove(); }, 300);
+      }
+      toast.querySelector('.dl-toast-close').addEventListener('click', dismiss);
+      document.body.appendChild(toast);
+      dlToastTimer = setTimeout(dismiss, 9000);
+    }
+
+    downloadBtns.forEach(function (btn) {
+      btn.addEventListener('click', function (e) {
+        // CSS holds the button shut for the mouse; keyboard activation still lands here.
+        if (btn.classList.contains('is-busy') || btn.classList.contains('is-done')) {
+          e.preventDefault();
+          return;
+        }
+        var label = btn.querySelector('.dl-label');
+        var idle = label ? label.textContent : 'Download';
+        var name = 'Your download';
+
+        btn.classList.add('is-busy');
+        btn.setAttribute('aria-busy', 'true');
+        btn.setAttribute('aria-disabled', 'true');
+        dlSwapLabel(btn, 'Starting\u2026');
+
+        setTimeout(function () {
+          btn.classList.remove('is-busy');
+          btn.classList.add('is-done');
+          btn.removeAttribute('aria-busy');
+          dlSwapLabel(btn, 'Download started');
+          dlShowToast(name);
+
+          setTimeout(function () {
+            btn.classList.remove('is-done');
+            btn.removeAttribute('aria-disabled');
+            dlSwapLabel(btn, idle);
+          }, DL_DONE_MS);
+        }, DL_BUSY_MS);
+      });
+    });
+  }
+
   /* ---------- Hero visibility gate ----------
      The aurora and particle loops only draw while the hero is on screen
      and the tab is visible. */

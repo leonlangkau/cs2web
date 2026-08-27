@@ -12,6 +12,11 @@ database_name = "goyhub"
 database_id = "1f2fd246-9cf1-46d0-a88a-629ad12f4243"
 
 [vars]
+# Host canonicalization. By default www.<domain> is 301-redirected to the
+# bare apex (goyhub.st). Set CANONICAL_WWW = "1" to make www the canonical
+# host instead (apex → www). Attach BOTH hostnames as Custom domains in the
+# Pages dashboard so the redirect target resolves.
+# CANONICAL_WWW = "0"
 # Registered entity shown on the legal pages. Replace before publishing —
 # until these are real, both legal pages show a "Setup required" banner.
 COMPANY_LEGAL_NAME = "goyhub"

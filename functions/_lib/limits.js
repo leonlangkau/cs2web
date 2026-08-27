@@ -19,6 +19,7 @@ const DEFAULTS = {
   burst: { limit: 240, windowMs: 60 * 1000 },         // per IP, ALL dynamic routes (flood control)
   flood: { limit: 5, windowMs: 10 * 60 * 1000 },      // per IP, burst BREACHES before auto-ban
   report: { limit: 5, windowMs: 60 * 60 * 1000 },     // per user
+  checkout: { limit: 10, windowMs: 60 * 60 * 1000 },  // per user (store invoices)
   reset: { limit: 3, windowMs: 60 * 60 * 1000 },      // per IP (password-reset emails)
   verify: { limit: 3, windowMs: 60 * 60 * 1000 },     // per user (verification emails)
 };
@@ -32,6 +33,7 @@ const ENV_KEYS = {
   burst: 'RATE_LIMIT_BURST',
   flood: 'RATE_LIMIT_FLOOD',
   report: 'RATE_LIMIT_REPORT',
+  checkout: 'RATE_LIMIT_CHECKOUT',
   reset: 'RATE_LIMIT_RESET',
   verify: 'RATE_LIMIT_VERIFY',
 };

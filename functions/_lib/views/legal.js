@@ -334,7 +334,26 @@ function terms(ctx) {
         <li><strong>Language.</strong> These Terms are written in English. Any translation is provided for convenience, and the English version prevails.</li>
       </ul>` },
 
-    { id: 's20', title: 'Contact', html: contactBlock(c, 'Questions about these Terms, or opting out of arbitration under section 17.7? Get in touch:') },
+    { id: 's20', title: 'Payments & memberships', html: `
+      <p>Paid membership is sold through the store on the Service. Prices are displayed in the currency shown
+      on the store page and are payable in cryptocurrency through our payment server. We do not accept card
+      payments, and we never receive or store your card, bank or wallet credentials.</p>
+      <p>A membership runs for the period stated on the plan you buy, beginning when your payment confirms. If
+      you already hold a paid membership, time you buy is <strong>added to the end</strong> of it rather than
+      replacing it. Memberships do <strong>not</strong> renew automatically: when the period ends the account
+      returns to the free tier until you buy again. A lifetime plan does not expire, but does not survive
+      closure of the account or a ban.</p>
+      <p><strong>Refunds.</strong> Cryptocurrency payments cannot be reversed by us. Once a payment has
+      confirmed, purchases are final except where a refund is required by consumer law that applies to you, or
+      where we choose to make one. If a payment confirms and your account is not upgraded, contact us with the
+      order reference and we will either complete the order or refund it.</p>
+      <p>We may change prices and what a plan includes at any time; a change never alters a membership already
+      bought. We may refuse or cancel an order, and may suspend or withdraw a membership without refund where
+      the account breaches these Terms — including sections 6 and 7.</p>
+      <p>Network (miner) fees are yours and are not part of the price. An underpaid, overpaid or late payment
+      may need to be settled by hand — contact us with the order reference shown on your order page.</p>` },
+
+    { id: 's21', title: 'Contact', html: contactBlock(c, 'Questions about these Terms, or opting out of arbitration under section 17.7? Get in touch:') },
   ];
 
   sections.summary = summaryBlock([
@@ -343,6 +362,7 @@ function terms(ctx) {
     '<strong>You may not tamper with, clone, copy, decompile or redistribute our software.</strong>',
     'Don\'t cheat, harass people, or upload anything illegal. We can remove content and ban accounts.',
     'You keep ownership of what you post, but you let us host and display it on the site.',
+    'Paid memberships are bought with cryptocurrency, do not auto-renew, and <strong>cannot be refunded once the payment confirms</strong> (section 20).',
     '<strong>Disputes go to binding private arbitration, individually — not to court and not as a class action.</strong> You can opt out within 30 days (section 17.7).',
     'The service is provided "as is", with no guarantee of uptime or fitness for any purpose.',
     'We are not affiliated with Valve Corporation.',
@@ -388,7 +408,7 @@ function privacy(ctx) {
       <ul>
         <li><strong>IP address</strong> of the connecting device.</li>
         <li><strong>Browser user-agent string</strong> (browser and operating system identifiers).</li>
-        <li><strong>Event type and timestamp</strong> — specifically for account sign-up, successful login, failed login, blocked login attempt on a banned account, logout, file download, and administrator actions.</li>
+        <li><strong>Event type and timestamp</strong> — specifically for account sign-up, successful login, failed login, blocked login attempt on a banned account, logout, file download, store orders being created, paid and completed, and administrator actions.</li>
         <li><strong>Session records</strong> — a hashed session identifier, the IP address and user agent the session was created from, and its creation and expiry times.</li>
         <li><strong>Sign-up IP and most recent login IP</strong>, stored on your account record.</li>
         <li><strong>The username or email address entered in a failed sign-in attempt</strong> — recorded alongside the IP address and browser even where no such account exists, so that repeated attempts against real accounts can be investigated.</li>
@@ -403,7 +423,16 @@ function privacy(ctx) {
       with information the application needs to function — such as your linked game profile identifier, match
       statistics it retrieves on your behalf, saved configuration profiles, application version, and diagnostic
       and crash information.</p>
-      <h3>3.5 Correspondence</h3>
+      <h3>3.5 Purchase data</h3>
+      <p>If you buy a membership from the store we create an order record and keep it. It holds the plan you
+      chose, its price, currency and duration, an order reference, the identifier of the invoice raised on our
+      payment server, the order's status, and the times it was created, updated and completed. Your account
+      record also stores which tier you are on and the date your membership ends.</p>
+      <p>Payment itself is handled by our own <span class="mono">BTCPay Server</span>. The only information we
+      pass to it is the order reference, the amount, and your username and account number so that the payment
+      can be matched to your account. We do not receive or store wallet addresses, transaction contents, card
+      numbers or bank details, and we do not use a third-party card processor.</p>
+      <h3>3.6 Correspondence</h3>
       <p>If you contact us by email or through a support channel, we keep the message, your contact details and
       our reply.</p>` },
 
@@ -475,6 +504,7 @@ function privacy(ctx) {
         <li><strong>Security and IP logs</strong> — retained for as long as we judge necessary to protect the Service and to detect repeat abuse and ban evasion, which may be indefinitely. This is deliberate: short retention would defeat the purpose of the logs.</li>
         <li><strong>Session records</strong> — deleted automatically when they expire, and immediately when you log out or are banned.</li>
         <li><strong>Forum content</strong> — retained indefinitely as part of the public record of the forum, including after an account is closed.</li>
+        <li><strong>Order records</strong> — kept as our record of what was bought and paid for, including after an account is closed, for accounting, tax and dispute-resolution purposes.</li>
         <li><strong>Correspondence</strong> — for as long as needed to handle your request and keep a record of it.</li>
       </ul>
       <p>Where we no longer need data in identifiable form, we may anonymise it and keep it as aggregate
@@ -543,6 +573,7 @@ function privacy(ctx) {
     'We log the <strong>IP address, browser and timestamp</strong> of every sign-up, login, failed login, logout and download, for security and abuse prevention.',
     'Forum posts are public and are indexed by search engines.',
     'We use strictly necessary cookies to keep you signed in. We don\'t sell your data.',
+    'If you buy a membership we keep an order record; payment runs on our own server and we never see your wallet or card details.',
     'We keep security logs for as long as we consider necessary to protect the Service.',
   ]);
 

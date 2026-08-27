@@ -14,7 +14,7 @@ const TERMS_COOKIE = 'ghterms';
 const SESSION_DAYS = 7;
 
 /** Bump when the Terms change materially — everyone is asked to accept again. */
-const TERMS_VERSION = '2026-08-21';
+const TERMS_VERSION = '2026-08-27';
 const TERMS_GATE_EXEMPT = new Set(['/terms', '/privacy', '/legal/accept']);
 
 /** btoa()/atob() only accept Latin1, but flash messages carry arbitrary text
@@ -416,7 +416,7 @@ function requireTier(c, minTier) {
     return c.html(errorPage(c.get('view'), {
       code: 403, title: 'Members only',
       message: `This area requires ${TIER_LABELS[minTier]} access or higher.`,
-      action: { href: '/upgrade', label: 'See upgrade options' },
+      action: { href: '/store', label: 'See membership plans' },
     }), 403);
   }
   return null;

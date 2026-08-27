@@ -54,17 +54,38 @@ Copy `.dev.vars.example` to `.dev.vars` and set `CAPTCHA_SECRET` and
 - Sign up / log in / log out; passwords hashed with **PBKDF2-HMAC-SHA256** (Web Crypto)
 - Sessions stored in D1 — only a hash of the token is persisted
 - **IP logging**: signup, login, failed login, blocked login, logout, download,
-  CAPTCHA failure, terms acceptance and every admin action are recorded with IP,
-  user agent and timestamp
+  CAPTCHA failure, terms acceptance, store orders and every admin action are
+  recorded with IP, user agent and timestamp
 
 ### Accounts & tiers
 - Access tiers `user < paid < developer < trial_admin < admin`; the forum and
   download are Paid+ benefits, staff tiers unlock the admin panel
 - `/profile`: tier + loader license, change password/email, per-session revoke,
   sign-out-everywhere, self-serve account deletion
-- `/upgrade`: env-configurable crypto checkout (honest "coming soon" until set)
+- `/store`: membership plans paid in Bitcoin through your own BTCPay Server
 - Loader API: `POST /api/loader/auth` (username+password → tier + signed
   license) and `POST /api/loader/verify` (server-side check, live tier)
+
+### Store
+- `/store` (aliased `/buy` and `/upgrade`) sells Paid membership as plans —
+  1/3/12 months and lifetime by default, overridable with `STORE_PLANS`
+- Checkout raises an invoice on **your own BTCPay Server** (Greenfield API) and
+  hands the buyer a private order page; the account flips to Paid the moment the
+  payment settles, no re-login needed
+- **Two independent settlement paths**: the signed `BTCPay-Sig` webhook, and the
+  buyer's order page re-checking the invoice — so checkout works before the
+  webhook is wired up, and a missed delivery can't strand a paid order
+- What a payment buys is decided by our own order row, never by the callback
+  payload; a settlement callback is also confirmed against BTCPay before it
+  grants anything
+- Fulfilment is idempotent (a redelivery can't stack a second month), adds time
+  on top of a running subscription, and never shortens a lifetime one or
+  downgrades a staff account
+- Renders honestly at every stage of setup: with nothing configured it shows the
+  plans and says checkout is being set up, with `CRYPTO_PAY_*` set it shows the
+  manual crypto fallback, and staff get a checklist of the settings still missing
+- **Admin → Orders**: the queue, with re-check-against-BTCPay, manual fulfil and
+  cancel
 
 ### Forum
 - Categories → threads → replies, with views, pinning, locking and pagination
@@ -75,8 +96,8 @@ Copy `.dev.vars.example` to `.dev.vars` and set `CAPTCHA_SECRET` and
 
 ### Admin backend (`/admin`, hidden as 404 for non-staff)
 - Dashboard (+ site-wide announcement banner), user management (ban/unban,
-  tier changes, delete), filterable IP log viewer with IP bans, report queue,
-  forum moderation
+  tier changes, delete), store order queue, filterable IP log viewer with IP
+  bans, report queue, forum moderation
 - Admin accounts' IPs are hidden from other staff in the panel
 
 ### Flood protection
@@ -113,10 +134,14 @@ Set as `[vars]`/secrets in `wrangler.toml` / the Pages dashboard (see DEPLOY.md)
 | `CAPTCHA_SECRET` | insecure dev value | **Required** — signs CAPTCHA challenges |
 | `CAPTCHA_DIFFICULTY` | `16` | Proof-of-work leading zero bits (8–24) |
 | `PBKDF2_ITERATIONS` | `100000` | Hash cost; watch the free 10ms CPU limit |
-| `RATE_LIMIT_*` | see wrangler.toml | login / signup / post / download / shout / report / burst / flood |
+| `RATE_LIMIT_*` | see wrangler.toml | login / signup / post / download / shout / report / checkout / burst / flood |
 | `AUTO_IP_BAN_MINUTES` | `60` | How long automatic flood bans last |
 | `SIGNUP_SURGE_LIMIT` | `30` | Site-wide signups per 10 min before registration pauses |
-| `CRYPTO_PAY_URL` / `CRYPTO_PAY_ADDRESSES` / `PAID_PRICE` | unset | Upgrade-page checkout config (page shows "coming soon" until set) |
+| `BTCPAY_URL` / `BTCPAY_STORE_ID` | unset | Your BTCPay Server and the store to invoice through |
+| `BTCPAY_API_KEY` | unset | **Secret** — Greenfield key (`cancreateinvoice` + `canviewinvoices`) |
+| `BTCPAY_WEBHOOK_SECRET` | unset | **Secret** — signs settlement callbacks; without it the webhook route refuses every delivery |
+| `STORE_PLANS` / `STORE_CURRENCY` | built-in catalogue / `USD` | Override plans without a deploy — `"id:Name:price:days,…"`, days `0` = lifetime |
+| `CRYPTO_PAY_URL` / `CRYPTO_PAY_ADDRESSES` | unset | Manual crypto fallback shown while BTCPay is being set up |
 | `EMAIL_PROVIDER` + `EMAIL_API_KEY` + `EMAIL_FROM` | unset (disabled) | Outbound email: `cloudflare` (Email Service SMTPS relay) / `resend` / `sendgrid` / `mailchannels` |
 | `TURNSTILE_SITE_KEY` / `TURNSTILE_SECRET_KEY` | unset | Optional Cloudflare Turnstile on signup |
 | `LICENSE_SECRET` | falls back to `CAPTCHA_SECRET` | Signs loader license tokens |

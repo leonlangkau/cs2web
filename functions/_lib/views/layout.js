@@ -1,5 +1,5 @@
 import { esc } from "./util.js";
-import { isStaff, meetsTier } from "../tiers.js";
+import { isStaff } from "../tiers.js";
 
 const BRAND_MARK = `<svg class="brand-mark" viewBox="0 0 32 32" aria-hidden="true">
   <path d="M16 4L26.4 22H5.6z" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linejoin="round"/>
@@ -56,7 +56,7 @@ function nav(ctx) {
       ${link('/', 'Home', ctx.path === '/')}
       ${link('/forum', 'Forum', ctx.path.startsWith('/forum'))}
       ${link('/download', 'Download', ctx.path.startsWith('/download'))}
-      ${meetsTier(ctx.user, 'paid') ? '' : link('/buy', 'Buy', ctx.path === '/buy' || ctx.path === '/upgrade')}
+      ${link('/store', 'Store', ctx.path.startsWith('/store') || ctx.path === '/buy' || ctx.path === '/upgrade')}
       ${isStaff(ctx.user) ? link('/admin', 'Admin', ctx.path.startsWith('/admin')) : ''}
     </nav>
     <div class="nav-auth">${THEME_TOGGLE}${authArea}</div>
@@ -67,8 +67,8 @@ function nav(ctx) {
 function footer(ctx) {
   const c = ctx.company;
   const accountLinks = ctx.user
-    ? '<a href="/profile">Profile</a><a href="/upgrade">Upgrade</a><a href="/forum/new">New thread</a>'
-    : '<a href="/auth/signup">Sign up</a><a href="/auth/login">Log in</a><a href="/upgrade">Upgrade</a>';
+    ? '<a href="/profile">Profile</a><a href="/store">Store</a><a href="/forum/new">New thread</a>'
+    : '<a href="/auth/signup">Sign up</a><a href="/auth/login">Log in</a><a href="/store">Store</a>';
   // Fall back to the trading name so an unfilled placeholder never ships site-wide.
   const operator = c.isPlaceholder ? c.tradingName : c.legalName;
 

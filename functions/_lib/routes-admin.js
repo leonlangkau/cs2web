@@ -5,13 +5,18 @@ import { requireAdmin, requireStaff, destroyUserSessions, audit, formBody, setFl
 import { TIERS, TIER_LABELS, STAFF_TIERS } from "./tiers.js";
 import { hashPassword } from "./crypto.js";
 import { setSetting, ANNOUNCEMENT_KEY } from "./settings.js";
+import * as store from "./store.js";
+import * as btcpay from "./btcpay.js";
+import { syncOrder, settleOrder } from "./routes-store.js";
 
 const LOGS_PER_PAGE = 50;
 const USERS_PER_PAGE = 25;
+const ORDERS_PER_PAGE = 40;
 const LOG_EVENTS = ['signup', 'login', 'login_failed', 'login_blocked', 'logout', 'download',
   'admin_action', 'captcha_failed', 'terms_accepted', 'password_changed', 'loader_auth', 'loader_auth_failed',
   'ip_autoban', 'signup_surge_blocked', 'post_reported', 'email_changed', 'account_deleted',
-  'password_reset_requested', 'password_reset', 'email_verified', 'shout_deleted'];
+  'password_reset_requested', 'password_reset', 'email_verified', 'shout_deleted',
+  'order_created', 'order_paid', 'order_fulfilled', 'order_failed'];
 
 // High-volume, low-signal events — routine traffic rather than something an
 // admin needs to review. Excluded by the "Important only" log filter so a
@@ -107,6 +112,8 @@ function register(app) {
       failedLogins24h: await one("SELECT COUNT(*) AS n FROM ip_logs WHERE event = 'login_failed' AND created_at > datetime('now', '-1 day')"),
       ipBans: await one('SELECT COUNT(*) AS n FROM ip_bans'),
       openReports: await one("SELECT COUNT(*) AS n FROM reports WHERE status = 'open'"),
+      paidOrders: await one("SELECT COUNT(*) AS n FROM orders WHERE status IN ('paid', 'fulfilled')"),
+      openOrders: await one("SELECT COUNT(*) AS n FROM orders WHERE status IN ('new', 'processing')"),
     };
     const { maskUser, maskLog } = await adminIpMask(c);
     const recentLogs = (await db.all('SELECT * FROM ip_logs ORDER BY id DESC LIMIT 12')).map(maskLog);
@@ -145,6 +152,91 @@ function register(app) {
     )).map(maskUser);
 
     return c.html(views.users(c.get('view'), { users, q, page, pages, total, tiers: TIERS, tierLabels: TIER_LABELS }));
+  });
+
+  // --- Store orders --------------------------------------------------------
+
+  const findOrder = async (c) => {
+    const id = intParam(c.req.param('id'), -1);
+    return id > 0 ? c.get('db').get('SELECT * FROM orders WHERE id = ?', id) : null;
+  };
+
+  app.get('/admin/orders', async (c) => {
+    const db = c.get('db');
+    const url = new URL(c.req.url);
+    const status = store.ORDER_STATUSES.includes(url.searchParams.get('status'))
+      ? url.searchParams.get('status') : '';
+
+    const where = status ? 'WHERE status = ?' : '';
+    const params = status ? [status] : [];
+    const total = Number((await db.get(`SELECT COUNT(*) AS n FROM orders ${where}`, ...params)).n);
+    const pages = Math.max(1, Math.ceil(total / ORDERS_PER_PAGE));
+    const page = Math.max(1, Math.min(pages, intParam(url.searchParams.get('page'))));
+    const rows = await db.all(
+      `SELECT * FROM orders ${where} ORDER BY id DESC LIMIT ? OFFSET ?`,
+      ...params, ORDERS_PER_PAGE, (page - 1) * ORDERS_PER_PAGE
+    );
+
+    return c.html(views.orders(c.get('view'), {
+      orders: rows, status, statuses: store.ORDER_STATUSES, page, pages, total,
+      live: btcpay.isConfigured(c.get('cfg')),
+    }));
+  });
+
+  // Re-asks BTCPay what an invoice is doing and applies the answer — the
+  // manual version of what a buyer's own order page does, for when a webhook
+  // was missed. Staff-level: it only ever applies BTCPay's own verdict.
+  app.post('/admin/orders/:id/refresh', async (c) => {
+    const order = await findOrder(c);
+    if (!order) return notFound(c, 'No such order.');
+    if (!btcpay.isConfigured(c.get('cfg'))) {
+      setFlash(c, 'error', 'BTCPay is not configured — nothing to re-check against.');
+      return c.redirect(backTo(c, '/admin/orders'), 302);
+    }
+    const updated = await syncOrder(c, order);
+    setFlash(c, 'success', updated.status === order.status
+      ? `Order ${order.order_ref} is still "${store.STATUS_LABELS[order.status]}".`
+      : `Order ${order.order_ref} is now "${store.STATUS_LABELS[updated.status]}".`);
+    return c.redirect(backTo(c, '/admin/orders'), 302);
+  });
+
+  // Grants the membership by hand — for a payment that arrived out of band
+  // (or one BTCPay lost). Full admin only: it hands out paid access.
+  app.post('/admin/orders/:id/fulfill', async (c) => {
+    const gate = requireAdmin(c);
+    if (gate) return gate;
+    const order = await findOrder(c);
+    if (!order) return notFound(c, 'No such order.');
+
+    const result = await settleOrder(c, order, `manual by ${c.get('user').username}`);
+    if (result.granted) {
+      await adminAudit(c, `fulfilled order ${order.order_ref} for ${order.username} (${order.product_name})`);
+      setFlash(c, 'success', `${order.username} is now Paid — order ${order.order_ref} fulfilled.`);
+    } else {
+      const why = {
+        already_settled: 'that order was already fulfilled',
+        staff_account: 'the buyer is a staff account, so their tier was left alone',
+        no_account: 'the buyer\'s account no longer exists',
+      }[result.reason] || 'nothing was granted';
+      await adminAudit(c, `fulfil attempt on order ${order.order_ref}: ${why}`);
+      setFlash(c, 'error', `Order ${order.order_ref}: ${why}.`);
+    }
+    return c.redirect(backTo(c, '/admin/orders'), 302);
+  });
+
+  app.post('/admin/orders/:id/cancel', async (c) => {
+    const gate = requireAdmin(c);
+    if (gate) return gate;
+    const order = await findOrder(c);
+    if (!order) return notFound(c, 'No such order.');
+    const moved = await store.setOrderStatus(c.get('db'), order.id, 'cancelled');
+    if (!moved) {
+      setFlash(c, 'error', `Order ${order.order_ref} can no longer be cancelled.`);
+      return c.redirect(backTo(c, '/admin/orders'), 302);
+    }
+    await adminAudit(c, `cancelled order ${order.order_ref} (${order.username || 'no account'})`);
+    setFlash(c, 'success', `Order ${order.order_ref} cancelled.`);
+    return c.redirect(backTo(c, '/admin/orders'), 302);
   });
 
   app.post('/admin/users/:id/ban', async (c) => {

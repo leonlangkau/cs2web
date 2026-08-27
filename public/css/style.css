@@ -664,6 +664,58 @@ textarea { resize: vertical; min-height: 90px; }
 .steps li { margin: 0.4rem 0; }
 .download-page ul { padding-left: 1.3rem; }
 
+/* ---------- Store & orders ---------- */
+.store-lede { max-width: 62ch; margin-bottom: 1.4rem; }
+.plan-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1.1rem; margin: 1.8rem 0 2.4rem; }
+.plan-card {
+  display: flex; flex-direction: column; gap: 0.35rem; position: relative;
+  background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius);
+  padding: 1.5rem 1.4rem; box-shadow: var(--shadow-sm); transition: transform 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
+}
+.plan-card:hover { transform: translateY(-4px); border-color: var(--accent); box-shadow: var(--shadow); }
+.plan-popular { border-color: var(--accent); box-shadow: var(--shadow); }
+.plan-flag {
+  position: absolute; top: -0.7rem; left: 1.4rem; background: var(--accent); color: #fff;
+  font-family: var(--mono); font-size: 0.62rem; font-weight: 700; letter-spacing: 0.12em;
+  text-transform: uppercase; padding: 0.18rem 0.55rem; border-radius: 5px;
+}
+.plan-name { font-size: 1.05rem; margin: 0; }
+.plan-price { display: flex; align-items: baseline; gap: 0.35rem; margin: 0.2rem 0 0; }
+.plan-amount { font-size: 2rem; font-weight: 900; line-height: 1.1; font-variant-numeric: tabular-nums; }
+.plan-currency { font-family: var(--mono); font-size: 0.78rem; color: var(--muted); letter-spacing: 0.08em; }
+.plan-term { font-family: var(--mono); font-size: 0.72rem; letter-spacing: 0.12em; text-transform: uppercase; color: var(--accent); }
+.plan-blurb { color: var(--muted); font-size: 0.9rem; flex: 1; margin-bottom: 1rem; }
+.plan-soon { color: var(--muted); font-size: 0.85rem; text-align: center; border: 1px dashed var(--border-strong); border-radius: 8px; padding: 0.5rem; }
+.store-columns { display: grid; grid-template-columns: 1fr 1fr; gap: 1.4rem; align-items: start; }
+.store-columns .profile-card { margin-bottom: 0; }
+.store-page .steps { margin-bottom: 0.9rem; }
+.store-setup { border-color: var(--border-strong); margin-top: 1.4rem; }
+
+.order-head { display: flex; justify-content: space-between; align-items: center; gap: 1rem; flex-wrap: wrap; margin-bottom: 1rem; }
+.order-amount { font-size: 1.5rem; font-weight: 800; font-variant-numeric: tabular-nums; }
+.order-steps { list-style: none; display: flex; gap: 1.4rem; flex-wrap: wrap; margin: 0 0 1.2rem; padding: 0; }
+.order-steps li { color: var(--muted); font-size: 0.9rem; display: flex; align-items: center; gap: 0.45rem; }
+.order-steps li::before {
+  content: ""; width: 14px; height: 14px; border-radius: 50%; flex-shrink: 0;
+  border: 2px solid var(--border-strong); background: transparent;
+}
+.order-steps li.step-done { color: var(--success); font-weight: 600; }
+.order-steps li.step-done::before { border-color: var(--success); background: var(--success); }
+
+/* Order status badges — same palette as the moderation tags */
+.tag-order-new, .tag-order-processing { background: #f0eade; color: var(--warn); }
+.tag-order-paid { background: #e1e7f6; color: var(--accent); }
+.tag-order-fulfilled { background: #e2efe9; color: var(--success); }
+.tag-order-expired, .tag-order-cancelled { background: #e8eaee; color: var(--muted); }
+.tag-order-invalid { background: #f7e3e5; color: var(--danger); }
+[data-theme="dark"] .tag-order-new,
+[data-theme="dark"] .tag-order-processing { background: rgba(224, 168, 60, 0.18); color: var(--warn); }
+[data-theme="dark"] .tag-order-paid { background: var(--accent-soft); color: var(--accent); }
+[data-theme="dark"] .tag-order-fulfilled { background: rgba(62, 203, 130, 0.16); color: var(--success); }
+[data-theme="dark"] .tag-order-expired,
+[data-theme="dark"] .tag-order-cancelled { background: var(--panel-2); color: var(--muted); }
+[data-theme="dark"] .tag-order-invalid { background: rgba(255, 107, 122, 0.16); color: var(--danger); }
+
 /* ---------- Legal pages ---------- */
 .legal-layout { display: grid; grid-template-columns: 250px 1fr; gap: 3rem; align-items: start; }
 .legal-toc {
@@ -796,6 +848,14 @@ tbody tr.row-banned:hover td { background: #f8e7e9; }
 [data-theme="dark"] .tag-loader_auth_failed,
 [data-theme="dark"] .tag-ip_autoban { background: rgba(255, 107, 122, 0.16); color: var(--danger); }
 [data-theme="dark"] .tag-signup_surge_blocked { background: rgba(224, 168, 60, 0.18); color: var(--warn); }
+.tag-order_created { background: #e1e7f6; color: var(--accent); }
+.tag-order_paid { background: #e2ebfd; color: var(--accent-deep); }
+.tag-order_fulfilled { background: #e2efe9; color: var(--success); }
+.tag-order_failed { background: #f7e3e5; color: var(--danger); }
+[data-theme="dark"] .tag-order_created,
+[data-theme="dark"] .tag-order_paid { background: var(--accent-soft); color: var(--accent); }
+[data-theme="dark"] .tag-order_fulfilled { background: rgba(62, 203, 130, 0.16); color: var(--success); }
+[data-theme="dark"] .tag-order_failed { background: rgba(255, 107, 122, 0.16); color: var(--danger); }
 
 .filter-bar { display: flex; gap: 0.6rem; align-items: center; margin-bottom: 1.3rem; flex-wrap: wrap; }
 .filter-bar input[type="search"] { max-width: 320px; }
@@ -839,6 +899,8 @@ tbody tr.row-banned:hover td { background: #f8e7e9; }
   .forum-sidebar { position: static; }
   .admin-columns { grid-template-columns: 1fr; }
   .stat-cards { grid-template-columns: repeat(2, 1fr); }
+  .plan-grid { grid-template-columns: repeat(2, 1fr); }
+  .store-columns { grid-template-columns: 1fr; }
   .footer-grid { grid-template-columns: 1fr 1fr 1fr; }
   .legal-layout { grid-template-columns: 1fr; gap: 1.6rem; }
   .legal-toc { position: static; }
@@ -851,6 +913,7 @@ tbody tr.row-banned:hover td { background: #f8e7e9; }
   .hero-cards { display: none; }
   .stats-grid { grid-template-columns: repeat(2, 1fr); }
   .features-grid { grid-template-columns: 1fr; }
+  .plan-grid { grid-template-columns: 1fr; }
   .recent-threads { grid-template-columns: 1fr; }
   .category-card { grid-template-columns: 1fr; gap: 0.6rem; }
   .category-latest { border-left: 0; padding-left: 0; }

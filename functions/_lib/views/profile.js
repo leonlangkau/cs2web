@@ -23,7 +23,7 @@ function profile(ctx, { account, stats, license, isPaid, sessions = [], currentS
   const upgradeNote = isPaid
     ? ''
     : `<p class="muted">You are on the Free tier — the forum and app download are Paid benefits.
-        <a href="/upgrade">See upgrade options</a>.</p>`;
+        <a href="/store">See membership plans</a>.</p>`;
 
   const body = `
 <div class="section profile-page">

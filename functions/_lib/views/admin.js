@@ -1,6 +1,7 @@
 import { page } from "./layout.js";
 import { esc, timeAgo, map, pagination } from "./util.js";
 import { TIER_LABELS, STAFF_TIERS, isFullAdmin } from "../tiers.js";
+import { STATUS_LABELS, planDuration } from "../store.js";
 
 const tierTag = (tier) => tier && tier !== 'user'
   ? ` <span class="tag tag-tier tag-tier-${esc(tier)}">${esc(TIER_LABELS[tier] || tier)}</span>` : '';
@@ -14,6 +15,7 @@ function head(ctx, heading) {
   <nav class="admin-tabs" aria-label="Admin sections">
     ${tab('/admin', 'Dashboard', p === '/admin')}
     ${tab('/admin/users', 'Users', p.startsWith('/admin/users'))}
+    ${tab('/admin/orders', 'Orders', p.startsWith('/admin/orders'))}
     ${tab('/admin/logs', 'IP logs', p.startsWith('/admin/logs'))}
     ${tab('/admin/reports', 'Reports', p.startsWith('/admin/reports'))}
     ${tab('/admin/forum', 'Forum', p.startsWith('/admin/forum'))}
@@ -58,6 +60,8 @@ function dashboard(ctx, { stats, recentLogs, recentUsers }) {
       ${card(stats.banned, 'Banned users', stats.banned > 0)}
       ${card(stats.ipBans, 'IP bans', stats.ipBans > 0)}
       ${card(stats.openReports, 'Open reports', stats.openReports > 0)}
+      ${card(stats.paidOrders, 'Paid orders')}
+      ${card(stats.openOrders, 'Orders awaiting payment')}
     </div>
     <div class="admin-columns">
       <div class="panel">
@@ -187,6 +191,62 @@ function users(ctx, { users: rows, q, page: current, pages, total, tiers, tierLa
   </div>
 </div>`;
   return page(ctx, { title: 'Admin · Users', body });
+}
+
+/**
+ * Store orders. Read-only for staff; fulfilling or cancelling by hand is full
+ * admin, because both move money-shaped state — "fulfil" grants a paid
+ * membership without a payment ever having been seen.
+ */
+function orders(ctx, { orders: rows, status, statuses, page: current, pages, total, live }) {
+  const csrf = `<input type="hidden" name="_csrf" value="${esc(ctx.csrfToken)}">`;
+  const canSettle = isFullAdmin(ctx.user);
+
+  const row = (o) => `<tr class="${o.status === 'fulfilled' ? 'row-resolved' : ''}">
+    <td><a class="mono" href="/store/order/${esc(o.order_ref)}" title="${esc(o.order_ref)}">${esc(o.order_ref.slice(0, 8))}…</a></td>
+    <td>${o.username
+      ? `<a class="member-link" href="/u/${encodeURIComponent(o.username)}">${esc(o.username)}</a>`
+      : '<span class="muted">(deleted)</span>'}</td>
+    <td>${esc(o.product_name)}<div class="muted">${esc(planDuration(o.days === null || o.days === undefined ? null : Number(o.days)))}</div></td>
+    <td class="nowrap">${esc(o.amount)} ${esc(o.currency)}</td>
+    <td><span class="tag tag-order tag-order-${esc(o.status)}">${esc(STATUS_LABELS[o.status] || o.status)}</span></td>
+    <td class="mono detail-cell" title="${esc(o.invoice_id || '')}">${esc(o.invoice_id || '—')}</td>
+    <td class="muted nowrap">${esc(timeAgo(o.created_at))}</td>
+    <td class="actions-cell">
+      ${live && o.invoice_id && o.status !== 'fulfilled' ? `<form method="post" action="/admin/orders/${esc(o.id)}/refresh" class="inline-form">${csrf}
+        <button class="btn btn-ghost btn-xs" type="submit">Re-check</button></form>` : ''}
+      ${canSettle && o.status !== 'fulfilled' ? `<form method="post" action="/admin/orders/${esc(o.id)}/fulfill" class="inline-form"
+        data-confirm="Grant this membership without a confirmed payment?">${csrf}
+        <button class="btn btn-warn btn-xs" type="submit">Fulfil</button></form>` : ''}
+      ${canSettle && o.status !== 'fulfilled' && o.status !== 'cancelled' ? `<form method="post" action="/admin/orders/${esc(o.id)}/cancel" class="inline-form">${csrf}
+        <button class="btn btn-ghost btn-xs" type="submit">Cancel</button></form>` : ''}
+    </td></tr>`;
+
+  const body = `
+<div class="section admin-page">
+  <div class="container">
+    ${head(ctx, 'Orders')}
+    ${live ? '' : `<p class="muted">BTCPay is not configured, so no new invoices can be created —
+      see the setup checklist on the <a href="/store">store page</a>.</p>`}
+    <form class="filter-bar" method="get" action="/admin/orders">
+      <select name="status" aria-label="Filter by status">
+        <option value="">All statuses</option>
+        ${map(statuses, (s) => `<option value="${esc(s)}" ${status === s ? 'selected' : ''}>${esc(STATUS_LABELS[s] || s)}</option>`)}
+      </select>
+      <button class="btn btn-outline btn-sm" type="submit">Filter</button>
+      ${status ? '<a class="btn btn-ghost btn-sm" href="/admin/orders">Clear</a>' : ''}
+      <span class="muted">${esc(total)} order${total === 1 ? '' : 's'}</span>
+    </form>
+    <div class="panel"><div class="table-wrap"><table>
+      <thead><tr><th>Order</th><th>User</th><th>Plan</th><th>Amount</th><th>Status</th><th>Invoice</th><th>Placed</th><th></th></tr></thead>
+      <tbody>${rows.length
+        ? map(rows, row)
+        : '<tr><td colspan="8" class="muted center">No orders yet.</td></tr>'}</tbody>
+    </table></div></div>
+    ${pagination(current, pages, (n) => `/admin/orders?${new URLSearchParams({ ...(status ? { status } : {}), page: String(n) })}`)}
+  </div>
+</div>`;
+  return page(ctx, { title: 'Admin · Orders', body });
 }
 
 function logs(ctx, { logs: rows, q, event, events, important, page: current, pages, total, ipBans }) {
@@ -366,4 +426,4 @@ function forumAdmin(ctx, { categories, threads }) {
   return page(ctx, { title: 'Admin · Forum', body });
 }
 
-export { dashboard, users, logs, reports, forumAdmin };
+export { dashboard, users, orders, logs, reports, forumAdmin };

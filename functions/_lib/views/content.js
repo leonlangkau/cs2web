@@ -11,10 +11,14 @@ const FAQ_ITEMS = [
      same public data the game client exposes to everyone. No VAC or trust-factor risk.`],
   ['What does a free account get me?',
     `A free account lets you sign in on the site and in the app. The community forum and the app download
-     are Paid-member benefits — see the upgrade page for what's included.`],
+     are Paid-member benefits — the store lists what's included.`],
   ['How do I upgrade to Paid?',
-    `Head to the upgrade page while signed in. Crypto checkout is being set up; until it goes live the page
-     shows exactly how to complete an upgrade with the support team.`],
+    `Pick a plan in the store while signed in and pay the invoice in Bitcoin — your account flips to Paid
+     as soon as the payment confirms. Bitcoin checkout runs on our own BTCPay Server, which is still being
+     set up; until it opens, the store page shows the current way to buy.`],
+  ['Can I pay in something other than Bitcoin?',
+    `Not right now. Bitcoin (on-chain or Lightning) through our own BTCPay Server is the only method — no
+     card processor sits between you and us, and no card details ever reach the site.`],
   ['How does the app know I\'m a Paid member?',
     `The desktop app signs in with your website username and password and receives a short-lived signed
      license that proves your tier. Upgrades, downgrades and bans apply within one launch — there is no

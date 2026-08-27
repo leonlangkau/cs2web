@@ -22,3 +22,14 @@ ADMIN_PASSWORD=choose-a-strong-password
 # Cloudflare Turnstile (optional). Cloudflare's public ALWAYS-PASS test keys:
 # TURNSTILE_SITE_KEY=1x00000000000000000000AA
 # TURNSTILE_SECRET_KEY=1x0000000000000000000000000000000AA
+
+# Store checkout against a BTCPay Server. All four are needed before the pay
+# button goes live; without them the store still renders and says checkout is
+# being set up. The smoke tests stub BTCPay out, so none of this is needed to
+# run `npm test`.
+# BTCPAY_URL=https://btcpay.example.com
+# BTCPAY_STORE_ID=your-store-id
+# BTCPAY_API_KEY=greenfield-api-key
+# BTCPAY_WEBHOOK_SECRET=webhook-signing-secret
+# STORE_CURRENCY=USD
+# STORE_PLANS=1m:1 Month:9.99:30,lifetime:Lifetime:149.99:0

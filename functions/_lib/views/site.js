@@ -1,5 +1,5 @@
 import { page } from "./layout.js";
-import { esc, timeAgo, map, emailLink } from "./util.js";
+import { esc, timeAgo, map } from "./util.js";
 import { meetsTier, tierOf, TIER_LABELS } from "../tiers.js";
 
 const DOWNLOAD_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m0 0l-5-5m5 5l5-5M4 19h16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
@@ -32,26 +32,26 @@ function home(ctx, { stats, recentThreads, downloadMeta }) {
   const heroCta = canDownload
     ? `<a class="btn btn-primary btn-lg btn-download" href="/download/file" rel="nofollow">${DOWNLOAD_ICON}Download for Windows</a>`
     : ctx.user
-      ? '<a class="btn btn-primary btn-lg" href="/upgrade">Upgrade to download</a>'
+      ? '<a class="btn btn-primary btn-lg" href="/store">Upgrade to download</a>'
       : '<a class="btn btn-primary btn-lg" href="/auth/signup">Create a free account</a>';
 
   const heroMeta = canDownload
     ? `v${esc(ctx.appVersion)} · ${esc(downloadMeta.sizeKb)} KB · <span class="mono">SHA-256 ${esc(downloadMeta.sha256.slice(0, 12))}…</span>`
     : ctx.user
-      ? `v${esc(ctx.appVersion)} · Windows 10/11 · <a href="/upgrade">Paid members only — see upgrade options</a>`
+      ? `v${esc(ctx.appVersion)} · Windows 10/11 · <a href="/store">Paid members only — see the store</a>`
       : `v${esc(ctx.appVersion)} · Windows 10/11 · <a href="/auth/login?next=%2Fdownload">Already a member? Log in</a>`;
 
   const bottomCta = canDownload
     ? `<p class="reveal"><a class="btn btn-primary btn-lg btn-download" href="/download/file" rel="nofollow">${DOWNLOAD_ICON}Download GoyHub v${esc(ctx.appVersion)}</a></p>
        <p class="fineprint mono reveal">SHA-256: ${esc(downloadMeta.sha256)}</p>`
     : ctx.user
-      ? `<p class="reveal"><a class="btn btn-primary btn-lg" href="/upgrade">See upgrade options</a></p>
+      ? `<p class="reveal"><a class="btn btn-primary btn-lg" href="/store">See membership plans</a></p>
          <p class="fineprint reveal">The download is a Paid membership benefit.</p>`
       : `<p class="reveal"><a class="btn btn-primary btn-lg" href="/auth/signup">Sign up to download</a></p>
          <p class="fineprint reveal">Downloads are a Paid membership benefit. Already have an account? <a href="/auth/login?next=%2Fdownload">Log in</a>.</p>`;
 
   const recent = !canViewForum
-    ? '<p class="muted reveal">The forum is a Paid membership benefit. <a href="/upgrade">See upgrade options</a>.</p>'
+    ? '<p class="muted reveal">The forum is a Paid membership benefit. <a href="/store">See membership plans</a>.</p>'
     : recentThreads.length === 0
       ? '<p class="muted reveal">No threads yet — <a href="/forum">be the first to post</a>.</p>'
       : map(recentThreads, (t) => `<a class="recent-thread reveal" href="/forum/t/${esc(t.id)}">
@@ -129,7 +129,7 @@ function downloadPage(ctx, { downloadMeta }) {
   const action = canDownload
     ? `<a class="btn btn-primary btn-lg btn-download" href="/download/file" rel="nofollow">${DOWNLOAD_ICON}Download now</a>`
     : ctx.user
-      ? `<span class="download-gate"><a class="btn btn-primary btn-lg" href="/upgrade">Upgrade to Paid</a></span>`
+      ? `<span class="download-gate"><a class="btn btn-primary btn-lg" href="/store">Upgrade to Paid</a></span>`
       : `<span class="download-gate">
            <a class="btn btn-primary btn-lg" href="/auth/signup">Sign up free</a>
            <a class="btn btn-outline btn-lg" href="/auth/login?next=%2Fdownload">Log in</a>
@@ -138,7 +138,7 @@ function downloadPage(ctx, { downloadMeta }) {
   const gateNote = canDownload
     ? ''
     : ctx.user
-      ? '<div class="muted">The download is a Paid-tier benefit. <a href="/upgrade">See upgrade options</a>.</div>'
+      ? '<div class="muted">The download is a Paid-tier benefit. <a href="/store">See membership plans</a>.</div>'
       : '<div class="muted">Downloads are available to Paid members. Signing up is free — upgrading unlocks the download.</div>';
 
   const licenseBlock = canDownload ? `
@@ -201,74 +201,4 @@ function errorPage(ctx, { code, title, message, action }) {
   return page(ctx, { title, body });
 }
 
-/**
- * Paid-membership upgrade page. There is no automated checkout yet — the
- * `pay` config (from env vars) decides what this shows: a hosted checkout
- * link, manual crypto addresses, or a "coming soon" note. Never fakes a
- * payment flow that doesn't exist.
- */
-function upgradePage(ctx, { pay }) {
-  const benefits = `
-    <ul class="upgrade-benefits">
-      <li><strong>Community forum</strong> — full access to every category, threads, replies and the shoutbox.</li>
-      <li><strong>App download</strong> — the GoyHub desktop app for Windows, with updates.</li>
-      <li><strong>Loader license</strong> — a signed token so the app knows your account is Paid.</li>
-      <li><strong>Priority support</strong> — Paid member reports get looked at first.</li>
-    </ul>`;
-
-  let payBlock;
-  if (pay.url) {
-    payBlock = `
-      <a class="btn btn-primary btn-lg" href="${esc(pay.url)}" rel="noopener nofollow">Pay with crypto</a>
-      <p class="fineprint">Checkout is handled by our payment processor. Your account upgrades
-        automatically once the payment confirms. Paying from a different service? Include your
-        username <span class="mono">${esc(ctx.user ? ctx.user.username : 'your-username')}</span> in the memo.</p>`;
-  } else if (pay.addresses.length > 0) {
-    payBlock = `
-      <p>Send the payment in any listed coin, then email
-        ${emailLink(ctx.company.contactEmail)} with the
-        <strong>transaction ID</strong> and your username
-        <span class="mono">${esc(ctx.user ? ctx.user.username : 'your-username')}</span> — an admin activates
-        Paid on your account after confirmation. Automatic activation is coming soon.</p>
-      <div class="pay-addresses">${map(pay.addresses, (a) => `
-        <div class="pay-address"><span class="pay-coin">${esc(a.coin)}</span>
-          <span class="mono">${esc(a.address)}</span></div>`)}
-      </div>`;
-  } else {
-    payBlock = `
-      <p class="muted">Automatic crypto payments are being set up and will appear here soon.
-        Until then, contact ${emailLink(ctx.company.contactEmail)}
-        ${ctx.user ? `from your account email with your username <span class="mono">${esc(ctx.user.username)}</span>` : ''}
-        to upgrade.</p>`;
-  }
-
-  const accountNote = ctx.user
-    ? (meetsTier(ctx.user, 'paid')
-      ? `<div class="flash flash-success upgrade-note">Your account is already
-          <strong>${esc(TIER_LABELS[tierOf(ctx.user)])}</strong> — everything below is unlocked.</div>`
-      : '')
-    : `<p class="muted"><a href="/auth/signup">Create a free account</a> first — upgrades attach to your username.</p>`;
-
-  const body = `
-<div class="section upgrade-page">
-  <div class="container narrow">
-    <p class="section-kicker">// MEMBERSHIP</p>
-    <h1 class="section-title">Upgrade to Paid</h1>
-    ${accountNote}
-    <div class="panel profile-card">
-      <h2>What you get</h2>
-      ${benefits}
-      ${pay.price ? `<p class="upgrade-price"><strong>${esc(pay.price)}</strong></p>` : ''}
-    </div>
-    <div class="panel profile-card">
-      <h2>Pay with crypto</h2>
-      ${payBlock}
-    </div>
-    <p class="fineprint">Payments are subject to our <a href="/terms">Terms &amp; Conditions</a>.
-      Tier changes are logged. Need help? ${emailLink(ctx.company.contactEmail)}.</p>
-  </div>
-</div>`;
-  return page(ctx, { title: 'Upgrade', body });
-}
-
-export { home, downloadPage, errorPage, upgradePage, DOWNLOAD_ICON };
+export { home, downloadPage, errorPage, DOWNLOAD_ICON };

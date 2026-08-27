@@ -46,15 +46,36 @@ RATE_LIMIT_FLOOD = "5"
 AUTO_IP_BAN_MINUTES = "60"
 SIGNUP_SURGE_LIMIT = "30"
 
-# Crypto payments (the /upgrade page). All optional — with none set the page
-# shows an honest "payments coming soon" note with the support contact.
-#   CRYPTO_PAY_URL        hosted checkout link (Coinbase Commerce, NOWPayments,
-#                         BTCPay, …) once you set one up — shown as the pay button
-#   CRYPTO_PAY_ADDRESSES  manual fallback, e.g. "BTC:bc1qxy...,ETH:0xab...,LTC:ltc1..."
-#   PAID_PRICE            display string, e.g. "$10 / month"
+# Store (/store, with /buy and /upgrade as aliases).
+#
+# Plans live in functions/_lib/store.js. STORE_PLANS overrides them without a
+# deploy — "id:Name:price:days,…", days 0 meaning lifetime. An entry that does
+# not parse is dropped rather than shipped as a broken price.
+# STORE_PLANS = "1m:1 Month:9.99:30,3m:3 Months:24.99:90,12m:12 Months:79.99:365,lifetime:Lifetime:149.99:0"
+# STORE_CURRENCY = "USD"       # what BTCPay prices the invoice in
+# RATE_LIMIT_CHECKOUT = "10"   # invoices per account per hour
+#
+# Bitcoin checkout runs on your own BTCPay Server. It stays off — and the store
+# page says so plainly — until all four settings exist. The two secrets belong
+# in the Pages dashboard, never in this file:
+#   BTCPAY_URL             https://btcpay.example.com               (plain var)
+#   BTCPAY_STORE_ID        the store id from its BTCPay settings URL (plain var)
+#   BTCPAY_API_KEY         SECRET — API key with the permissions
+#                          btcpay.store.cancreateinvoice + btcpay.store.canviewinvoices
+#   BTCPAY_WEBHOOK_SECRET  SECRET — the webhook's signing secret. Without it the
+#                          callback route refuses every delivery, so settlement
+#                          falls back to the buyer's own order page re-checking.
+# Point the BTCPay webhook at https://<your-domain>/api/btcpay/webhook and give
+# it InvoiceSettled, InvoiceProcessing, InvoiceExpired and InvoiceInvalid.
+# BTCPAY_URL = ""
+# BTCPAY_STORE_ID = ""
+#
+# Manual fallback shown while BTCPay is still being set up (either turns it on):
+#   CRYPTO_PAY_URL        hosted checkout link (Coinbase Commerce, NOWPayments…)
+#   CRYPTO_PAY_ADDRESSES  "BTC:bc1qxy...,ETH:0xab...,LTC:ltc1..." — pay, then
+#                         email support with the transaction ID
 # CRYPTO_PAY_URL = ""
 # CRYPTO_PAY_ADDRESSES = ""
-# PAID_PRICE = ""
 
 # Outbound email (password reset + verification) via Cloudflare's Email
 # Service SMTPS relay (smtp.mx.cloudflare.net:465, spoken natively over
@@ -95,6 +116,8 @@ DOWNLOAD_URL = "downloader.goyhub.st/xd13/QeRc7Al.exe"
 #                    verifies a member's tier with. Falls back to
 #                    CAPTCHA_SECRET if unset — set a dedicated one in
 #                    production so rotating one doesn't invalidate the other.
+#   BTCPAY_API_KEY   BTCPay Greenfield API key (store checkout)
+#   BTCPAY_WEBHOOK_SECRET  signs BTCPay's settlement callbacks
 
 # Optional: serve a real, multi-megabyte installer from R2 instead of the copy
 # embedded in the Function bundle. Create the bucket, upload the zip under its

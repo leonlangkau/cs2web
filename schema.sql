@@ -156,3 +156,32 @@ CREATE TABLE IF NOT EXISTS ip_bans (
   expires_at INTEGER,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
+
+-- Store orders. One row per checkout attempt, created BEFORE the payment
+-- processor is called so a settled invoice always has somewhere to land.
+-- `days` (NULL = lifetime) and `amount` are copied from the catalog at
+-- purchase time: what an order grants is decided here, never by the webhook
+-- payload, and a later price change never rewrites an existing order.
+-- 'fulfilled' and 'cancelled' are terminal — a late "expired" callback can't
+-- take back membership someone paid for.
+CREATE TABLE IF NOT EXISTS orders (
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  order_ref    TEXT NOT NULL UNIQUE,
+  user_id      INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  username     TEXT,
+  product_id   TEXT NOT NULL,
+  product_name TEXT NOT NULL,
+  amount       TEXT NOT NULL,
+  currency     TEXT NOT NULL,
+  days         INTEGER,
+  invoice_id   TEXT,
+  checkout_url TEXT,
+  status       TEXT NOT NULL DEFAULT 'new'
+               CHECK (status IN ('new','processing','paid','fulfilled','expired','invalid','cancelled')),
+  fulfilled_at TEXT,
+  created_at   TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at   TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_orders_user ON orders(user_id);
+CREATE INDEX IF NOT EXISTS idx_orders_status ON orders(status);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_orders_invoice ON orders(invoice_id);

@@ -57,6 +57,8 @@ No build command is needed — the Functions are committed ready to run.
 | `CAPTCHA_SECRET` | a long random string |
 | `ADMIN_PASSWORD` | password for the seeded admin account |
 | `ADMIN_USERNAME` | optional, defaults to `admin` |
+| `BTCPAY_API_KEY` | optional — store checkout, see below |
+| `BTCPAY_WEBHOOK_SECRET` | optional — store checkout, see below |
 
 Generate a CAPTCHA secret:
 
@@ -87,6 +89,45 @@ Then log in at `/auth/login` with the admin credentials from step 3 and change
 the password.
 
 ---
+
+## Turning on store checkout (BTCPay Server)
+
+The store at `/store` renders its plans with no configuration at all — it just
+says checkout is being set up, and no pay button appears. Four settings switch
+Bitcoin checkout on:
+
+1. **In BTCPay** (your own instance), open the store you want to sell through.
+   Its id is in the settings URL: `/stores/<store-id>/settings`.
+2. **Account → API Keys → Generate key**, scoped to that store with
+   `btcpay.store.cancreateinvoice` and `btcpay.store.canviewinvoices`.
+3. **Store → Settings → Webhooks → Create webhook**
+   - Payload URL: `https://<your-domain>/api/btcpay/webhook`
+   - Events: `InvoiceSettled`, `InvoiceProcessing`, `InvoiceExpired`,
+     `InvoiceInvalid`
+   - Copy the **signing secret** it shows you.
+4. **In Pages → Settings → Variables and Secrets**:
+
+| Name | Type | Value |
+| --- | --- | --- |
+| `BTCPAY_URL` | Variable | `https://btcpay.example.com` |
+| `BTCPAY_STORE_ID` | Variable | the store id from step 1 |
+| `BTCPAY_API_KEY` | **Secret** | the key from step 2 |
+| `BTCPAY_WEBHOOK_SECRET` | **Secret** | the signing secret from step 3 |
+
+Redeploy. Signed-in members can now buy a plan; the account flips to Paid the
+moment the invoice settles, and the buyer's tier updates on their next request
+without a re-login.
+
+**Order this in whatever sequence suits you.** With the first three set but no
+webhook secret, checkout still works: the buyer's own order page re-checks the
+invoice against BTCPay and settles it there. The webhook only makes settlement
+instant instead of waiting for them to come back. Staff see exactly which of
+the four settings are still missing in a panel on `/store`.
+
+Prices come from `functions/_lib/store.js`; `STORE_PLANS` overrides them from
+the dashboard without a deploy (see `wrangler.toml` for the format). Orders are
+listed under **Admin → Orders**, where a full admin can re-check one against
+BTCPay, fulfil it by hand, or cancel it.
 
 ## Attaching your custom domain
 
@@ -186,4 +227,5 @@ Other issues:
 | Live logs | `npm run tail` |
 | Query the database | `npx wrangler d1 execute goyhub --remote --command "SELECT COUNT(*) FROM users"` |
 | Re-apply schema | `npm run db:remote` |
+| Recent store orders | `npx wrangler d1 execute goyhub --remote --command "SELECT order_ref, username, product_name, status FROM orders ORDER BY id DESC LIMIT 20"` |
 | Rollback | Dashboard → Deployments → **Rollback** |

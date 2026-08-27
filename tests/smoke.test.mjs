@@ -1499,6 +1499,15 @@ test("btcpay: checkout creates an invoice and a settled webhook grants Paid (ide
     assert.deepEqual(await res.json(), { ok: false, error: "mismatch" }, "amount mismatch is not credited");
     const notCredited = await db.get("SELECT credited_at FROM payments WHERE invoice_id = 'INV999'");
     assert.equal(notCredited.credited_at, null, "mismatched invoice left uncredited");
+
+    // Staff have nothing to buy — checkout must not take their money or create
+    // an invoice. (Guards for lifetime members work the same way.)
+    await db.run("UPDATE users SET tier = 'developer', paid_until = NULL WHERE id = ?", buyer.id);
+    const countBefore = Number((await db.get("SELECT COUNT(*) AS n FROM payments WHERE user_id = ?", buyer.id)).n);
+    res = await member.post("/upgrade/checkout", {});
+    assert.ok(res.status === 302 && res.headers.get("location") === "/upgrade", "staff redirected away from checkout");
+    const countAfter = Number((await db.get("SELECT COUNT(*) AS n FROM payments WHERE user_id = ?", buyer.id)).n);
+    assert.equal(countAfter, countBefore, "no invoice created for a staff member");
   } finally {
     globalThis.fetch = realFetch;
   }

@@ -20,7 +20,7 @@ import { newToken } from "./crypto.js";
 import { audit, requireAuth, clientIp, setFlash } from "./middleware.js";
 import { tooMany } from "./routes-main.js";
 import { isStaff, normalizeTier } from "./tiers.js";
-import { btcpayConfig, createInvoice, getInvoice, verifyWebhookSignature, extendPaidUntil } from "./btcpay.js";
+import { btcpayConfig, createInvoice, getInvoice, verifyWebhookSignature } from "./btcpay.js";
 
 /** Invoice statuses BTCPay reports as fully paid + confirmed. */
 const SETTLED_STATUSES = new Set(['settled', 'complete', 'confirmed']);
@@ -39,6 +39,17 @@ function register(app) {
 
     if (!cfg.configured) {
       setFlash(c, 'error', 'Crypto checkout is not available right now. Please try again later.');
+      return c.redirect('/upgrade', 302);
+    }
+
+    // Don't take money for access the account already has. Staff sit above Paid,
+    // and a lifetime member has nothing to buy; dated Paid members may renew.
+    if (isStaff(user)) {
+      setFlash(c, 'success', 'Your account already has full access beyond Paid — no purchase needed.');
+      return c.redirect('/upgrade', 302);
+    }
+    if (normalizeTier(user.tier) === 'paid' && (user.paid_until === null || user.paid_until === undefined)) {
+      setFlash(c, 'success', 'You already have a lifetime Paid membership — there is nothing to buy.');
       return c.redirect('/upgrade', 302);
     }
 
@@ -176,12 +187,17 @@ function register(app) {
 
     const invStatus = String(invoice.status || '').toLowerCase();
     if (!SETTLED_STATUSES.has(invStatus)) {
-      // Signed webhook said Settled but the store doesn't agree — do not grant.
+      // Signed webhook said Settled but the store doesn't agree yet. If the
+      // invoice is still New/Processing this is likely store-side lag between
+      // the webhook firing and the API reflecting it — ask BTCPay to retry (503)
+      // rather than permanently dropping a real settlement. Only genuinely
+      // terminal states (Expired/Invalid) are acknowledged as final.
+      const terminal = invStatus === 'expired' || invStatus === 'invalid';
       await audit(c, 'btcpay_webhook_rejected', {
         userId: payment.user_id, username: payment.username,
         detail: `order ${payment.order_id}: status ${invoice.status} not settled`,
       });
-      return c.json({ ok: false, error: 'not_settled' }, 200);
+      return c.json({ ok: false, error: 'not_settled' }, terminal ? 200 : 503);
     }
 
     // Amount, currency and order must match what we priced at checkout.
@@ -198,6 +214,10 @@ function register(app) {
       return c.json({ ok: false, error: 'mismatch' }, 200);
     }
 
+    // Look up the buyer BEFORE claiming the credit, so a missing user never
+    // leaves a credit-claim stranded.
+    const target = await db.get('SELECT id, tier, paid_until FROM users WHERE id = ?', payment.user_id);
+
     // Claim the credit atomically: only the delivery that flips credited_at
     // from NULL wins, so concurrent deliveries can't double-grant.
     const claim = await db.run(
@@ -206,8 +226,9 @@ function register(app) {
     );
     if (claim.changes === 0) return c.json({ ok: true, already: true }, 200);
 
-    const target = await db.get('SELECT id, tier, paid_until FROM users WHERE id = ?', payment.user_id);
     if (!target) {
+      // A deleted user cascades its payment rows, so this is nearly impossible —
+      // acknowledge (credit already claimed) so BTCPay stops retrying.
       await audit(c, 'btcpay_webhook_rejected', {
         username: payment.username, detail: `order ${payment.order_id}: user gone`,
       });
@@ -215,17 +236,38 @@ function register(app) {
     }
 
     // Staff already sit above Paid and never expire — record the payment but
-    // don't touch their tier. Everyone else is granted/renewed Paid.
+    // don't touch their tier. Everyone else is granted/renewed Paid. The new
+    // expiry is computed in SQL against the row's LIVE value (not a value read
+    // earlier), so two invoices settling at once extend rather than clobber
+    // each other. If the grant fails we roll the claim back so BTCPay's retry
+    // re-processes it, rather than leaving the member charged-but-not-upgraded.
     if (!isStaff(target)) {
       const periodDays = payment.period_days === null || payment.period_days === undefined
         ? null : Number(payment.period_days);
-      const isLifetimePaid = normalizeTier(target.tier) === 'paid'
-        && (target.paid_until === null || target.paid_until === undefined);
-      // Don't clip an existing lifetime membership down to a dated one.
-      const newPaidUntil = (isLifetimePaid && periodDays !== null)
-        ? null
-        : extendPaidUntil(target.paid_until, periodDays, Date.now());
-      await db.run('UPDATE users SET tier = ?, paid_until = ? WHERE id = ?', 'paid', newPaidUntil, target.id);
+      try {
+        if (periodDays === null) {
+          // Lifetime purchase.
+          await db.run("UPDATE users SET tier = 'paid', paid_until = NULL WHERE id = ?", target.id);
+        } else {
+          const ms = Math.floor(periodDays) * 86_400_000;
+          const now = Date.now();
+          await db.run(
+            `UPDATE users SET tier = 'paid', paid_until = CASE
+               WHEN tier = 'paid' AND paid_until IS NULL THEN NULL          -- keep an existing lifetime
+               WHEN paid_until IS NULL OR paid_until < ? THEN ? + ?         -- new/expired: start from now
+               ELSE paid_until + ? END                                      -- active: extend from current expiry
+             WHERE id = ?`,
+            now, now, ms, ms, target.id
+          );
+        }
+      } catch (err) {
+        await db.run(
+          "UPDATE payments SET credited_at = NULL, status = 'processing', updated_at = datetime('now') WHERE id = ?",
+          payment.id
+        ).catch(() => {});
+        console.error('BTCPay grant failed after credit claim:', err);
+        return c.json({ ok: false, error: 'grant_failed' }, 500);
+      }
       // No session teardown: loadContext reads tier/paid_until fresh on every
       // request, so the upgrade is live on the member's next page load.
     }

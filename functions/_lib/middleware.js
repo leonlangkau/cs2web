@@ -67,6 +67,38 @@ function userAgent(c) {
   return String(c.req.header('user-agent') || '').slice(0, 300);
 }
 
+/**
+ * Canonical host redirect: send www.<domain> to the bare apex with a permanent
+ * 301, preserving path and query. Runs first so every response — pages, forms,
+ * the sitemap — is served from a single canonical host (better for SEO, cookies
+ * and CSP). Hosts without a leading "www." (localhost, the apex itself, custom
+ * subdomains like downloader.) pass straight through, so local dev is unaffected.
+ * Set CANONICAL_WWW = "1" to invert it and make www the canonical host instead.
+ */
+const wwwRedirect = async (c, next) => {
+  const host = String(c.req.header('host') || '');
+  if (!host) return next();
+
+  const cfg = c.get('cfg') || {};
+  const preferWww = String(cfg.CANONICAL_WWW || '') === '1';
+  const hasWww = /^www\./i.test(host);
+
+  let targetHost = null;
+  if (preferWww && !hasWww) {
+    // Don't prepend www to a deeper subdomain (e.g. downloader.goyhub.st).
+    if (host.split(':')[0].split('.').length <= 2) targetHost = 'www.' + host;
+  } else if (!preferWww && hasWww) {
+    targetHost = host.replace(/^www\./i, '');
+  }
+
+  if (!targetHost) return next();
+
+  const url = new URL(c.req.url);
+  const proto = c.req.header('x-forwarded-proto') || url.protocol.replace(':', '');
+  const location = `${proto}://${targetHost}${url.pathname}${url.search}`;
+  return c.redirect(location, 301);
+};
+
 const securityHeaders = async (c, next) => {
   await next();
   // The CSP stays fully self-contained unless Turnstile is enabled, in which
@@ -424,7 +456,7 @@ function requireTier(c, minTier) {
 
 export {
   SESSION_COOKIE, CSRF_COOKIE, FLASH_COOKIE, TERMS_COOKIE, TERMS_VERSION,
-  securityHeaders, loadContext, csrfProtection, termsGate, ipBanGate, floodProtection,
+  wwwRedirect, securityHeaders, loadContext, csrfProtection, termsGate, ipBanGate, floodProtection,
   createSession, destroySession, destroyUserSessions,
   acceptTerms, setFlash, formBody, requireAuth, requireAdmin, requireStaff, requireTier,
   requireVerifiedEmail, clientIp, userAgent, audit, cookieOptions,

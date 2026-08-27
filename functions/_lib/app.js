@@ -9,7 +9,7 @@
  * req.param/req.header/req.parseBody), so the route and middleware code did not
  * change when Hono was dropped for a zero-dependency deploy.
  */
-import { securityHeaders, loadContext, csrfProtection, termsGate, ipBanGate, floodProtection } from "./middleware.js";
+import { wwwRedirect, securityHeaders, loadContext, csrfProtection, termsGate, ipBanGate, floodProtection } from "./middleware.js";
 import { errorPage } from "./views/site.js";
 import { createCompany } from "./company.js";
 import { register as registerMain } from "./routes-main.js";
@@ -194,6 +194,9 @@ function createApp({ resolveDb, env = {} }) {
     c.set("db", await resolveDb(c));
     return next();
   });
+
+  // Canonicalize the host (www ↔ apex) before any DB work or route runs.
+  app.use("*", wwwRedirect);
 
   app.use("*", loadContext);
   app.use("*", ipBanGate);

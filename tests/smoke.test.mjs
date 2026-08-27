@@ -1999,3 +1999,51 @@ test("admin shop: products added in the panel are what /buy sells and what check
     globalThis.fetch = realFetch;
   }
 });
+
+test("www host is 301-redirected to the bare apex, preserving path and query", async () => {
+  const { app } = await buildTestApp(ENV);
+
+  const res = await app.fetch(
+    new Request("https://www.goyhub.st/forum?page=2", {
+      headers: { host: "www.goyhub.st", "x-forwarded-proto": "https" },
+    }),
+    ENV,
+  );
+  assert.equal(res.status, 301);
+  assert.equal(res.headers.get("location"), "https://goyhub.st/forum?page=2");
+
+  // The apex itself is served normally, not redirected.
+  const apex = await app.fetch(
+    new Request("https://goyhub.st/", { headers: { host: "goyhub.st" } }),
+    ENV,
+  );
+  assert.notEqual(apex.status, 301);
+
+  // A deeper subdomain (e.g. downloader.) is left alone.
+  const sub = await app.fetch(
+    new Request("https://downloader.goyhub.st/", { headers: { host: "downloader.goyhub.st" } }),
+    ENV,
+  );
+  assert.notEqual(sub.status, 301);
+});
+
+test("CANONICAL_WWW=1 inverts the redirect: apex is sent to www", async () => {
+  const env = { ...ENV, CANONICAL_WWW: "1" };
+  const { app } = await buildTestApp(env);
+
+  const res = await app.fetch(
+    new Request("https://goyhub.st/upgrade", {
+      headers: { host: "goyhub.st", "x-forwarded-proto": "https" },
+    }),
+    env,
+  );
+  assert.equal(res.status, 301);
+  assert.equal(res.headers.get("location"), "https://www.goyhub.st/upgrade");
+
+  // www is already canonical here — served normally.
+  const www = await app.fetch(
+    new Request("https://www.goyhub.st/", { headers: { host: "www.goyhub.st" } }),
+    env,
+  );
+  assert.notEqual(www.status, 301);
+});

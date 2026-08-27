@@ -100,6 +100,11 @@ enter `goyhub.st` (or `www.`, or any subdomain) → **Activate**. Cloudflare
 creates the DNS record and issues the TLS certificate automatically. Do **not**
 add an A/CNAME by hand.
 
+Attach **both** `goyhub.st` and `www.goyhub.st` as Custom domains. The app then
+301-redirects `www` to the bare apex automatically, so the site is served from a
+single canonical host. To flip the direction (apex → `www`), set
+`CANONICAL_WWW = "1"` in `wrangler.toml`.
+
 After it is live, turn on **SSL/TLS → Edge Certificates → Always Use HTTPS**.
 IP logging works with no configuration: `CF-Connecting-IP` is set by Cloudflare
 and can't be spoofed, so the app trusts it directly. Don't set `TRUST_PROXY` on

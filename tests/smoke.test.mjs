@@ -10,10 +10,12 @@ import crypto from "node:crypto";
 import { buildTestApp, createNodeAdapter } from "./harness.mjs";
 import { leadingZeroBits } from "../functions/_lib/captcha.js";
 import { seed } from "../functions/_lib/bootstrap.js";
-import { verifyPassword } from "../functions/_lib/crypto.js";
+import { verifyPassword, hashPassword } from "../functions/_lib/crypto.js";
 import { verifyLicense } from "../functions/_lib/license.js";
+import { verifyWebhookSignature, extendPaidUntil, btcpayConfig } from "../functions/_lib/btcpay.js";
 import { verifyTurnstile } from "../functions/_lib/turnstile.js";
-import { scrambledFilename } from "../functions/_lib/routes-main.js";
+import { scrambledFilename, loadInstaller } from "../functions/_lib/routes-main.js";
+import { DEFAULTS as RATE_LIMIT_DEFAULTS } from "../functions/_lib/limits.js";
 import { smtpConversation, buildMessage } from "../functions/_lib/smtp.js";
 import { isEmailConfigured } from "../functions/_lib/email.js";
 import buildSchema from "../scripts/build-schema.cjs";
@@ -285,17 +287,14 @@ test("public pages, forum, legal, gate, auth, captcha, admin, moderation, downlo
   res = await anon.get("/download/file");
   assert.ok(res.status === 302 && res.headers.get("location").startsWith("/auth/login"), "anon download redirected");
   assert.equal(Number((await db.get("SELECT COUNT(*) AS n FROM ip_logs WHERE event = 'download'")).n), 0, "anon download not logged");
+  // No DOWNLOAD_URL configured in this test's env: a signed-in Paid member
+  // clears the gate, but there is no fallback file to serve — a clean
+  // "unavailable" response, not a silently-substituted placeholder, and
+  // nothing is logged as a successful download. The success path (with
+  // DOWNLOAD_URL configured) is covered end-to-end in its own test below.
   res = await admin.get("/download/file");
-  const buf = await res.arrayBuffer();
-  const disp = String(res.headers.get("content-disposition"));
-  assert.ok(res.status === 200 && buf.byteLength > 0 && disp.includes(".zip"), "member download");
-  // Filename is scrambled per-download: real base kept, random token injected.
-  assert.ok(/filename="GoyHub-Setup-1\.0\.0-[a-f0-9]{8}\.zip"/.test(disp), "download filename is scrambled");
-  const res2 = await admin.get("/download/file");
-  await res2.arrayBuffer();
-  assert.notEqual(res.headers.get("content-disposition"), res2.headers.get("content-disposition"),
-    "each download gets a different filename");
-  assert.ok(await db.get("SELECT id FROM ip_logs WHERE event = 'download' AND username = 'admin'"), "download logged");
+  assert.equal(res.status, 503, "member download with no DOWNLOAD_URL configured is a clean 'unavailable', not a fallback file");
+  assert.ok(!(await db.get("SELECT id FROM ip_logs WHERE event = 'download' AND username = 'admin'")), "unavailable download is not logged as a download");
 
   html = await (await anon.get("/")).text();
   assert.ok(!html.includes("/download/file") && html.includes("Create a free account"), "download hidden when logged out");
@@ -488,6 +487,53 @@ test("IP bans block every route except for staff, who are exempt", async () => {
   assert.ok(!(await db.get("SELECT * FROM ip_bans WHERE ip = '203.0.113.42'")), "ban row removed");
   res = await bannedReq("/");
   assert.equal(res.status, 200, "unbanned IP can browse again");
+});
+
+test("fingerprint beacon groups anonymous and signed-in sightings under one device log", async () => {
+  const { app, db } = await buildTestApp(ENV);
+  const admin = makeClient(app);
+  const user = makeClient(app);
+  const anon = makeClient(app);
+
+  await admin.get("/auth/login");
+  await admin.post("/auth/login", { identifier: "admin", password: "admin-test-password-1", next: "/" });
+
+  await user.get("/auth/signup");
+  await user.post("/auth/signup", {
+    username: "fp_user", email: "fp@example.com", password: "supersecret1", confirm: "supersecret1",
+    ...(await solveCaptcha(user)),
+  });
+
+  const fields = {
+    device: "Desktop", browser: "Chrome 120", os: "Windows 10/11",
+    screen: "1920x1080x24", language: "en-US", timezone: "Europe/Berlin", canvasHash: "abc123",
+  };
+
+  let res = await anon.post("/api/fingerprint", fields);
+  assert.equal(res.status, 204, "anonymous fingerprint beacon accepted");
+  res = await user.post("/api/fingerprint", fields);
+  assert.equal(res.status, 204, "signed-in fingerprint beacon accepted");
+
+  const rows = await db.all("SELECT * FROM fingerprints ORDER BY id");
+  assert.equal(rows.length, 2, "two sightings recorded");
+  assert.equal(rows[0].fp_hash, rows[1].fp_hash, "identical device data hashes to the same fingerprint");
+  assert.equal(rows[0].user_id, null, "anonymous sighting has no user");
+  assert.equal(rows[1].username, "fp_user", "signed-in sighting is attributed");
+  assert.equal(rows[1].email, "fp@example.com", "signed-in sighting captures the account email");
+
+  assert.equal((await user.get("/admin/fingerprints")).status, 404, "fingerprints panel hidden from non-staff");
+
+  const listHtml = await (await admin.get("/admin/fingerprints")).text();
+  assert.ok(listHtml.includes("1 distinct fingerprint") && listHtml.includes("2 sightings") && listHtml.includes("1 account"),
+    "admin fingerprints list groups both sightings under one device");
+
+  const hash = rows[0].fp_hash;
+  const detailHtml = await (await admin.get(`/admin/fingerprints/${hash}`)).text();
+  assert.ok(detailHtml.includes("fp_user") && detailHtml.includes("fp@example.com") && detailHtml.includes("anonymous")
+    && detailHtml.includes("Chrome 120") && detailHtml.includes("Europe/Berlin"),
+    "per-fingerprint log shows every sighting, signed-in and anonymous");
+
+  assert.equal((await admin.get("/admin/fingerprints/doesnotexist")).status, 404, "unknown fingerprint hash 404s");
 });
 
 test("account switching: login stays reachable while signed in and swaps the session", async () => {
@@ -1217,11 +1263,142 @@ test("turnstile: optional layer verifies server-side and fails closed", async ()
 });
 
 test("download filename scrambler keeps base+ext, injects a unique token", () => {
-  const a = scrambledFilename("GoyHub-Setup-1.0.0.zip");
-  const b = scrambledFilename("GoyHub-Setup-1.0.0.zip");
-  assert.ok(/^GoyHub-Setup-1\.0\.0-[a-f0-9]{8}\.zip$/.test(a), "shape preserved with token");
+  const a = scrambledFilename("GoyHub-Setup-1.0.0.exe");
+  const b = scrambledFilename("GoyHub-Setup-1.0.0.exe");
+  assert.ok(/^GoyHub-Setup-1\.0\.0-[a-f0-9]{8}\.exe$/.test(a), "shape preserved with token");
   assert.notEqual(a, b, "two calls differ");
   assert.equal(scrambledFilename("noext").slice(0, 6), "noext-", "extensionless names still get a token");
+});
+
+test("loadInstaller: DOWNLOAD_URL is fetched server-side and streamed, with NO fallback", async () => {
+  const upstreamBody = new ReadableStream({
+    start(controller) {
+      controller.enqueue(new TextEncoder().encode("fake-installer-bytes"));
+      controller.close();
+    },
+  });
+
+  // Configured and reachable: the fetch goes to exactly DOWNLOAD_URL, and its
+  // response body is handed back untouched for streaming — never buffered,
+  // never inspected, so the route can pipe it straight to the client.
+  let calledWith = null;
+  const served = await loadInstaller(
+    { DOWNLOAD_URL: "https://cdn.example.com/builds/GoyHub-Setup-1.0.0.exe" },
+    async (url) => { calledWith = url; return { ok: true, body: upstreamBody }; }
+  );
+  assert.equal(calledWith, "https://cdn.example.com/builds/GoyHub-Setup-1.0.0.exe", "fetch targets DOWNLOAD_URL");
+  assert.equal(served, upstreamBody, "upstream response body is returned as-is for streaming");
+
+  // Network failure (DNS, timeout, connection refused, ...) is a hard failure
+  // — null, not a silent substitute file.
+  const onNetworkError = await loadInstaller(
+    { DOWNLOAD_URL: "https://cdn.example.com/unreachable.zip" },
+    async () => { throw new Error("network down"); }
+  );
+  assert.equal(onNetworkError, null, "no fallback on fetch failure — null, so the route reports 'unavailable'");
+
+  // A non-OK upstream (404, 5xx, ...) is also a hard failure, not a fallback.
+  const onNotOk = await loadInstaller(
+    { DOWNLOAD_URL: "https://cdn.example.com/missing.zip" },
+    async () => ({ ok: false, status: 404 })
+  );
+  assert.equal(onNotOk, null, "no fallback on a non-OK upstream response");
+
+  // DOWNLOAD_URL unset: no network call is made, and there is nothing to fall
+  // back to — null.
+  const unset = await loadInstaller({}, async () => { throw new Error("must not be called"); });
+  assert.equal(unset, null, "unset DOWNLOAD_URL skips the fetch and returns null — no fallback file");
+});
+
+test("download: DOWNLOAD_URL end-to-end — served when reachable, a clean 503 (never a fallback file) when it isn't", async () => {
+  const downloadEnv = { ...ENV, DOWNLOAD_URL: "https://cdn.example.com/builds/GoyHub-Setup-1.0.0.exe" };
+  const { app, db } = await buildTestApp(downloadEnv);
+  const admin = makeClient(app);
+  await admin.get("/auth/login");
+  await admin.post("/auth/login", { identifier: "admin", password: "admin-test-password-1", next: "/" });
+
+  const originalFetch = globalThis.fetch;
+  try {
+    // Reachable: the route streams the upstream bytes straight through, with
+    // the usual per-download scrambled filename and audit log — the URL
+    // itself never appears anywhere in the response.
+    globalThis.fetch = async (url) => {
+      assert.equal(url, downloadEnv.DOWNLOAD_URL, "route fetches exactly DOWNLOAD_URL");
+      return new Response(new TextEncoder().encode("fake-installer-bytes"), { status: 200 });
+    };
+    let res = await admin.get("/download/file");
+    const buf = await res.arrayBuffer();
+    const disp = String(res.headers.get("content-disposition"));
+    assert.ok(res.status === 200 && buf.byteLength > 0 && disp.includes(".exe"), "member download served from DOWNLOAD_URL");
+    assert.ok(/filename="GoyHub-Setup-1\.0\.0-[a-f0-9]{8}\.exe"/.test(disp), "download filename is scrambled");
+    assert.ok(!JSON.stringify([...res.headers.entries()]).includes("cdn.example.com"), "DOWNLOAD_URL is never sent to the client");
+
+    const res2 = await admin.get("/download/file");
+    await res2.arrayBuffer();
+    assert.notEqual(res.headers.get("content-disposition"), res2.headers.get("content-disposition"),
+      "each download gets a different filename");
+    assert.equal(Number((await db.get("SELECT COUNT(*) AS n FROM ip_logs WHERE event = 'download' AND username = 'admin'")).n), 2,
+      "each successful download is logged");
+
+    // Now DOWNLOAD_URL is broken (host down, 404, whatever) — this must be a
+    // clean failure, NOT a silent fallback to the embedded placeholder.
+    globalThis.fetch = async () => { throw new Error("simulated network outage"); };
+    res = await admin.get("/download/file");
+    assert.equal(res.status, 503, "broken DOWNLOAD_URL is a clean 'unavailable', never a fallback file");
+    assert.equal(Number((await db.get("SELECT COUNT(*) AS n FROM ip_logs WHERE event = 'download' AND username = 'admin'")).n), 2,
+      "the failed attempt is not logged as a successful download");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("download rate limit: high default threshold, staff/admin fully exempt", async () => {
+  assert.equal(RATE_LIMIT_DEFAULTS.download.limit, 20, "download rate limit default is 20, not the old strict 3");
+
+  // A low override keeps this test fast while proving the mechanics: a
+  // regular Paid member is throttled past the configured limit, but an
+  // admin sails past that same limit untouched.
+  const downloadEnv = {
+    ...ENV,
+    DOWNLOAD_URL: "https://cdn.example.com/builds/GoyHub-Setup-1.0.0.exe",
+    RATE_LIMIT_DOWNLOAD: "3",
+  };
+  const { app, db } = await buildTestApp(downloadEnv);
+  const admin = makeClient(app);
+  const member = makeClient(app);
+
+  await admin.get("/auth/login");
+  await admin.post("/auth/login", { identifier: "admin", password: "admin-test-password-1", next: "/" });
+
+  await member.get("/auth/signup");
+  await member.post("/auth/signup", {
+    username: "download_member", email: "dlm@example.com",
+    password: "supersecret1", confirm: "supersecret1", ...(await solveCaptcha(member)),
+  });
+  await db.run("UPDATE users SET tier = 'paid' WHERE username = 'download_member'");
+
+  const originalFetch = globalThis.fetch;
+  try {
+    globalThis.fetch = async () => new Response(new TextEncoder().encode("fake-installer-bytes"), { status: 200 });
+
+    for (let i = 0; i < 3; i += 1) {
+      const res = await member.get("/download/file");
+      await res.arrayBuffer();
+      assert.equal(res.status, 200, `member download ${i + 1}/3 within RATE_LIMIT_DOWNLOAD succeeds`);
+    }
+    const throttled = await member.get("/download/file");
+    assert.equal(throttled.status, 429, "member is throttled past RATE_LIMIT_DOWNLOAD");
+
+    // Same low limit, but admin never gets the 429 — the gate is skipped for
+    // staff entirely, not just given a bigger allowance.
+    for (let i = 0; i < 5; i += 1) {
+      const res = await admin.get("/download/file");
+      await res.arrayBuffer();
+      assert.equal(res.status, 200, `admin download ${i + 1}/5 is never rate-limited`);
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });
 
 test("smtp client: correct SMTPS conversation for Cloudflare's Email Service relay", async () => {
@@ -1342,4 +1519,172 @@ test("subscriptions: per-user day adjustment, mass adjustment, unambiguous API f
   const life = await (await api("/api/loader/auth", { username: "sub_life", password: "supersecret1" })).json();
   assert.ok(life.subscription.lifetime === true && life.subscription.daysLeft === null && life.paid === true,
     "lifetime is explicit: paid=true, daysLeft=null, lifetime=true");
+});
+
+test("btcpay: signature verification and paid-until math", async () => {
+  const secret = "webhook-signing-secret";
+  const raw = JSON.stringify({ type: "InvoiceSettled", invoiceId: "X", storeId: "S" });
+  const good = crypto.createHmac("sha256", secret).update(raw).digest("hex");
+
+  assert.equal(await verifyWebhookSignature(secret, raw, `sha256=${good}`), true, "correct signature accepted");
+  assert.equal(await verifyWebhookSignature(secret, raw, good), true, "accepts a bare hex signature too");
+  assert.equal(await verifyWebhookSignature(secret, raw, `sha256=${"0".repeat(64)}`), false, "wrong signature rejected");
+  assert.equal(await verifyWebhookSignature(secret, raw + " ", `sha256=${good}`), false, "tampered body rejected");
+  assert.equal(await verifyWebhookSignature(secret, raw, ""), false, "missing signature rejected");
+  assert.equal(await verifyWebhookSignature("", raw, `sha256=${good}`), false, "no secret configured rejects");
+
+  const now = 1_000_000_000_000;
+  const DAY = 86_400_000;
+  assert.equal(extendPaidUntil(null, null, now), null, "lifetime purchase => null expiry");
+  assert.equal(extendPaidUntil(null, 30, now), now + 30 * DAY, "new member counts from now");
+  assert.equal(extendPaidUntil(now - DAY, 30, now), now + 30 * DAY, "expired member counts from now");
+  assert.equal(extendPaidUntil(now + 10 * DAY, 30, now), now + 40 * DAY, "active member extends from current expiry");
+
+  // configured is all-or-nothing on the required pieces.
+  assert.equal(btcpayConfig({}).configured, false, "empty env is not configured");
+  assert.equal(btcpayConfig({
+    BTCPAY_URL: "https://b.test/", BTCPAY_STORE_ID: "s", BTCPAY_API_KEY: "k",
+    BTCPAY_WEBHOOK_SECRET: "w", PAID_PRICE_AMOUNT: "10",
+  }).configured, true, "all required pieces => configured");
+  assert.equal(btcpayConfig({
+    BTCPAY_URL: "https://b.test", BTCPAY_STORE_ID: "s", BTCPAY_API_KEY: "k", PAID_PRICE_AMOUNT: "10",
+  }).configured, false, "missing webhook secret => not configured");
+  assert.equal(btcpayConfig({ BTCPAY_URL: "https://b.test/" }).url, "https://b.test", "trailing slash trimmed");
+});
+
+test("btcpay: checkout creates an invoice and a settled webhook grants Paid (idempotently)", async () => {
+  const BTCPAY_ENV = {
+    ...ENV,
+    BTCPAY_URL: "https://btcpay.test",
+    BTCPAY_STORE_ID: "STORE1",
+    BTCPAY_API_KEY: "greenfield-key",
+    BTCPAY_WEBHOOK_SECRET: "hook-secret-123",
+    PAID_PRICE_AMOUNT: "10.00",
+    PAID_PRICE_CURRENCY: "USD",
+    PAID_PERIOD_DAYS: "30",
+  };
+  const { app, db } = await buildTestApp(BTCPAY_ENV);
+
+  // A real BTCPay server would be reached over fetch(); stub it so the test is
+  // hermetic. POST /invoices returns a new invoice; GET /invoices/:id returns
+  // whatever `settledInvoice` currently holds.
+  const realFetch = globalThis.fetch;
+  let settledInvoice = null;
+  globalThis.fetch = async (url, opts = {}) => {
+    const u = String(url);
+    const jsonRes = (status, obj) => new Response(JSON.stringify(obj), {
+      status, headers: { "content-type": "application/json" },
+    });
+    if (opts.method === "POST" && /\/api\/v1\/stores\/STORE1\/invoices$/.test(u)) {
+      // Echo the caller's Authorization to prove the key is sent.
+      assert.equal(opts.headers.Authorization, "token greenfield-key", "store API key sent");
+      return jsonRes(200, { id: "INV123", checkoutLink: "https://btcpay.test/i/INV123", status: "New" });
+    }
+    if (u.endsWith("/api/v1/stores/STORE1/invoices/INV123")) {
+      return jsonRes(200, settledInvoice);
+    }
+    return jsonRes(404, {});
+  };
+
+  try {
+    globalThis.PBKDF2_ITERATIONS_OVERRIDE = "10000";
+    const memberPw = "buyer-pass-123";
+    await db.run(
+      "INSERT INTO users (username, email, password_hash, tier) VALUES (?, ?, ?, 'user')",
+      "buyer", "buyer@example.com", await hashPassword(memberPw)
+    );
+
+    const member = makeClient(app);
+    await member.get("/auth/login");
+    let res = await member.post("/auth/login", { identifier: "buyer", password: memberPw, next: "/" });
+    assert.ok(res.status === 302 && member.jar.has("ghsession"), "member logged in");
+
+    // The upgrade page shows the automated pay button now that BTCPay is set.
+    let html = await (await member.get("/upgrade")).text();
+    assert.ok(html.includes('action="/upgrade/checkout"') && html.includes("Pay with crypto"), "checkout form shown");
+
+    // Start checkout -> a pending payment row + redirect to the BTCPay invoice.
+    res = await member.raw("POST", "/upgrade/checkout", { _csrf: member.jar.get("ghcsrf") });
+    assert.equal(res.status, 302, "checkout redirects");
+    assert.equal(res.headers.get("location"), "https://btcpay.test/i/INV123", "redirects to the BTCPay invoice");
+
+    const buyer = await db.get("SELECT id FROM users WHERE username = 'buyer'");
+    const payment = await db.get("SELECT * FROM payments WHERE user_id = ?", buyer.id);
+    assert.ok(payment && payment.invoice_id === "INV123" && payment.status === "new", "pending payment row created");
+    assert.equal(payment.amount, "10.00");
+    assert.equal(payment.period_days, 30);
+    assert.ok(await db.get("SELECT id FROM ip_logs WHERE event = 'checkout_created'"), "checkout audited");
+
+    // Helper to POST a signed webhook exactly as BTCPay would.
+    const sendWebhook = (bodyObj, { sig } = {}) => {
+      const body = JSON.stringify(bodyObj);
+      const signature = sig ?? "sha256=" + crypto.createHmac("sha256", "hook-secret-123").update(body).digest("hex");
+      return app.fetch(new Request("http://local/api/btcpay/webhook", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "btcpay-sig": signature,
+          "content-length": String(Buffer.byteLength(body)),
+        },
+        body,
+      }), BTCPAY_ENV);
+    };
+
+    const settledBody = { type: "InvoiceSettled", invoiceId: "INV123", storeId: "STORE1" };
+
+    // A forged (bad-signature) webhook must be rejected and grant nothing.
+    res = await sendWebhook(settledBody, { sig: "sha256=" + "0".repeat(64) });
+    assert.equal(res.status, 400, "bad signature rejected");
+    assert.equal((await db.get("SELECT tier FROM users WHERE id = ?", buyer.id)).tier, "user", "no grant on bad signature");
+    assert.ok(await db.get("SELECT id FROM ip_logs WHERE event = 'btcpay_webhook_rejected'"), "rejection audited");
+
+    // A validly-signed webhook whose invoice the store reports as Settled grants Paid.
+    settledInvoice = { id: "INV123", status: "Settled", amount: "10.00", currency: "USD", metadata: { orderId: payment.order_id } };
+    res = await sendWebhook(settledBody);
+    assert.equal(res.status, 200, "signed settled webhook accepted");
+    assert.deepEqual(await res.json(), { ok: true, granted: true }, "reports granted");
+
+    let row = await db.get("SELECT tier, paid_until FROM users WHERE id = ?", buyer.id);
+    assert.equal(row.tier, "paid", "member upgraded to paid");
+    assert.ok(Math.abs(Number(row.paid_until) - (Date.now() + 30 * 86_400_000)) < 5 * 60_000, "paid_until ~30 days out");
+    const credited = await db.get("SELECT status, credited_at FROM payments WHERE invoice_id = 'INV123'");
+    assert.ok(credited.status === "settled" && credited.credited_at, "payment marked settled + credited");
+    assert.ok(await db.get("SELECT id FROM ip_logs WHERE event = 'membership_granted'"), "grant audited");
+
+    // Idempotency: replaying the same settled webhook must NOT extend again.
+    const paidBefore = Number(row.paid_until);
+    res = await sendWebhook(settledBody);
+    assert.equal(res.status, 200);
+    assert.deepEqual(await res.json(), { ok: true, already: true }, "replay is a no-op");
+    row = await db.get("SELECT paid_until FROM users WHERE id = ?", buyer.id);
+    assert.equal(Number(row.paid_until), paidBefore, "replayed webhook did not extend the membership");
+
+    // An amount that doesn't match the priced invoice must not grant.
+    await db.run(
+      "INSERT INTO payments (order_id, invoice_id, user_id, username, amount, currency, period_days, status) VALUES ('ord2','INV999',?,?,'10.00','USD',30,'new')",
+      buyer.id, "buyer"
+    );
+    settledInvoice = { id: "INV999", status: "Settled", amount: "0.01", currency: "USD", metadata: { orderId: "ord2" } };
+    globalThis.fetch = (async (url, opts = {}) => {
+      const u = String(url);
+      if (u.endsWith("/invoices/INV999")) return new Response(JSON.stringify(settledInvoice), { status: 200, headers: { "content-type": "application/json" } });
+      return new Response("{}", { status: 404 });
+    });
+    res = await sendWebhook({ type: "InvoiceSettled", invoiceId: "INV999", storeId: "STORE1" });
+    assert.equal(res.status, 200);
+    assert.deepEqual(await res.json(), { ok: false, error: "mismatch" }, "amount mismatch is not credited");
+    const notCredited = await db.get("SELECT credited_at FROM payments WHERE invoice_id = 'INV999'");
+    assert.equal(notCredited.credited_at, null, "mismatched invoice left uncredited");
+
+    // Staff have nothing to buy — checkout must not take their money or create
+    // an invoice. (Guards for lifetime members work the same way.)
+    await db.run("UPDATE users SET tier = 'developer', paid_until = NULL WHERE id = ?", buyer.id);
+    const countBefore = Number((await db.get("SELECT COUNT(*) AS n FROM payments WHERE user_id = ?", buyer.id)).n);
+    res = await member.post("/upgrade/checkout", {});
+    assert.ok(res.status === 302 && res.headers.get("location") === "/upgrade", "staff redirected away from checkout");
+    const countAfter = Number((await db.get("SELECT COUNT(*) AS n FROM payments WHERE user_id = ?", buyer.id)).n);
+    assert.equal(countAfter, countBefore, "no invoice created for a staff member");
+  } finally {
+    globalThis.fetch = realFetch;
+  }
 });

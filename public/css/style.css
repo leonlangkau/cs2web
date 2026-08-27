@@ -202,6 +202,16 @@
     --glass: rgba(9, 13, 27, 0.66);
     color-scheme: dark;
   }
+  /* No-JS dark fallback: the [data-theme="dark"] ink overrides below only fire
+     once boot.js stamps the attribute. Repeat them here (guarded so an explicit
+     light choice still wins) so a dark-OS visitor without scripting also gets
+     navy ink on the light-blue accent instead of low-contrast white. */
+  :root:not([data-theme="light"]):not([data-theme="dark"]) .btn-primary,
+  :root:not([data-theme="light"]):not([data-theme="dark"]) .btn-primary:hover,
+  :root:not([data-theme="light"]):not([data-theme="dark"]) .announcement,
+  :root:not([data-theme="light"]):not([data-theme="dark"]) .announcement-dismiss,
+  :root:not([data-theme="light"]):not([data-theme="dark"]) .skip-link,
+  :root:not([data-theme="light"]):not([data-theme="dark"]) .page.current { color: #0a1226; }
 }
 
 /* ---------- Base ---------- */
@@ -876,6 +886,8 @@ textarea { resize: vertical; min-height: 90px; }
 }
 .thread-row:hover { border-color: var(--accent); color: var(--text); box-shadow: var(--shadow); }
 .thread-flags:empty { display: none; }
+/* Search results reuse the row chrome but carry only the main column. */
+.thread-row--flush { grid-template-columns: 1fr; }
 .thread-title { font-weight: 700; display: block; font-family: var(--font-display); }
 .thread-nums { display: flex; flex-direction: column; font-size: 0.83rem; color: var(--muted); text-align: right; }
 .thread-nums strong { color: var(--text); }
@@ -899,6 +911,8 @@ textarea { resize: vertical; min-height: 90px; }
 .tag-tier-developer { background: var(--tier-dev-tint); color: var(--tier-dev-ink); }
 .tag-tier-trial_admin { background: var(--tint-warn); color: var(--warn); }
 .tag-tier-admin { background: var(--accent-soft); color: var(--accent-ink); }
+/* Device-fingerprint badge (device trust feature) */
+.tag-device { background: var(--panel-2); color: var(--muted); }
 
 .panel-spaced { margin-top: 1.8rem; }
 
@@ -1125,6 +1139,8 @@ tbody tr.row-banned:hover td { background: var(--tint-danger); }
 .filter-bar input[type="search"] { max-width: 320px; }
 .filter-bar select { width: auto; }
 .filter-bar .muted { margin-left: auto; font-size: 0.88rem; }
+.filter-check { display: flex; align-items: center; gap: 0.35rem; font-size: 0.88rem; color: var(--muted); cursor: pointer; white-space: nowrap; }
+.filter-check input { width: auto; }
 .filter-check { display: flex; align-items: center; gap: 0.35rem; font-size: 0.88rem; color: var(--muted); cursor: pointer; white-space: nowrap; }
 .filter-check input { width: auto; }
 

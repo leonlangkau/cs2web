@@ -14,13 +14,15 @@ const DEFAULTS = {
   login: { limit: 10, windowMs: 10 * 60 * 1000 },     // per IP
   signup: { limit: 5, windowMs: 60 * 60 * 1000 },     // per IP
   post: { limit: 6, windowMs: 60 * 1000 },            // per user
-  download: { limit: 3, windowMs: 3 * 60 * 60 * 1000 }, // per IP (3 per 3 hours)
+  download: { limit: 20, windowMs: 3 * 60 * 60 * 1000 }, // per IP (20 per 3 hours; staff exempt)
   shout: { limit: 3, windowMs: 60 * 1000 },           // per user
   burst: { limit: 240, windowMs: 60 * 1000 },         // per IP, ALL dynamic routes (flood control)
   flood: { limit: 5, windowMs: 10 * 60 * 1000 },      // per IP, burst BREACHES before auto-ban
   report: { limit: 5, windowMs: 60 * 60 * 1000 },     // per user
   reset: { limit: 3, windowMs: 60 * 60 * 1000 },      // per IP (password-reset emails)
   verify: { limit: 3, windowMs: 60 * 60 * 1000 },     // per user (verification emails)
+  fingerprint: { limit: 20, windowMs: 10 * 60 * 1000 }, // per IP (client fingerprint beacon)
+  checkout: { limit: 8, windowMs: 60 * 60 * 1000 },   // per user (BTCPay invoice creation)
 };
 
 const ENV_KEYS = {
@@ -34,6 +36,8 @@ const ENV_KEYS = {
   report: 'RATE_LIMIT_REPORT',
   reset: 'RATE_LIMIT_RESET',
   verify: 'RATE_LIMIT_VERIFY',
+  fingerprint: 'RATE_LIMIT_FINGERPRINT',
+  checkout: 'RATE_LIMIT_CHECKOUT',
 };
 
 function limitFor(name, env = {}) {

@@ -307,13 +307,13 @@ function searchResults(ctx, { q, threads, posts }) {
     : (threads.length === 0 && posts.length === 0)
       ? `<p class="muted empty-state">No results for “${esc(q)}”.</p>`
       : `${threads.length ? `<h2 class="search-group">Threads (${esc(threads.length)})</h2>
-          <div class="thread-list">${map(threads, (t) => `<a class="thread-row" href="/forum/t/${esc(t.id)}">
+          <div class="thread-list">${map(threads, (t) => `<a class="thread-row thread-row--flush" href="/forum/t/${esc(t.id)}">
             <div class="thread-main">
               <span class="thread-title">${esc(t.title)}</span>
               <span class="muted">${esc(t.category)} · by ${esc(t.username)} · ${esc(timeAgo(t.updated_at))}</span>
             </div></a>`)}</div>` : ''}
         ${posts.length ? `<h2 class="search-group">Posts (${esc(posts.length)})</h2>
-          <div class="thread-list">${map(posts, (p) => `<a class="thread-row" href="/forum/t/${esc(p.thread_id)}#post-${esc(p.id)}">
+          <div class="thread-list">${map(posts, (p) => `<a class="thread-row thread-row--flush" href="/forum/t/${esc(p.thread_id)}#post-${esc(p.id)}">
             <div class="thread-main">
               <span class="thread-title">${esc(p.thread_title)}</span>
               <span class="muted">${esc(excerpt(p.body, q))}</span>

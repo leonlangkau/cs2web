@@ -57,6 +57,7 @@ No build command is needed — the Functions are committed ready to run.
 | `CAPTCHA_SECRET` | a long random string |
 | `ADMIN_PASSWORD` | password for the seeded admin account |
 | `ADMIN_USERNAME` | optional, defaults to `admin` |
+| `DOWNLOAD_URL` | required for the download to work (no fallback) — where the real installer lives (see "Shipping a real installer" below) |
 
 Generate a CAPTCHA secret:
 
@@ -121,18 +122,113 @@ the schema with `npm run db:local`.
 
 ## Shipping a real installer
 
-The placeholder zip is embedded in the Function bundle. A real installer will be
-too big (the bundle caps at ~1 MB free / 10 MB paid), so use R2:
+The download route serves whatever `DOWNLOAD_URL` points at — **required**,
+with **no fallback**. Without it (or if it's unreachable), `/download/file`
+returns a clean "unavailable" response rather than silently serving the
+placeholder zip embedded in the Function bundle.
+
+Host the installer anywhere reachable over HTTPS — your own server, a CDN, a
+GitHub release asset, S3/B2, R2, etc. — then set:
 
 ```bash
-npx wrangler r2 bucket create goyhub-installer
-npx wrangler r2 object put goyhub-installer/GoyHub-Setup-1.0.0.zip --file=./installer.zip
+npx wrangler pages secret put DOWNLOAD_URL
+# paste the file's URL when prompted
 ```
 
-Uncomment the `[[r2_buckets]]` block in `wrangler.toml` (or add the binding in
-the dashboard as `INSTALLER`). The download route prefers R2 and falls back to
-the embedded copy. The artifact stays out of `public/`, so every download goes
-through the audited, rate-limited route.
+`/download/file` (still behind the sign-in + Paid-tier gate and the download
+rate limit) fetches that URL **server-side** on each request and streams the
+response straight back to the browser. The URL itself is never sent to the
+client — not in the page HTML, not in a redirect's `Location` header, not in
+any script — the browser only ever talks to the same-site `/download/file`.
+That's the obfuscation: the value never leaves the server, which beats any
+client-side encoding of the link (Base64, split strings, etc. are all
+trivially readable from a browser's dev tools; a value the browser never
+receives can't be read from it at all). And because there's no fallback, a
+broken or misconfigured `DOWNLOAD_URL` fails loudly (a 503 on `/download/file`)
+instead of quietly handing members a stale placeholder.
+
+If hosting on Cloudflare R2, make the object itself the URL — either a public
+R2.dev/custom domain, or a signed/presigned URL — and set that as
+`DOWNLOAD_URL`; the route doesn't bind R2 directly, it only ever fetches a URL.
+
+Always set it as a **Secret**, never as a plain `[vars]` entry in
+`wrangler.toml` — that file is committed, and a plain var would put the
+"hidden" URL in cleartext in git history and in the dashboard's variable
+list. A Secret is encrypted at rest and, once saved, is no longer readable
+from the dashboard either.
+
+Keep the version metadata honest: `functions/_lib/installer-data.js` (built
+from `artifacts/GoyHub-Setup-1.0.0.exe` — see below) is what the site shows
+as the download's name, size and SHA-256 checksum — its filename's extension
+also drives the `Content-Disposition` name and `scripts/build-installer.cjs`'s
+`NAME` constant, so it must match whatever `DOWNLOAD_URL` actually serves.
+When `DOWNLOAD_URL` points at a newer build, replace that artifact (renaming
+it too, if the file type changes) and run `npm run build`, so the checksum
+and filename shown on `/download` still match the file actually served.
+
+---
+
+The artifact stays out of `public/` regardless, so every download goes
+through the same audited, rate-limited, login-gated route.
+
+---
+
+## Crypto payments (BTCPay Server)
+
+The `/upgrade` page can run a fully automated, **crypto-only** checkout backed
+by your own **BTCPay Server** — no card processor, no third party, no personal
+data. A member clicks **Pay with crypto**, pays a Bitcoin (on-chain or
+Lightning) invoice on your BTCPay checkout, and the account is upgraded to
+**Paid** automatically once the payment confirms. There is no manual step and
+no admin action.
+
+**Setting up the server** (a small VPS) is documented end-to-end in
+[BTCPAY-SETUP.md](BTCPAY-SETUP.md) — swap, firewall, DNS, the one-line
+`btcpayserver-docker` install tuned for a 2‑core / 4 GB box (pruned node), and
+creating the store, API key and webhook.
+
+**Connecting it to this site** (the four values from that guide):
+
+1. In `wrangler.toml` `[vars]`, set the non-secret pieces:
+   ```toml
+   BTCPAY_URL = "https://btcpay.yourdomain.com"
+   BTCPAY_STORE_ID = "the-store-id"
+   PAID_PRICE_AMOUNT = "10.00"
+   PAID_PRICE_CURRENCY = "USD"
+   PAID_PERIOD_DAYS = "30"        # empty or "0" = lifetime
+   ```
+2. Add the two **secrets** in **Settings → Variables and Secrets** (type
+   **Secret**), or with wrangler:
+   ```bash
+   npx wrangler pages secret put BTCPAY_API_KEY
+   npx wrangler pages secret put BTCPAY_WEBHOOK_SECRET
+   ```
+3. In BTCPay, point the store **webhook** at
+   `https://yourdomain.com/api/btcpay/webhook` (the guide walks through this),
+   and paste that webhook's signing secret into `BTCPAY_WEBHOOK_SECRET`.
+4. Redeploy. The upgrade page switches from "coming soon" to a live pay button.
+
+**How the security holds up** (all enforced in `functions/_lib/`):
+
+- Price, currency and membership length are **server config** — the checkout
+  request from the browser carries none of them, so a tampered form can't buy a
+  cheaper or longer membership.
+- Every webhook is authenticated by an **HMAC‑SHA256 signature over the exact
+  raw body** using `BTCPAY_WEBHOOK_SECRET`; an unsigned or mis‑signed call is
+  rejected before it touches an account.
+- Before crediting, the handler **re‑fetches the invoice from BTCPay** with the
+  store key and re‑checks status (`Settled`), amount, currency and order id — a
+  forged "settled" body can't grant access even if it somehow passed the
+  signature check.
+- Crediting is **idempotent**: `payments.credited_at` is flipped once under a
+  `WHERE credited_at IS NULL` guard, so a replayed webhook can never grant a
+  second period.
+- Invoice creation is **rate‑limited per member** (`RATE_LIMIT_CHECKOUT`), and
+  every checkout, grant and rejection is written to the IP audit log.
+
+> Keep `BTCPAY_API_KEY` scoped to just `btcpay.store.cancreateinvoice` and
+> `btcpay.store.canviewinvoices` on the one store. It can create and read
+> invoices — it can't move funds.
 
 ---
 

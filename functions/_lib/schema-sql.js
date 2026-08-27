@@ -158,4 +158,55 @@ CREATE TABLE IF NOT EXISTS ip_bans (
   expires_at INTEGER,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
+
+-- Client-reported device/browser fingerprints, captured once per browser
+-- session (see public/js/fingerprint.js) and linked to the signed-in user, if
+-- any. fp_hash groups sightings of the same device together so each device
+-- accumulates its own history here — useful for spotting a banned user or
+-- multi-accounter returning behind a new IP or account.
+CREATE TABLE IF NOT EXISTS fingerprints (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  fp_hash     TEXT NOT NULL,
+  user_id     INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  username    TEXT,
+  email       TEXT,
+  ip          TEXT NOT NULL,
+  user_agent  TEXT,
+  device      TEXT,
+  browser     TEXT,
+  os          TEXT,
+  screen      TEXT,
+  language    TEXT,
+  timezone    TEXT,
+  canvas_hash TEXT,
+  created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_fingerprints_hash ON fingerprints(fp_hash);
+CREATE INDEX IF NOT EXISTS idx_fingerprints_user ON fingerprints(user_id);
+CREATE INDEX IF NOT EXISTS idx_fingerprints_created ON fingerprints(created_at);
+
+-- Crypto membership payments via a self-hosted BTCPay Server (see
+-- functions/_lib/btcpay.js). One row per checkout: created when the member
+-- starts a purchase, then advanced by BTCPay's signed webhook. \`order_id\` is
+-- our own random id, embedded in the invoice metadata and used to bind an
+-- incoming webhook back to the member who started it. \`credited_at\` (ms epoch)
+-- is the idempotency guard — set exactly once, so a replayed or duplicate
+-- "settled" webhook can never grant a second membership period. Amounts are
+-- stored as TEXT to preserve the exact decimal the invoice was priced at.
+CREATE TABLE IF NOT EXISTS payments (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  order_id    TEXT NOT NULL UNIQUE,
+  invoice_id  TEXT UNIQUE,
+  user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  username    TEXT,
+  amount      TEXT NOT NULL,
+  currency    TEXT NOT NULL,
+  period_days INTEGER,
+  status      TEXT NOT NULL DEFAULT 'new' CHECK (status IN ('new','processing','settled','expired','invalid')),
+  credited_at INTEGER,
+  created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_payments_user ON payments(user_id);
+CREATE INDEX IF NOT EXISTS idx_payments_status ON payments(status);
 `;

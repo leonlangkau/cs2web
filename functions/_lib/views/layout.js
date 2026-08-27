@@ -16,19 +16,11 @@ function termsGate(ctx) {
     <h2 id="terms-gate-title">Before you continue</h2>
     <p>To use ${esc(ctx.appName)} you need to accept our
       <a href="/terms">Terms &amp; Conditions</a> and <a href="/privacy">Privacy Policy</a>.</p>
-    <ul class="terms-gate-points">
-      <li>You may not tamper with, clone, copy, decompile or redistribute our software.</li>
-      <li>Disputes are resolved by <strong>binding private arbitration</strong>, individually; not in court and not as a class action.</li>
-      <li>We log the IP address, browser and device fingerprint of sign-ups, logins and downloads for security.</li>
-    </ul>
     <form method="post" action="/legal/accept" class="terms-gate-actions">
       <input type="hidden" name="_csrf" value="${esc(ctx.csrfToken)}">
       <input type="hidden" name="next" value="${esc(ctx.path)}">
       <button type="submit" class="btn btn-primary" autofocus>I accept</button>
-      <a class="btn btn-outline" href="/terms">Read the Terms</a>
     </form>
-    <p class="terms-gate-note">Accepting records the date, your IP address and the version you agreed to
-      (<span class="mono">${esc(ctx.termsVersion)}</span>). If you do not accept, please close this page.</p>
   </div>
 </div>`;
 }

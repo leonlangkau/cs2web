@@ -97,9 +97,8 @@ function terms(ctx) {
         <li>downloading, installing or using the GoyHub application; or</li>
         <li>otherwise continuing to use the Service.</li>
       </ul>
-      <p>Our <a href="/privacy">Privacy Policy</a> is incorporated into these Terms by reference. We record
-      the date, IP address and version accepted when you select "I accept". If you do not agree to these
-      Terms, you must not use the Service.</p>` },
+      <p>Our <a href="/privacy">Privacy Policy</a> is incorporated into these Terms by reference. If you do not
+      agree to these Terms, you must not use the Service.</p>` },
 
     { id: 's3', title: 'Eligibility', html: `
       <p>You must be at least ${esc(c.minimumAge)} years old to create a GoyHub account. If the law where you
@@ -444,27 +443,14 @@ function privacy(ctx) {
         <li><strong>Password</strong> — stored only as a salted <span class="mono">PBKDF2-HMAC-SHA256</span> hash. We never store, log or transmit your password in plain text and cannot recover it for you.</li>
         <li><strong>Account status</strong> — your role (member or administrator), whether the account is banned, and when it was created.</li>
       </ul>
-      <h3>3.2 Technical and security data</h3>
-      <p>We automatically record the following each time certain events occur:</p>
-      <ul>
-        <li><strong>IP address</strong> of the connecting device.</li>
-        <li><strong>Browser user-agent string</strong> (browser and operating system identifiers).</li>
-        <li><strong>Event type and timestamp</strong> — specifically for account sign-up, successful login, failed login, blocked login attempt on a banned account, logout, file download, and administrator actions.</li>
-        <li><strong>Session records</strong> — a hashed session identifier, the IP address and user agent the session was created from, and its creation and expiry times.</li>
-        <li><strong>Sign-up IP and most recent login IP</strong>, stored on your account record.</li>
-        <li><strong>The username or email address entered in a failed sign-in attempt</strong> — recorded alongside the IP address and browser even where no such account exists, so that repeated attempts against real accounts can be investigated.</li>
-        <li><strong>Failed human-verification attempts</strong> on the sign-up form, with the reason.</li>
-        <li><strong>Acceptance of these terms</strong> — the date, IP address and version you accepted.</li>
-      </ul>
-      <h3>3.3 Content data</h3>
+      <h3>3.2 Content data</h3>
       <p>The threads, replies, configurations, crosshair codes and other material you submit, together with
       associated metadata such as timestamps, view counts and the category you posted in.</p>
-      <h3>3.4 Application data</h3>
-      <p>Where you sign in to the GoyHub desktop application, we may collect the technical data above together
-      with information the application needs to function — such as your linked game profile identifier, match
-      statistics it retrieves on your behalf, saved configuration profiles, application version, and diagnostic
-      and crash information.</p>
-      <h3>3.5 Correspondence</h3>
+      <h3>3.3 Application data</h3>
+      <p>Where you sign in to the GoyHub desktop application, we may collect information the application needs
+      to function — such as your linked game profile identifier, match statistics it retrieves on your behalf,
+      saved configuration profiles, application version, and diagnostic and crash information.</p>
+      <h3>3.4 Correspondence</h3>
       <p>If you contact us by email or through a support channel, we keep the message, your contact details and
       our reply.</p>` },
 
@@ -484,7 +470,7 @@ function privacy(ctx) {
       <ul>
         <li>create and maintain your account and keep you signed in;</li>
         <li>operate, display and deliver the forum, the website and the application;</li>
-        <li><strong>protect the Service and its users</strong> — detecting and investigating abuse, spam, bot activity, credential-stuffing and brute-force attempts, ban evasion, and multiple-account abuse; enforcing rate limits; and maintaining an audit trail of security-relevant events;</li>
+        <li><strong>protect the Service and its users</strong> — detecting and investigating abuse, spam, bot activity, credential-stuffing and brute-force attempts, ban evasion, and multiple-account abuse; and enforcing rate limits;</li>
         <li>moderate content and enforce our <a href="/terms">Terms &amp; Conditions</a>;</li>
         <li>respond to your support requests and send you service-related messages;</li>
         <li>understand how the Service is used, produce aggregate statistics, and develop and improve our features;</li>
@@ -495,28 +481,7 @@ function privacy(ctx) {
       with you (operating your account), our legitimate interests (security, abuse prevention, moderation and
       improving the Service), your consent where we ask for it, and compliance with legal obligations.</p>` },
 
-    { id: 'p6', title: 'IP address logging', html: `
-      <p>Because GoyHub is a free service with an open sign-up, IP logging is central to how we keep it usable.
-      We record the IP address and browser of each sign-up, login attempt, logout and download, and we retain
-      those records so that our administrators can:</p>
-      <ul>
-        <li>identify and block accounts used for spam, harassment or cheating-related activity;</li>
-        <li>detect when a banned user returns under a new account;</li>
-        <li>investigate suspicious login patterns and protect accounts from takeover;</li>
-        <li>evidence abuse when reporting it to a hosting provider, network operator or authority.</li>
-      </ul>
-      <p>These logs are visible to our administrators through an access-controlled admin interface, and every
-      administrator action against an account is itself logged. Where the Service runs behind a reverse proxy or
-      content delivery network <em>and is configured to trust it</em>, the IP we record is the client address
-      that proxy reports; otherwise it is the address of the system that connected to us, which in such a
-      deployment may be the proxy rather than you.</p>
-      <p>We also collect a device fingerprint from your browser once per browsing session: device type, browser
-      and operating system, screen size, language, timezone, and a canvas-rendering signature. This does not use
-      cookies and works whether or not you are signed in. We use it for the same purposes as IP logging above —
-      chiefly recognising a banned account or an evasion attempt that returns under a new IP or account — and it is
-      visible to our administrators alongside the IP logs.</p>` },
-
-    { id: 'p7', title: 'Public content', html: `
+    { id: 'p6', title: 'Public content', html: `
       <p>The forum is public. Your username, your posts, the time you posted, your join date and your post count
       are visible to anyone visiting the site, including people without an account, and may be indexed by search
       engines and copied or archived by third parties beyond our control.</p>
@@ -538,8 +503,7 @@ function privacy(ctx) {
       <p>We keep personal data for as long as we consider necessary for the purposes it was collected for. In practice:</p>
       <ul>
         <li><strong>Account data</strong> — for as long as your account is open, and afterwards where we need it for security, legal or dispute-resolution purposes.</li>
-        <li><strong>Security and IP logs</strong> — retained for as long as we judge necessary to protect the Service and to detect repeat abuse and ban evasion, which may be indefinitely. This is deliberate: short retention would defeat the purpose of the logs.</li>
-        <li><strong>Session records</strong> — deleted automatically when they expire, and immediately when you log out or are banned.</li>
+        <li><strong>Session records</strong> — deleted automatically when they expire, and immediately when you sign out or are banned.</li>
         <li><strong>Forum content</strong> — retained indefinitely as part of the public record of the forum, including after an account is closed.</li>
         <li><strong>Correspondence</strong> — for as long as needed to handle your request and keep a record of it.</li>
       </ul>
@@ -552,10 +516,10 @@ function privacy(ctx) {
         <li>salted <span class="mono">PBKDF2-HMAC-SHA256</span> password hashing — plain-text passwords are never stored;</li>
         <li>server-side sessions where only a hash of the session token is stored, with <span class="mono">HttpOnly</span> cookies;</li>
         <li>cross-site request forgery protection bound to your session;</li>
-        <li>rate limiting on login, sign-up, posting and downloads;</li>
+        <li>rate limiting on sign-in, sign-up, posting and downloads;</li>
         <li>a proof-of-work human-verification check on sign-up;</li>
         <li>a strict content security policy and other hardened HTTP security headers;</li>
-        <li>administrator access restricted to authorised accounts, with every administrative action recorded.</li>
+        <li>administrator access restricted to authorised accounts.</li>
       </ul>
       <p>No online service can be completely secure. You are responsible for keeping your password confidential
       and for the security of the device you use. If we become aware of a breach affecting your personal data,
@@ -576,7 +540,7 @@ function privacy(ctx) {
       <p>To make a request, email ${mailPrivacy} from the address registered to your account. We may ask you for
       information to verify your identity before we act, and we will respond within the period required by
       applicable law.</p>
-      <p>Please note two limits. First, we may retain security and IP logs, and records needed to enforce bans or
+      <p>Please note two limits. First, we may retain records needed to enforce bans or
       to establish, exercise or defend legal claims, even after an account is deleted. Second, deleting an
       account does not delete the threads and replies you posted: removing them would break the conversations
       other members took part in, so they stay on the forum and are <strong>reattributed to
@@ -606,10 +570,8 @@ function privacy(ctx) {
 
   sections.summary = summaryBlock([
     'We collect your username, email address and a hashed password when you sign up.',
-    'We log the <strong>IP address, browser and timestamp</strong> of every sign-up, login, failed login, logout and download, for security and abuse prevention.',
     'Forum posts are public and are indexed by search engines.',
     'We use strictly necessary cookies to keep you signed in. We don\'t sell your data.',
-    'We keep security logs for as long as we consider necessary to protect the Service.',
   ]);
 
   return render(ctx, {

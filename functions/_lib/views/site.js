@@ -189,8 +189,7 @@ function downloadPage(ctx, { downloadMeta }) {
     </ol>
     <h2>System requirements</h2>
     <ul class="muted"><li>Windows 10 or 11, 64-bit</li><li>2 GB RAM · 200 MB disk space</li><li>Counter-Strike 2 installed via Steam</li></ul>
-    <p class="fineprint">Downloads are logged (IP address, browser and timestamp) for security and abuse prevention.
-      See our <a href="/privacy">Privacy Policy</a>. Installing GoyHub is subject to our
+    <p class="fineprint">See our <a href="/privacy">Privacy Policy</a>. Installing GoyHub is subject to our
       <a href="/terms">Terms &amp; Conditions</a>. Trouble installing? Ask in the
       <a href="/forum/c/support">Support forum</a>.</p>
   </div>

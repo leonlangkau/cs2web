@@ -72,8 +72,7 @@ function signup(ctx, { errors = [], values = {} } = {}) {
     </form>
     <p class="muted center">Already have an account? <a href="/auth/login">Log in</a></p>
     <p class="fineprint">By signing up you agree to our <a href="/terms">Terms &amp; Conditions</a> and
-      <a href="/privacy">Privacy Policy</a>. For security and anti-abuse, we record the IP address
-      and browser of sign-ups, logins and downloads.</p>
+      <a href="/privacy">Privacy Policy</a>.</p>
   </div>
 </section>`;
   const scripts = ['/js/captcha.js'];

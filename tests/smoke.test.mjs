@@ -163,7 +163,7 @@ test("public pages, forum, legal, gate, auth, captcha, admin, moderation, downlo
 
   res = await anon.get("/privacy");
   html = await res.text();
-  assert.ok(html.includes("IP address logging") && html.includes("ghsession") && html.includes("PBKDF2"), "privacy content");
+  assert.ok(html.includes("ghsession") && html.includes("PBKDF2"), "privacy content");
 
   // Terms gate
   const visitor = makeClient(app);

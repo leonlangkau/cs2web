@@ -7,6 +7,7 @@ import { hashPassword } from "./crypto.js";
 import { setSetting, ANNOUNCEMENT_KEY } from "./settings.js";
 import { btcpayConfig } from "./btcpay.js";
 import { verifyAndCredit, sweepOpenPayments } from "./fulfil.js";
+import { storePlans, planDuration } from "./plans.js";
 
 const LOGS_PER_PAGE = 50;
 const USERS_PER_PAGE = 25;
@@ -161,6 +162,145 @@ function register(app) {
     )).map(maskUser);
 
     return c.html(views.users(c.get('view'), { users, q, page, pages, total, tiers: TIERS, tierLabels: TIER_LABELS }));
+  });
+
+  // --- Shop products -------------------------------------------------------
+
+  const PRICE_RE = /^\d{1,7}(\.\d{1,2})?$/;
+
+  /**
+   * Slug from a product name, uniqued against what is already there. The slug
+   * is what a buy form submits, so it must be stable and URL-safe — but the
+   * admin never has to think about it.
+   */
+  async function uniqueSlug(db, name) {
+    const base = String(name).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 20)
+      || 'plan';
+    let slug = base;
+    for (let n = 2; await db.get('SELECT id FROM products WHERE slug = ?', slug); n += 1) {
+      slug = `${base}-${n}`;
+    }
+    return slug;
+  }
+
+  /**
+   * Reads the length from the form: the custom days box wins over the preset
+   * list when it holds a number, and 0 (either way) means lifetime.
+   */
+  function readPeriodDays(body) {
+    const custom = String(body.custom_days || '').trim();
+    const raw = custom !== '' ? Number(custom) : Number(body.period_days);
+    if (!Number.isInteger(raw) || raw < 0 || raw > 3650) return { error: 'Length must be a whole number of days, 0–3650 (0 = lifetime).' };
+    return { days: raw === 0 ? null : raw };
+  }
+
+  function readProductForm(body) {
+    const name = String(body.name || '').trim().slice(0, 40);
+    if (!name) return { error: 'Give the product a name.' };
+    const amount = String(body.amount || '').trim();
+    if (!PRICE_RE.test(amount) || Number(amount) <= 0) {
+      return { error: 'Price must be a positive number with at most two decimals, e.g. 9.99.' };
+    }
+    const period = readPeriodDays(body);
+    if (period.error) return period;
+    const positionRaw = Number(String(body.position || '').trim());
+    return {
+      name, amount, days: period.days,
+      description: String(body.description || '').trim().slice(0, 120),
+      position: Number.isInteger(positionRaw) ? positionRaw : null,
+    };
+  }
+
+  app.get('/admin/shop', async (c) => {
+    const gate = requireAdmin(c);
+    if (gate) return gate;
+    const db = c.get('db');
+    const env = c.get('cfg');
+    const products = await db.all('SELECT * FROM products ORDER BY position ASC, id ASC');
+    return c.html(views.shop(c.get('view'), {
+      products,
+      currency: btcpayConfig(env).currency,
+      live: btcpayConfig(env).configured,
+      usingEnvFallback: products.filter((p) => p.active).length === 0,
+      envPlans: storePlans(env),
+    }));
+  });
+
+  app.post('/admin/shop/new', async (c) => {
+    const gate = requireAdmin(c);
+    if (gate) return gate;
+    const db = c.get('db');
+    const form = readProductForm(await formBody(c));
+    if (form.error) {
+      setFlash(c, 'error', form.error);
+      return c.redirect('/admin/shop', 302);
+    }
+    // New products land at the end unless a position was given.
+    const last = Number((await db.get('SELECT MAX(position) AS n FROM products'))?.n || 0);
+    const slug = await uniqueSlug(db, form.name);
+    await db.run(
+      `INSERT INTO products (slug, name, description, amount, period_days, position)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+      slug, form.name, form.description, form.amount, form.days,
+      form.position === null ? last + 1 : form.position
+    );
+    await adminAudit(c, `added product ${slug} (${form.name}, ${form.amount}, `
+      + `${planDuration(form.days)})`);
+    setFlash(c, 'success', `Added "${form.name}" — it is on sale at /buy now.`);
+    return c.redirect('/admin/shop', 302);
+  });
+
+  const findProduct = async (c) => {
+    const id = intParam(c.req.param('id'), -1);
+    return id > 0 ? c.get('db').get('SELECT * FROM products WHERE id = ?', id) : null;
+  };
+
+  app.post('/admin/shop/:id/edit', async (c) => {
+    const gate = requireAdmin(c);
+    if (gate) return gate;
+    const product = await findProduct(c);
+    if (!product) return notFound(c, 'No such product.');
+    const form = readProductForm(await formBody(c));
+    if (form.error) {
+      setFlash(c, 'error', form.error);
+      return c.redirect('/admin/shop', 302);
+    }
+    await c.get('db').run(
+      `UPDATE products SET name = ?, description = ?, amount = ?, period_days = ?, position = ?,
+         updated_at = datetime('now') WHERE id = ?`,
+      form.name, form.description, form.amount, form.days,
+      form.position === null ? product.position : form.position, product.id
+    );
+    await adminAudit(c, `edited product ${product.slug}: ${form.name}, ${form.amount}, ${planDuration(form.days)}`);
+    setFlash(c, 'success', `Updated "${form.name}". Orders already placed keep their original price.`);
+    return c.redirect('/admin/shop', 302);
+  });
+
+  app.post('/admin/shop/:id/toggle', async (c) => {
+    const gate = requireAdmin(c);
+    if (gate) return gate;
+    const product = await findProduct(c);
+    if (!product) return notFound(c, 'No such product.');
+    const next = product.active ? 0 : 1;
+    await c.get('db').run(
+      "UPDATE products SET active = ?, updated_at = datetime('now') WHERE id = ?", next, product.id
+    );
+    await adminAudit(c, `${next ? 'showed' : 'hid'} product ${product.slug}`);
+    setFlash(c, 'success', `"${product.name}" is ${next ? 'back on sale' : 'hidden from the shop'}.`);
+    return c.redirect('/admin/shop', 302);
+  });
+
+  app.post('/admin/shop/:id/delete', async (c) => {
+    const gate = requireAdmin(c);
+    if (gate) return gate;
+    const product = await findProduct(c);
+    if (!product) return notFound(c, 'No such product.');
+    // Payments snapshot their own price and plan name, so removing a product
+    // never disturbs an order that was placed against it.
+    await c.get('db').run('DELETE FROM products WHERE id = ?', product.id);
+    await adminAudit(c, `deleted product ${product.slug} (${product.name})`);
+    setFlash(c, 'success', `Deleted "${product.name}". Past orders are unaffected.`);
+    return c.redirect('/admin/shop', 302);
   });
 
   // --- Crypto payments -----------------------------------------------------

@@ -214,11 +214,14 @@ function upgradePage(ctx, { pay }) {
   const csrf = `<input type="hidden" name="_csrf" value="${esc(ctx.csrfToken)}">`;
 
   let payBlock;
-  if (pay.btcpay && pay.btcpay.configured) {
+  const catalogue = (pay.btcpay && pay.btcpay.plans) || [];
+  // A configured BTCPay with nothing in the shop yet is not a checkout —
+  // fall through to the honest "coming soon" rather than an empty grid.
+  if (pay.btcpay && pay.btcpay.configured && catalogue.length > 0) {
     // Automated, self-hosted BTCPay checkout. One card per plan; the plan id is
     // the only thing the form carries — the price attached to it is read from
     // the server-side catalogue, never from this page.
-    const plans = pay.btcpay.plans || [];
+    const plans = catalogue;
     const currency = pay.btcpay.currency;
 
     const planCard = (plan) => `<article class="plan-card">
@@ -226,6 +229,7 @@ function upgradePage(ctx, { pay }) {
         <p class="plan-price"><span class="plan-amount">${esc(plan.amount)}</span>
           <span class="plan-currency">${esc(currency)}</span></p>
         <p class="plan-term">${esc(planDuration(plan.periodDays))}</p>
+        ${plan.description ? `<p class="plan-blurb">${esc(plan.description)}</p>` : ''}
         ${ctx.user
           ? `<form method="post" action="/upgrade/checkout">${csrf}
               <input type="hidden" name="plan" value="${esc(plan.id)}">

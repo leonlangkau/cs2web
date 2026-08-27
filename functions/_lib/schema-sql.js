@@ -211,4 +211,26 @@ CREATE TABLE IF NOT EXISTS payments (
 );
 CREATE INDEX IF NOT EXISTS idx_payments_user ON payments(user_id);
 CREATE INDEX IF NOT EXISTS idx_payments_status ON payments(status);
+
+-- Shop products, managed from the admin backend (Admin -> Shop). Each row is a
+-- membership length for sale: \`period_days\` NULL means lifetime, and \`amount\`
+-- is the price in the store's currency. Prices are ALWAYS read from here (or
+-- from STORE_PLANS when this table is empty) at checkout — never from the
+-- buyer's form, which carries only a slug — and each order snapshots what it
+-- was sold at, so editing a product never rewrites a purchase already made.
+-- Deactivating instead of deleting keeps a product out of the shop while its
+-- past orders still make sense.
+CREATE TABLE IF NOT EXISTS products (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  slug        TEXT NOT NULL UNIQUE,
+  name        TEXT NOT NULL,
+  description TEXT NOT NULL DEFAULT '',
+  amount      TEXT NOT NULL,
+  period_days INTEGER,
+  position    INTEGER NOT NULL DEFAULT 0,
+  active      INTEGER NOT NULL DEFAULT 1,
+  created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_products_active ON products(active, position);
 `;

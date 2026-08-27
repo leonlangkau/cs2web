@@ -1892,3 +1892,110 @@ test("fulfilment: the admin sweep catches a buyer who paid and never came back",
     globalThis.fetch = realFetch;
   }
 });
+
+test("admin shop: products added in the panel are what /buy sells and what checkout charges", async () => {
+  const BTCPAY_ENV = {
+    ...ENV,
+    BTCPAY_URL: "https://btcpay.test",
+    BTCPAY_STORE_ID: "STORE1",
+    BTCPAY_API_KEY: "greenfield-key",
+    BTCPAY_WEBHOOK_SECRET: "hook-secret-123",
+    PAID_PRICE_CURRENCY: "USD",
+  };
+  const { app, db } = await buildTestApp(BTCPAY_ENV);
+
+  let created = null;
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (url, opts = {}) => {
+    if (opts.method === "POST" && String(url).endsWith("/invoices")) {
+      created = JSON.parse(opts.body);
+      return Response.json({ id: "INV_SHOP", checkoutLink: "https://btcpay.test/i/INV_SHOP", status: "New" });
+    }
+    return Response.json({}, { status: 404 });
+  };
+
+  try {
+    globalThis.PBKDF2_ITERATIONS_OVERRIDE = "10000";
+    const admin = makeClient(app);
+    await admin.get("/auth/login");
+    await admin.post("/auth/login", { identifier: "admin", password: "admin-test-password-1", next: "/admin" });
+
+    // Nothing for sale yet: the shop is empty and /buy says so rather than
+    // rendering an empty grid.
+    let html = await (await admin.get("/admin/shop")).text();
+    assert.ok(html.includes("No products yet"), "empty shop states it plainly");
+    assert.ok((await (await admin.get("/buy")).text()).includes("being set up"),
+      "a connected BTCPay with no products is not a checkout");
+
+    // Add the lengths the shop should offer, including a custom one.
+    await admin.post("/admin/shop/new", { name: "1 day", amount: "1.50", period_days: "1" });
+    await admin.post("/admin/shop/new", { name: "7 days", amount: "5.00", period_days: "7" });
+    await admin.post("/admin/shop/new", { name: "30 days", amount: "9.99", period_days: "30",
+      description: "Full access for a month." });
+    await admin.post("/admin/shop/new", { name: "90 days", amount: "24.99", period_days: "90" });
+    await admin.post("/admin/shop/new", { name: "365 days", amount: "79.99", period_days: "365" });
+    await admin.post("/admin/shop/new", { name: "Lifetime", amount: "149.99", period_days: "0" });
+    await admin.post("/admin/shop/new", { name: "Fortnight", amount: "3.00", period_days: "30", custom_days: "14" });
+
+    const products = await db.all("SELECT * FROM products ORDER BY position");
+    assert.equal(products.length, 7);
+    assert.equal(products.find((p) => p.name === "Lifetime").period_days, null, "0 days stored as lifetime");
+    assert.equal(products.find((p) => p.name === "Fortnight").period_days, 14, "custom days beats the preset");
+    assert.deepEqual(products.map((p) => p.slug).slice(0, 3), ["1-day", "7-days", "30-days"], "slugs derived from names");
+
+    // Bad input is refused rather than stored as a broken price.
+    await admin.post("/admin/shop/new", { name: "Free stuff", amount: "free", period_days: "30" });
+    await admin.post("/admin/shop/new", { name: "", amount: "5.00", period_days: "30" });
+    await admin.post("/admin/shop/new", { name: "Forever", amount: "5.00", custom_days: "99999" });
+    assert.equal(Number((await db.get("SELECT COUNT(*) AS n FROM products")).n), 7, "invalid products rejected");
+
+    // /buy now offers exactly those products.
+    html = await (await admin.get("/buy")).text();
+    for (const label of ["1 day", "7 days", "30 days", "90 days", "365 days", "Lifetime"]) {
+      assert.ok(html.includes(label), `${label} offered at /buy`);
+    }
+    assert.ok(html.includes("Full access for a month."), "the blurb shows on the card");
+
+    // Buying one charges that product's price and length.
+    const member = makeClient(app);
+    const { hashPassword } = await import("../functions/_lib/crypto.js");
+    await db.run("INSERT INTO users (username, email, password_hash, tier) VALUES ('shopper','s@e.com',?, 'user')",
+      await hashPassword("buyer-pass-123"));
+    await member.get("/auth/login");
+    await member.post("/auth/login", { identifier: "shopper", password: "buyer-pass-123", next: "/" });
+    await member.post("/upgrade/checkout", { plan: "90-days" });
+    assert.equal(created.amount, "24.99", "invoice priced from the product row");
+    const payment = await db.get("SELECT * FROM payments ORDER BY id DESC LIMIT 1");
+    assert.equal(payment.period_days, 90);
+    assert.equal(payment.plan_id, "90-days");
+
+    // Editing a price must not rewrite an order already placed.
+    const ninety = products.find((p) => p.slug === "90-days");
+    await admin.post(`/admin/shop/${ninety.id}/edit`,
+      { name: "90 days", amount: "29.99", period_days: "90" });
+    assert.equal((await db.get("SELECT amount FROM payments WHERE id = ?", payment.id)).amount, "24.99",
+      "the placed order keeps its original price");
+    assert.equal((await db.get("SELECT amount FROM products WHERE id = ?", ninety.id)).amount, "29.99");
+
+    // Hiding takes it off /buy without touching history; deleting is permanent.
+    await admin.post(`/admin/shop/${ninety.id}/toggle`);
+    assert.ok(!(await (await admin.get("/buy")).text()).includes('value="90-days"'), "hidden product leaves the shop");
+    assert.equal((await member.post("/upgrade/checkout", { plan: "90-days" })).headers.get("location"), "/buy",
+      "and can no longer be bought");
+    await admin.post(`/admin/shop/${ninety.id}/delete`);
+    assert.ok(!(await db.get("SELECT id FROM products WHERE id = ?", ninety.id)));
+    assert.ok(await db.get("SELECT id FROM payments WHERE id = ?", payment.id), "its past order survives");
+
+    // Staff below full admin can't manage products at all.
+    await db.run("INSERT INTO users (username, email, password_hash, tier) VALUES ('devguy','d@e.com',?, 'developer')",
+      await hashPassword("dev-pass-123"));
+    const dev = makeClient(app);
+    await dev.get("/auth/login");
+    await dev.post("/auth/login", { identifier: "devguy", password: "dev-pass-123", next: "/" });
+    assert.equal((await dev.get("/admin/shop")).status, 404, "shop is full-admin only");
+    await dev.post("/admin/shop/new", { name: "Sneaky", amount: "0.01", period_days: "365" });
+    assert.equal(Number((await db.get("SELECT COUNT(*) AS n FROM products")).n), 6, "and its actions are too");
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+});

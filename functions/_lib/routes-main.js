@@ -11,6 +11,7 @@ import { issueLicense } from "./license.js";
 import { newToken } from "./crypto.js";
 import { btcpayConfig } from "./btcpay.js";
 import { reconcileForUser } from "./fulfil.js";
+import { resolvePlans } from "./plans.js";
 
 /**
  * Per-download filename so the served attachment is never a predictable,
@@ -60,7 +61,7 @@ async function siteStats(db) {
  *   PAID_PRICE           display string, e.g. "$10 / month"
  * With none set, the upgrade page shows an honest "coming soon" + contact.
  */
-function paymentConfig(env = {}) {
+function paymentConfig(env = {}, plans = null) {
   const addresses = String(env.CRYPTO_PAY_ADDRESSES || '')
     .split(',')
     .map((pair) => {
@@ -73,10 +74,16 @@ function paymentConfig(env = {}) {
     .filter(Boolean);
 
   const btc = btcpayConfig(env);
+  // The live catalogue (admin-managed products, else the env fallback) when the
+  // caller resolved one; otherwise just what env describes.
+  const catalogue = plans || btc.plans;
   // Display price: the explicit PAID_PRICE string wins; otherwise compose one
-  // from the BTCPay amount/currency when that path is configured.
+  // from the cheapest thing actually on sale.
+  const cheapest = catalogue.length > 0
+    ? catalogue.reduce((a, b) => (Number(b.amount) < Number(a.amount) ? b : a))
+    : null;
   const price = String(env.PAID_PRICE || '').trim()
-    || (btc.configured ? `${btc.amount} ${btc.currency}` : '');
+    || (btc.configured && cheapest ? `from ${cheapest.amount} ${btc.currency}` : '');
 
   return {
     btcpay: {
@@ -84,7 +91,7 @@ function paymentConfig(env = {}) {
       currency: btc.currency,
       amount: btc.amount,
       periodDays: btc.periodDays,
-      plans: btc.plans,
+      plans: catalogue,
     },
     url: String(env.CRYPTO_PAY_URL || '').trim(),
     addresses,
@@ -168,7 +175,7 @@ function register(app) {
     const user = c.get('user');
     if (user) await reconcileForUser(c, btcpayConfig(c.get('cfg')), user.id);
     return c.html(views.upgradePage(c.get('view'), {
-      pay: paymentConfig(c.get('cfg')),
+      pay: paymentConfig(c.get('cfg'), await resolvePlans(c.get('db'), c.get('cfg'))),
     }));
   };
   app.get('/buy', buyPage);

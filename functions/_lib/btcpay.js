@@ -60,7 +60,11 @@ function btcpayConfig(env = {}) {
   const amount = plans.length > 0 ? plans[0].amount : '';
   const periodDays = plans.length > 0 ? plans[0].periodDays : null;
 
-  const configured = Boolean(url && storeId && apiKey && webhookSecret && amount);
+  // `configured` describes the CONNECTION to the store: can we create and read
+  // invoices, and authenticate a callback? What is for sale is a separate
+  // question now that products are managed in the admin panel rather than in
+  // env — a shop with no products yet is still a working BTCPay setup.
+  const configured = Boolean(url && storeId && apiKey && webhookSecret);
   return { url, storeId, apiKey, webhookSecret, amount, currency, periodDays, plans, configured };
 }
 

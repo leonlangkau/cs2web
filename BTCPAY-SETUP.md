@@ -44,19 +44,23 @@ It is written for **Ubuntu 24.04 LTS** on a **2 vCPU / 4 GB RAM** VPS, over
 
 ---
 
-## Plans, and how a payment becomes a membership
+## Products, and how a payment becomes a membership
 
-`PAID_PRICE_AMOUNT` sells one membership length. To offer several, set
-`STORE_PLANS` instead (see `wrangler.toml`):
+Add what you sell in **Admin → Shop** (full admin only). Each product is one
+membership length — 1 day, 7 days, 30, 90, 365, lifetime, or any custom number
+of days — with a price and an optional blurb. `/buy` shows one card per active
+product, cheapest ordering under your control.
 
-```
-STORE_PLANS = "m1:1 Month:9.99:30,m12:12 Months:79.99:365,life:Lifetime:149.99:0"
-```
+Two fallbacks exist for a deployment that would rather keep its catalogue in
+config, used only while the products table is empty: `STORE_PLANS`
+(`"id:Name:amount:days,…"`, days `0` = lifetime) and the original single
+`PAID_PRICE_AMOUNT` / `PAID_PERIOD_DAYS` pair. Adding the first product in the
+admin panel quietly takes over from both.
 
-`/buy` then shows one card per plan. The buyer's form carries only a plan **id**;
-the price and period are read from this catalogue server-side, snapshotted onto
-the order at checkout, and re-verified against the invoice before anything is
-granted. A later price change never alters an order already in flight.
+The buyer's form carries only a product **slug**; the price and period are read
+server-side, snapshotted onto the order at checkout, and re-verified against the
+invoice before anything is granted. Editing or deleting a product never rewrites
+an order already placed, and a payment in flight settles at its original price.
 
 **Fulfilment does not depend on the webhook arriving.** The same verified
 credit path runs from four places:

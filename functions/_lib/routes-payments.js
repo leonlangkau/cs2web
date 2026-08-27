@@ -22,7 +22,7 @@ import { tooMany } from "./routes-main.js";
 import { isStaff, normalizeTier } from "./tiers.js";
 import { btcpayConfig, createInvoice, verifyWebhookSignature } from "./btcpay.js";
 import { verifyAndCredit, reconcileForUser } from "./fulfil.js";
-import { findPlan, planDuration } from "./plans.js";
+import { resolvePlan, resolvePlans, planDuration } from "./plans.js";
 
 function register(app) {
   // Start a purchase: create a pending payment row + a BTCPay invoice, then
@@ -62,7 +62,9 @@ function register(app) {
     // plan is refused rather than quietly charged at the default price.
     const body = await formBody(c);
     const requested = String(body.plan || '').trim();
-    const plan = requested ? findPlan(env, requested) : (cfg.plans[0] || null);
+    const plan = requested
+      ? await resolvePlan(db, env, requested)
+      : ((await resolvePlans(db, env))[0] || null);
     if (!plan) {
       setFlash(c, 'error', 'That membership plan is not available.');
       return c.redirect('/buy', 302);

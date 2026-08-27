@@ -772,6 +772,7 @@ textarea { resize: vertical; min-height: 90px; }
   background: var(--bg-2); border: 1px solid var(--border);
   border-radius: var(--radius-ctl); padding: 1.1rem 1rem;
 }
+.plan-blurb { font-size: 0.85rem; color: var(--muted); margin: 0.1rem 0 0.3rem; }
 .plan-card form { margin-top: auto; padding-top: 0.7rem; }
 .plan-card .btn { margin-top: 0; }
 .plan-name { font-family: var(--font-display); font-size: 1rem; font-weight: 700; margin: 0; }

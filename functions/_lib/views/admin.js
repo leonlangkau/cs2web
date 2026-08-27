@@ -1,6 +1,7 @@
 import { page } from "./layout.js";
 import { esc, timeAgo, map, pagination } from "./util.js";
 import { TIER_LABELS, STAFF_TIERS, isFullAdmin } from "../tiers.js";
+import { planDuration, PERIOD_PRESETS } from "../plans.js";
 
 const tierTag = (tier) => tier && tier !== 'user'
   ? ` <span class="tag tag-tier tag-tier-${esc(tier)}">${esc(TIER_LABELS[tier] || tier)}</span>` : '';
@@ -14,6 +15,7 @@ function head(ctx, heading) {
   <nav class="admin-tabs" aria-label="Admin sections">
     ${tab('/admin', 'Dashboard', p === '/admin')}
     ${tab('/admin/users', 'Users', p.startsWith('/admin/users'))}
+    ${tab('/admin/shop', 'Shop', p.startsWith('/admin/shop'))}
     ${tab('/admin/payments', 'Payments', p.startsWith('/admin/payments'))}
     ${tab('/admin/logs', 'IP logs', p.startsWith('/admin/logs'))}
     ${tab('/admin/fingerprints', 'Fingerprints', p.startsWith('/admin/fingerprints'))}
@@ -198,6 +200,101 @@ function users(ctx, { users: rows, q, page: current, pages, total, tiers, tierLa
  * only, because it grants a paid membership without a confirmed payment.
  * "Re-check" is staff-level — it only ever applies BTCPay's own verdict.
  */
+/**
+ * Shop products — the membership lengths on sale at /buy.
+ *
+ * Full admin only: a product is a price, and editing one changes what members
+ * are charged. Editing never touches an order already placed (each payment
+ * snapshots what it was sold at), so the risk here is future sales, not past
+ * ones — which is why deactivating is offered next to deleting.
+ */
+function shop(ctx, { products, currency, live, usingEnvFallback, envPlans }) {
+  const csrf = `<input type="hidden" name="_csrf" value="${esc(ctx.csrfToken)}">`;
+
+  const periodOptions = (selected) => map(PERIOD_PRESETS, (opt) =>
+    `<option value="${esc(opt.days)}" ${Number(selected) === opt.days ? 'selected' : ''}>${esc(opt.label)}</option>`);
+
+  const row = (p) => `<tr class="${p.active ? '' : 'row-resolved'}">
+    <td>
+      <details class="admin-user-tools">
+        <summary><strong>${esc(p.name)}</strong>${p.active ? '' : ' <span class="tag tag-lock">HIDDEN</span>'}</summary>
+        <form method="post" action="/admin/shop/${esc(p.id)}/edit" class="stack cat-edit-form">${csrf}
+          <label><span>Name</span><input type="text" name="name" value="${esc(p.name)}" maxlength="40" required></label>
+          <label><span>Price (${esc(currency)})</span>
+            <input type="text" name="amount" value="${esc(p.amount)}" inputmode="decimal" required></label>
+          <label><span>Length</span>
+            <select name="period_days">${periodOptions(p.period_days === null ? 0 : p.period_days)}</select></label>
+          <label><span>Custom length in days <small class="muted">(overrides the list; 0 = lifetime)</small></span>
+            <input type="text" name="custom_days" inputmode="numeric" placeholder="e.g. 14"></label>
+          <label><span>Blurb <small class="muted">(optional, shown on the card)</small></span>
+            <input type="text" name="description" value="${esc(p.description || '')}" maxlength="120"></label>
+          <label><span>Sort order</span>
+            <input type="text" name="position" value="${esc(p.position)}" inputmode="numeric"></label>
+          <button class="btn btn-primary btn-sm" type="submit">Save changes</button>
+        </form>
+      </details>
+      <div class="muted mono">${esc(p.slug)}</div>
+    </td>
+    <td class="nowrap">${esc(p.amount)} ${esc(currency)}</td>
+    <td class="nowrap">${esc(planDuration(p.period_days === null || p.period_days === undefined ? null : Number(p.period_days)))}</td>
+    <td class="muted">${esc(p.position)}</td>
+    <td class="actions-cell">
+      <form method="post" action="/admin/shop/${esc(p.id)}/toggle" class="inline-form">${csrf}
+        <button class="btn btn-ghost btn-xs" type="submit">${p.active ? 'Hide' : 'Show'}</button></form>
+      <form method="post" action="/admin/shop/${esc(p.id)}/delete" class="inline-form"
+        data-confirm="Delete ${esc(p.name)}? Orders already placed keep their own price and are unaffected.">${csrf}
+        <button class="btn btn-danger btn-xs" type="submit">Delete</button></form>
+    </td></tr>`;
+
+  const fallbackNote = usingEnvFallback
+    ? `<p class="muted">No products yet, so /buy is falling back to the catalogue in your environment
+        config${envPlans.length ? ` (${esc(envPlans.map((p) => p.name).join(', '))})` : ''}.
+        Adding one below takes over from it.</p>`
+    : '';
+
+  const body = `
+<div class="section admin-page">
+  <div class="container">
+    ${head(ctx, 'Shop')}
+    ${live ? '' : `<p class="muted">BTCPay is not connected yet, so nothing here can be bought —
+      see <span class="mono">BTCPAY-SETUP.md</span>. You can still set your products up in advance.</p>`}
+    ${fallbackNote}
+    <div class="panel"><div class="table-wrap"><table>
+      <thead><tr><th>Product</th><th>Price</th><th>Length</th><th>Order</th><th></th></tr></thead>
+      <tbody>${products.length
+        ? map(products, row)
+        : '<tr><td colspan="5" class="muted center">No products yet — add your first one below.</td></tr>'}</tbody>
+    </table></div>
+      <form method="post" action="/admin/shop/new" class="stack panel-form">${csrf}
+        <h3>Add a product</h3>
+        <p class="muted">Each product sells one membership length. Prices are in
+          <strong>${esc(currency)}</strong>, the currency BTCPay prices invoices in
+          (<span class="mono">PAID_PRICE_CURRENCY</span>).</p>
+        <div class="form-row">
+          <label><span>Name</span>
+            <input type="text" name="name" maxlength="40" required placeholder="e.g. 30 days"></label>
+          <label><span>Price (${esc(currency)})</span>
+            <input type="text" name="amount" inputmode="decimal" required placeholder="9.99"></label>
+        </div>
+        <div class="form-row">
+          <label><span>Length</span>
+            <select name="period_days">${periodOptions(30)}</select></label>
+          <label><span>Custom length in days <small class="muted">(overrides the list; 0 = lifetime)</small></span>
+            <input type="text" name="custom_days" inputmode="numeric" placeholder="e.g. 14"></label>
+        </div>
+        <label><span>Blurb <small class="muted">(optional, shown on the card)</small></span>
+          <input type="text" name="description" maxlength="120" placeholder="Full access for a month."></label>
+        <button class="btn btn-primary" type="submit">Add product</button>
+      </form>
+    </div>
+    <p class="fineprint">Changing a price only affects future purchases — every order snapshots what it was
+      sold at, and a payment already in flight settles at its original price. Hiding a product removes it from
+      /buy while keeping its history readable.</p>
+  </div>
+</div>`;
+  return page(ctx, { title: 'Admin · Shop', body });
+}
+
 function payments(ctx, { rows, status, statuses, page: current, pages, total, live, swept }) {
   const csrf = `<input type="hidden" name="_csrf" value="${esc(ctx.csrfToken)}">`;
   const canCredit = isFullAdmin(ctx.user);
@@ -516,4 +613,4 @@ function forumAdmin(ctx, { categories, threads }) {
   return page(ctx, { title: 'Admin · Forum', body });
 }
 
-export { dashboard, users, payments, logs, fingerprints, fingerprintDetail, reports, forumAdmin };
+export { dashboard, users, shop, payments, logs, fingerprints, fingerprintDetail, reports, forumAdmin };

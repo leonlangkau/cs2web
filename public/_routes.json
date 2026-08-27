@@ -2,5 +2,5 @@
   "version": 1,
   "description": "The Function handles all HTML routes (plus robots.txt and sitemap.xml, which need the request origin); static assets are excluded so they serve straight from the edge. '/' additionally has its own functions/index.js so the bare root is always served by a Function.",
   "include": ["/*"],
-  "exclude": ["/css/*", "/js/*", "/favicon.ico"]
+  "exclude": ["/css/*", "/js/*", "/fonts/*", "/favicon.ico"]
 }

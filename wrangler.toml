@@ -27,11 +27,11 @@ COMPANY_LEGAL_EMAIL = "legal@goyhub.st"
 CAPTCHA_DIFFICULTY = "16"
 PBKDF2_ITERATIONS = "100000"
 
-# Rate limits: attempts per window (10 min / hour / minute / hour / minute).
+# Rate limits: attempts per window (10 min / hour / minute / 3 hours / minute).
 RATE_LIMIT_LOGIN = "10"
 RATE_LIMIT_SIGNUP = "5"
 RATE_LIMIT_POST = "6"
-RATE_LIMIT_DOWNLOAD = "3"
+RATE_LIMIT_DOWNLOAD = "20"  # per IP per 3h; staff/admin are exempt entirely (see routes-main.js)
 RATE_LIMIT_SHOUT = "3"
 RATE_LIMIT_REPORT = "5"
 
@@ -46,36 +46,38 @@ RATE_LIMIT_FLOOD = "5"
 AUTO_IP_BAN_MINUTES = "60"
 SIGNUP_SURGE_LIMIT = "30"
 
-# Store (/store, with /buy and /upgrade as aliases).
+# Crypto payments (the /upgrade page). All optional — with none set the page
+# shows an honest "payments coming soon" note with the support contact.
 #
-# Plans live in functions/_lib/store.js. STORE_PLANS overrides them without a
-# deploy — "id:Name:price:days,…", days 0 meaning lifetime. An entry that does
-# not parse is dropped rather than shipped as a broken price.
-# STORE_PLANS = "1m:1 Month:9.99:30,3m:3 Months:24.99:90,12m:12 Months:79.99:365,lifetime:Lifetime:149.99:0"
-# STORE_CURRENCY = "USD"       # what BTCPay prices the invoice in
-# RATE_LIMIT_CHECKOUT = "10"   # invoices per account per hour
-#
-# Bitcoin checkout runs on your own BTCPay Server. It stays off — and the store
-# page says so plainly — until all four settings exist. The two secrets belong
-# in the Pages dashboard, never in this file:
-#   BTCPAY_URL             https://btcpay.example.com               (plain var)
-#   BTCPAY_STORE_ID        the store id from its BTCPay settings URL (plain var)
-#   BTCPAY_API_KEY         SECRET — API key with the permissions
-#                          btcpay.store.cancreateinvoice + btcpay.store.canviewinvoices
-#   BTCPAY_WEBHOOK_SECRET  SECRET — the webhook's signing secret. Without it the
-#                          callback route refuses every delivery, so settlement
-#                          falls back to the buyer's own order page re-checking.
-# Point the BTCPay webhook at https://<your-domain>/api/btcpay/webhook and give
-# it InvoiceSettled, InvoiceProcessing, InvoiceExpired and InvoiceInvalid.
-# BTCPAY_URL = ""
+# PREFERRED: a self-hosted BTCPay Server (crypto-only, no third party). When the
+# four BTCPAY_* values plus PAID_PRICE_AMOUNT are set, /upgrade shows a one-click
+# "Pay with crypto" button that creates an invoice and upgrades the account
+# automatically once the payment confirms on-chain (verified by a signed
+# webhook). Full setup guide: BTCPAY-SETUP.md.
+#   BTCPAY_URL           https base URL of your BTCPay Server, e.g. https://btcpay.goyhub.st
+#   BTCPAY_STORE_ID      the store's id (Store Settings → the id in the URL / General)
+#   PAID_PRICE_AMOUNT    numeric price per membership, e.g. "10.00"
+#   PAID_PRICE_CURRENCY  ISO currency the invoice is priced in (default "USD")
+#   PAID_PERIOD_DAYS     membership length in days; empty or "0" = lifetime
+# BTCPAY_URL = "https://btcpay.example.com"
 # BTCPAY_STORE_ID = ""
+# PAID_PRICE_AMOUNT = "10.00"
+# PAID_PRICE_CURRENCY = "USD"
+# PAID_PERIOD_DAYS = "30"
+# RATE_LIMIT_CHECKOUT = "8"   # invoices a member can create per hour (abuse cap)
 #
-# Manual fallback shown while BTCPay is still being set up (either turns it on):
+# BTCPAY_API_KEY and BTCPAY_WEBHOOK_SECRET are SECRETS — never put them here.
+# Add them in the Pages dashboard (Settings → Variables and Secrets, type
+# Secret) or with `npx wrangler pages secret put NAME`, exactly like
+# ADMIN_PASSWORD. See the secrets note near the bottom of this file.
+#
+# FALLBACKS (used only when BTCPay is not configured):
 #   CRYPTO_PAY_URL        hosted checkout link (Coinbase Commerce, NOWPayments…)
-#   CRYPTO_PAY_ADDRESSES  "BTC:bc1qxy...,ETH:0xab...,LTC:ltc1..." — pay, then
-#                         email support with the transaction ID
+#   CRYPTO_PAY_ADDRESSES  manual addresses, e.g. "BTC:bc1qxy...,ETH:0xab...,LTC:ltc1..."
+#   PAID_PRICE            display string that overrides the composed price, e.g. "$10 / month"
 # CRYPTO_PAY_URL = ""
 # CRYPTO_PAY_ADDRESSES = ""
+# PAID_PRICE = ""
 
 # Outbound email (password reset + verification) via Cloudflare's Email
 # Service SMTPS relay (smtp.mx.cloudflare.net:465, spoken natively over
@@ -96,9 +98,6 @@ EMAIL_FROM_NAME = "GoyHub"
 # (REQUIRE_VERIFIED_EMAIL = "0" turns that gate off).
 # DISPOSABLE_EMAIL_DOMAINS = ""   # extra comma-separated throwaway domains to block
 
-
-#DOWNLOADER
-DOWNLOAD_URL = "downloader.goyhub.st/xd13/QeRc7Al.exe"
 # Cloudflare Turnstile (optional second signup CAPTCHA layered on the built-in
 # proof-of-work). Create a site in dashboard → Turnstile, then set:
 #   TURNSTILE_SITE_KEY    (plain var is fine)
@@ -116,12 +115,20 @@ DOWNLOAD_URL = "downloader.goyhub.st/xd13/QeRc7Al.exe"
 #                    verifies a member's tier with. Falls back to
 #                    CAPTCHA_SECRET if unset — set a dedicated one in
 #                    production so rotating one doesn't invalidate the other.
-#   BTCPAY_API_KEY   BTCPay Greenfield API key (store checkout)
-#   BTCPAY_WEBHOOK_SECRET  signs BTCPay's settlement callbacks
-
-# Optional: serve a real, multi-megabyte installer from R2 instead of the copy
-# embedded in the Function bundle. Create the bucket, upload the zip under its
-# exact filename, then uncomment. The download route prefers R2 automatically.
-# [[r2_buckets]]
-# binding = "INSTALLER"
-# bucket_name = "goyhub-installer"
+#   DOWNLOAD_URL     where the installer actually lives (your own host, a CDN,
+#                    a GitHub release asset, ...). REQUIRED for the download
+#                    to work — there is no fallback. The route fetches it
+#                    server-side and streams the bytes straight through, so
+#                    the URL itself is never sent to the browser. Unset, or
+#                    unreachable: /download/file serves a clean "unavailable"
+#                    response instead of silently substituting a different
+#                    file. Set it as a Secret, never as a plain [vars] entry
+#                    above — this file is committed, and a plain var would put
+#                    the "hidden" URL in plaintext in git history and the
+#                    dashboard's variable list.
+#   BTCPAY_API_KEY        BTCPay Greenfield API key with the
+#                         btcpay.store.cancreateinvoice + canviewinvoices
+#                         permissions on your store (creates checkout invoices)
+#   BTCPAY_WEBHOOK_SECRET the signing secret of the store webhook that points at
+#                         https://your-site/api/btcpay/webhook — every webhook is
+#                         HMAC-verified against this before it can grant Paid

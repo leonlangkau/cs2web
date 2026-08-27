@@ -5,18 +5,14 @@ import { requireAdmin, requireStaff, destroyUserSessions, audit, formBody, setFl
 import { TIERS, TIER_LABELS, STAFF_TIERS } from "./tiers.js";
 import { hashPassword } from "./crypto.js";
 import { setSetting, ANNOUNCEMENT_KEY } from "./settings.js";
-import * as store from "./store.js";
-import * as btcpay from "./btcpay.js";
-import { syncOrder, settleOrder } from "./routes-store.js";
 
 const LOGS_PER_PAGE = 50;
 const USERS_PER_PAGE = 25;
-const ORDERS_PER_PAGE = 40;
+const FINGERPRINTS_PER_PAGE = 25;
 const LOG_EVENTS = ['signup', 'login', 'login_failed', 'login_blocked', 'logout', 'download',
   'admin_action', 'captcha_failed', 'terms_accepted', 'password_changed', 'loader_auth', 'loader_auth_failed',
   'ip_autoban', 'signup_surge_blocked', 'post_reported', 'email_changed', 'account_deleted',
-  'password_reset_requested', 'password_reset', 'email_verified', 'shout_deleted',
-  'order_created', 'order_paid', 'order_fulfilled', 'order_failed'];
+  'password_reset_requested', 'password_reset', 'email_verified', 'shout_deleted'];
 
 // High-volume, low-signal events — routine traffic rather than something an
 // admin needs to review. Excluded by the "Important only" log filter so a
@@ -42,6 +38,9 @@ async function adminIpMask(c) {
   const adminIds = new Set(admins.map((a) => a.id));
   const adminNames = new Set(admins.map((a) => String(a.username).toLowerCase()));
 
+  const isAdminRow = (row) => (row.user_id !== null && row.user_id !== undefined && adminIds.has(row.user_id))
+    || (row.username && adminNames.has(String(row.username).toLowerCase()));
+
   const maskUser = (u) => {
     if (STAFF_TIERS.has(u.tier) && u.id !== viewer.id) {
       return { ...u, signup_ip: IP_HIDDEN, last_login_ip: IP_HIDDEN, ipHidden: true };
@@ -49,14 +48,21 @@ async function adminIpMask(c) {
     return u;
   };
   const maskLog = (l) => {
-    const isAdminRow = (l.user_id !== null && adminIds.has(l.user_id))
-      || (l.username && adminNames.has(String(l.username).toLowerCase()));
-    if (isAdminRow && l.user_id !== viewer.id) {
+    if (isAdminRow(l) && l.user_id !== viewer.id) {
       return { ...l, ip: IP_HIDDEN, user_agent: IP_HIDDEN, ipHidden: true };
     }
     return l;
   };
-  return { maskUser, maskLog };
+  // Fingerprint rows carry the same PII shape as ip_logs plus a canvas
+  // signature — masked under the same rule so one staff member's device
+  // isn't exposed to another.
+  const maskFingerprint = (f) => {
+    if (isAdminRow(f) && f.user_id !== viewer.id) {
+      return { ...f, ip: IP_HIDDEN, user_agent: IP_HIDDEN, canvas_hash: IP_HIDDEN, ipHidden: true };
+    }
+    return f;
+  };
+  return { maskUser, maskLog, maskFingerprint };
 }
 
 function intParam(value, fallback = 1) {
@@ -112,8 +118,7 @@ function register(app) {
       failedLogins24h: await one("SELECT COUNT(*) AS n FROM ip_logs WHERE event = 'login_failed' AND created_at > datetime('now', '-1 day')"),
       ipBans: await one('SELECT COUNT(*) AS n FROM ip_bans'),
       openReports: await one("SELECT COUNT(*) AS n FROM reports WHERE status = 'open'"),
-      paidOrders: await one("SELECT COUNT(*) AS n FROM orders WHERE status IN ('paid', 'fulfilled')"),
-      openOrders: await one("SELECT COUNT(*) AS n FROM orders WHERE status IN ('new', 'processing')"),
+      fingerprints: await one('SELECT COUNT(DISTINCT fp_hash) AS n FROM fingerprints'),
     };
     const { maskUser, maskLog } = await adminIpMask(c);
     const recentLogs = (await db.all('SELECT * FROM ip_logs ORDER BY id DESC LIMIT 12')).map(maskLog);
@@ -152,91 +157,6 @@ function register(app) {
     )).map(maskUser);
 
     return c.html(views.users(c.get('view'), { users, q, page, pages, total, tiers: TIERS, tierLabels: TIER_LABELS }));
-  });
-
-  // --- Store orders --------------------------------------------------------
-
-  const findOrder = async (c) => {
-    const id = intParam(c.req.param('id'), -1);
-    return id > 0 ? c.get('db').get('SELECT * FROM orders WHERE id = ?', id) : null;
-  };
-
-  app.get('/admin/orders', async (c) => {
-    const db = c.get('db');
-    const url = new URL(c.req.url);
-    const status = store.ORDER_STATUSES.includes(url.searchParams.get('status'))
-      ? url.searchParams.get('status') : '';
-
-    const where = status ? 'WHERE status = ?' : '';
-    const params = status ? [status] : [];
-    const total = Number((await db.get(`SELECT COUNT(*) AS n FROM orders ${where}`, ...params)).n);
-    const pages = Math.max(1, Math.ceil(total / ORDERS_PER_PAGE));
-    const page = Math.max(1, Math.min(pages, intParam(url.searchParams.get('page'))));
-    const rows = await db.all(
-      `SELECT * FROM orders ${where} ORDER BY id DESC LIMIT ? OFFSET ?`,
-      ...params, ORDERS_PER_PAGE, (page - 1) * ORDERS_PER_PAGE
-    );
-
-    return c.html(views.orders(c.get('view'), {
-      orders: rows, status, statuses: store.ORDER_STATUSES, page, pages, total,
-      live: btcpay.isConfigured(c.get('cfg')),
-    }));
-  });
-
-  // Re-asks BTCPay what an invoice is doing and applies the answer — the
-  // manual version of what a buyer's own order page does, for when a webhook
-  // was missed. Staff-level: it only ever applies BTCPay's own verdict.
-  app.post('/admin/orders/:id/refresh', async (c) => {
-    const order = await findOrder(c);
-    if (!order) return notFound(c, 'No such order.');
-    if (!btcpay.isConfigured(c.get('cfg'))) {
-      setFlash(c, 'error', 'BTCPay is not configured — nothing to re-check against.');
-      return c.redirect(backTo(c, '/admin/orders'), 302);
-    }
-    const updated = await syncOrder(c, order);
-    setFlash(c, 'success', updated.status === order.status
-      ? `Order ${order.order_ref} is still "${store.STATUS_LABELS[order.status]}".`
-      : `Order ${order.order_ref} is now "${store.STATUS_LABELS[updated.status]}".`);
-    return c.redirect(backTo(c, '/admin/orders'), 302);
-  });
-
-  // Grants the membership by hand — for a payment that arrived out of band
-  // (or one BTCPay lost). Full admin only: it hands out paid access.
-  app.post('/admin/orders/:id/fulfill', async (c) => {
-    const gate = requireAdmin(c);
-    if (gate) return gate;
-    const order = await findOrder(c);
-    if (!order) return notFound(c, 'No such order.');
-
-    const result = await settleOrder(c, order, `manual by ${c.get('user').username}`);
-    if (result.granted) {
-      await adminAudit(c, `fulfilled order ${order.order_ref} for ${order.username} (${order.product_name})`);
-      setFlash(c, 'success', `${order.username} is now Paid — order ${order.order_ref} fulfilled.`);
-    } else {
-      const why = {
-        already_settled: 'that order was already fulfilled',
-        staff_account: 'the buyer is a staff account, so their tier was left alone',
-        no_account: 'the buyer\'s account no longer exists',
-      }[result.reason] || 'nothing was granted';
-      await adminAudit(c, `fulfil attempt on order ${order.order_ref}: ${why}`);
-      setFlash(c, 'error', `Order ${order.order_ref}: ${why}.`);
-    }
-    return c.redirect(backTo(c, '/admin/orders'), 302);
-  });
-
-  app.post('/admin/orders/:id/cancel', async (c) => {
-    const gate = requireAdmin(c);
-    if (gate) return gate;
-    const order = await findOrder(c);
-    if (!order) return notFound(c, 'No such order.');
-    const moved = await store.setOrderStatus(c.get('db'), order.id, 'cancelled');
-    if (!moved) {
-      setFlash(c, 'error', `Order ${order.order_ref} can no longer be cancelled.`);
-      return c.redirect(backTo(c, '/admin/orders'), 302);
-    }
-    await adminAudit(c, `cancelled order ${order.order_ref} (${order.username || 'no account'})`);
-    setFlash(c, 'success', `Order ${order.order_ref} cancelled.`);
-    return c.redirect(backTo(c, '/admin/orders'), 302);
   });
 
   app.post('/admin/users/:id/ban', async (c) => {
@@ -313,7 +233,7 @@ function register(app) {
     const user = await findUser(c);
     if (!user) return notFound(c, 'No such user.');
     if (user.tier !== 'paid') {
-      setFlash(c, 'error', `${user.username} is not on the Paid tier — set their tier first.`);
+      setFlash(c, 'error', `${user.username} is not on the Paid tier; set their tier first.`);
       return c.redirect(backTo(c, '/admin/users'), 302);
     }
     const body = await formBody(c);
@@ -329,8 +249,8 @@ function register(app) {
     const next = Math.max(now, base + Math.round(delta) * 86_400_000);
     await db.run('UPDATE users SET paid_until = ? WHERE id = ?', next, user.id);
     const left = Math.max(0, Math.round((next - now) / 86_400_000));
-    await adminAudit(c, `adjusted #${user.id} (${user.username}) subscription by ${delta}d — ${left}d left`);
-    setFlash(c, 'success', `${user.username}: ${delta > 0 ? '+' : ''}${Math.round(delta)} days — ${left} day${left === 1 ? '' : 's'} remaining.`);
+    await adminAudit(c, `adjusted #${user.id} (${user.username}) subscription by ${delta}d; ${left}d left`);
+    setFlash(c, 'success', `${user.username}: ${delta > 0 ? '+' : ''}${Math.round(delta)} days; ${left} day${left === 1 ? '' : 's'} remaining.`);
     return c.redirect(backTo(c, '/admin/users'), 302);
   });
 
@@ -506,6 +426,57 @@ function register(app) {
     await adminAudit(c, `banned IP ${ip}${reason ? ` (${reason})` : ''}`);
     setFlash(c, 'success', `${ip} has been banned.`);
     return c.redirect(backTo(c, '/admin/logs'), 302);
+  });
+
+  // Fingerprint log: one row per distinct device (fp_hash), latest sighting
+  // first. Each fingerprint has its own drill-down log at /admin/fingerprints/:hash.
+  app.get('/admin/fingerprints', async (c) => {
+    const db = c.get('db');
+    const url = new URL(c.req.url);
+    const q = String(url.searchParams.get('q') || '').trim().slice(0, 100);
+
+    const clauses = [];
+    const params = [];
+    if (q) {
+      clauses.push('(fp_hash LIKE ? OR ip LIKE ? OR username LIKE ? OR email LIKE ? OR device LIKE ? OR browser LIKE ? OR os LIKE ?)');
+      params.push(...Array(7).fill(`%${q}%`));
+    }
+    const where = clauses.length ? `WHERE ${clauses.join(' AND ')}` : '';
+
+    const total = Number((await db.get(
+      `SELECT COUNT(*) AS n FROM (SELECT fp_hash FROM fingerprints ${where} GROUP BY fp_hash)`, ...params
+    )).n);
+    const pages = Math.max(1, Math.ceil(total / FINGERPRINTS_PER_PAGE));
+    const page = Math.max(1, Math.min(pages, intParam(url.searchParams.get('page'))));
+
+    const { maskFingerprint } = await adminIpMask(c);
+    const rows = (await db.all(
+      `SELECT f.*, g.sightings, g.first_seen, g.last_seen, g.user_count
+       FROM fingerprints f
+       JOIN (
+         SELECT fp_hash, MAX(id) AS latest_id, COUNT(*) AS sightings,
+                MIN(created_at) AS first_seen, MAX(created_at) AS last_seen,
+                COUNT(DISTINCT CASE WHEN user_id IS NOT NULL THEN user_id END) AS user_count
+         FROM fingerprints ${where}
+         GROUP BY fp_hash
+       ) g ON g.latest_id = f.id
+       ORDER BY g.last_seen DESC LIMIT ? OFFSET ?`,
+      ...params, FINGERPRINTS_PER_PAGE, (page - 1) * FINGERPRINTS_PER_PAGE
+    )).map(maskFingerprint);
+
+    return c.html(views.fingerprints(c.get('view'), { rows, q, page, pages, total }));
+  });
+
+  // Full sighting history for one device fingerprint — the "own log" per fingerprint.
+  app.get('/admin/fingerprints/:hash', async (c) => {
+    const db = c.get('db');
+    const hash = String(c.req.param('hash') || '');
+    const { maskFingerprint } = await adminIpMask(c);
+    const sightings = (await db.all(
+      'SELECT * FROM fingerprints WHERE fp_hash = ? ORDER BY id DESC LIMIT 300', hash
+    )).map(maskFingerprint);
+    if (!sightings.length) return notFound(c, 'No such fingerprint.');
+    return c.html(views.fingerprintDetail(c.get('view'), { hash, sightings }));
   });
 
   app.post('/admin/ip-bans/:ip/unban', async (c) => {
@@ -685,7 +656,7 @@ function register(app) {
     }
     const first = await db.get('SELECT MIN(id) AS m FROM posts WHERE thread_id = ?', post.thread_id);
     if (Number(first.m) === post.id) {
-      setFlash(c, 'error', 'That is the opening post — delete the whole thread instead.');
+      setFlash(c, 'error', 'That is the opening post; delete the whole thread instead.');
       return c.redirect(backTo(c, `/forum/t/${post.thread_id}`), 302);
     }
     await db.run('DELETE FROM posts WHERE id = ?', id);

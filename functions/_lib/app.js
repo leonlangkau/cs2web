@@ -16,7 +16,7 @@ import { register as registerMain } from "./routes-main.js";
 import { register as registerAuth } from "./routes-auth.js";
 import { register as registerProfile } from "./routes-profile.js";
 import { register as registerApi } from "./routes-api.js";
-import { register as registerStore } from "./routes-store.js";
+import { register as registerPayments } from "./routes-payments.js";
 import { register as registerForum } from "./routes-forum.js";
 import { register as registerAdmin } from "./routes-admin.js";
 
@@ -205,7 +205,7 @@ function createApp({ resolveDb, env = {} }) {
   registerAuth(app);
   registerProfile(app);
   registerApi(app);
-  registerStore(app);
+  registerPayments(app);
   registerForum(app);
   registerAdmin(app);
 

@@ -108,11 +108,11 @@ function register(app) {
     const confirm = String(body.confirm || '');
 
     const errors = [];
-    if (!USERNAME_RE.test(username)) errors.push('Username must be 3–20 characters: letters, numbers and underscores only.');
+    if (!USERNAME_RE.test(username)) errors.push('Username must be 3-20 characters: letters, numbers and underscores only.');
     else if (RESERVED_USERNAMES.has(username.toLowerCase())) errors.push('That username is reserved.');
     if (!EMAIL_RE.test(email) || email.length > 254) errors.push('Enter a valid email address.');
-    else if (isDisposableEmail(email, c.get('cfg'))) errors.push('Disposable email addresses cannot be used — use a real inbox.');
-    if (password.length < 8 || password.length > 128) errors.push('Password must be 8–128 characters.');
+    else if (isDisposableEmail(email, c.get('cfg'))) errors.push('Disposable email addresses cannot be used; use a real inbox.');
+    if (password.length < 8 || password.length > 128) errors.push('Password must be 8-128 characters.');
     if (password !== confirm) errors.push('Passwords do not match.');
 
     // Bot gates before the uniqueness query, so a scripted signup can't probe
@@ -218,7 +218,7 @@ function register(app) {
     const confirm = String(body.confirm || '');
 
     const errors = [];
-    if (password.length < 8 || password.length > 128) errors.push('Password must be 8–128 characters.');
+    if (password.length < 8 || password.length > 128) errors.push('Password must be 8-128 characters.');
     if (password !== confirm) errors.push('Passwords do not match.');
     if (errors.length > 0) {
       // Only validation failed — the token stays live for the retry.
@@ -239,7 +239,7 @@ function register(app) {
     await db.run('UPDATE users SET password_hash = ? WHERE id = ?', await hashPassword(password), row.user_id);
     await destroyUserSessions(db, row.user_id); // a reset means the old credentials can't be trusted
     await audit(c, 'password_reset', { userId: row.user_id, username: user ? user.username : null });
-    setFlash(c, 'success', 'Password updated — log in with your new password.');
+    setFlash(c, 'success', 'Password updated. Log in with your new password.');
     return c.redirect('/auth/login', 302);
   });
 
@@ -255,7 +255,7 @@ function register(app) {
     await db.run("UPDATE users SET email_verified_at = datetime('now') WHERE id = ?", row.user_id);
     const user = await db.get('SELECT username FROM users WHERE id = ?', row.user_id);
     await audit(c, 'email_verified', { userId: row.user_id, username: user ? user.username : null });
-    setFlash(c, 'success', 'Email verified — thanks!');
+    setFlash(c, 'success', 'Email verified. Thanks!');
     return c.redirect(c.get('user') ? '/profile' : '/auth/login', 302);
   });
 

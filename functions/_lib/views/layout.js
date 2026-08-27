@@ -1,5 +1,6 @@
 import { esc } from "./util.js";
-import { isStaff } from "../tiers.js";
+import { asset } from "../asset-manifest.js";
+import { isStaff, meetsTier } from "../tiers.js";
 
 const BRAND_MARK = `<svg class="brand-mark" viewBox="0 0 32 32" aria-hidden="true">
   <path d="M16 4L26.4 22H5.6z" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linejoin="round"/>
@@ -17,8 +18,8 @@ function termsGate(ctx) {
       <a href="/terms">Terms &amp; Conditions</a> and <a href="/privacy">Privacy Policy</a>.</p>
     <ul class="terms-gate-points">
       <li>You may not tamper with, clone, copy, decompile or redistribute our software.</li>
-      <li>Disputes are resolved by <strong>binding private arbitration</strong>, individually — not in court and not as a class action.</li>
-      <li>We log the IP address and browser of sign-ups, logins and downloads for security.</li>
+      <li>Disputes are resolved by <strong>binding private arbitration</strong>, individually; not in court and not as a class action.</li>
+      <li>We log the IP address, browser and device fingerprint of sign-ups, logins and downloads for security.</li>
     </ul>
     <form method="post" action="/legal/accept" class="terms-gate-actions">
       <input type="hidden" name="_csrf" value="${esc(ctx.csrfToken)}">
@@ -56,7 +57,7 @@ function nav(ctx) {
       ${link('/', 'Home', ctx.path === '/')}
       ${link('/forum', 'Forum', ctx.path.startsWith('/forum'))}
       ${link('/download', 'Download', ctx.path.startsWith('/download'))}
-      ${link('/store', 'Store', ctx.path.startsWith('/store') || ctx.path === '/buy' || ctx.path === '/upgrade')}
+      ${meetsTier(ctx.user, 'paid') ? '' : link('/buy', 'Upgrade', ctx.path === '/buy' || ctx.path === '/upgrade')}
       ${isStaff(ctx.user) ? link('/admin', 'Admin', ctx.path.startsWith('/admin')) : ''}
     </nav>
     <div class="nav-auth">${THEME_TOGGLE}${authArea}</div>
@@ -67,8 +68,8 @@ function nav(ctx) {
 function footer(ctx) {
   const c = ctx.company;
   const accountLinks = ctx.user
-    ? '<a href="/profile">Profile</a><a href="/store">Store</a><a href="/forum/new">New thread</a>'
-    : '<a href="/auth/signup">Sign up</a><a href="/auth/login">Log in</a><a href="/store">Store</a>';
+    ? '<a href="/profile">Profile</a><a href="/upgrade">Upgrade</a><a href="/forum/new">New thread</a>'
+    : '<a href="/auth/signup">Sign up</a><a href="/auth/login">Log in</a><a href="/upgrade">Upgrade</a>';
   // Fall back to the trading name so an unfilled placeholder never ships site-wide.
   const operator = c.isPlaceholder ? c.tradingName : c.legalName;
 
@@ -101,11 +102,11 @@ function footer(ctx) {
  * `body` is trusted markup produced by a view; data inside it must already be escaped.
  */
 function page(ctx, { title, body, bodyClass = '', scripts = [] } = {}) {
-  const fullTitle = title ? `${title} · ${ctx.appName}` : `${ctx.appName} — The Ultimate CS2 Companion`;
+  const fullTitle = title ? `${title} · ${ctx.appName}` : `${ctx.appName} · The Ultimate CS2 Companion`;
   const announcement = ctx.announcement
     ? `<div class="announcement" id="announcement" role="status">
         <div class="container announcement-inner">
-          <span>📣 ${esc(ctx.announcement)}</span>
+          <span>${esc(ctx.announcement)}</span>
           <button type="button" class="announcement-dismiss" id="announcement-dismiss" aria-label="Dismiss announcement">✕</button>
         </div>
       </div>`
@@ -113,7 +114,7 @@ function page(ctx, { title, body, bodyClass = '', scripts = [] } = {}) {
   const flash = ctx.flash
     ? `<div class="flash flash-${ctx.flash.type === 'error' ? 'error' : 'success'}" role="status"><div class="container">${esc(ctx.flash.message)}</div></div>`
     : '';
-  const extraScripts = scripts.map((src) => `<script src="${esc(src)}" defer></script>`).join('\n');
+  const extraScripts = scripts.map((src) => `<script src="${esc(asset(src))}" defer></script>`).join('\n');
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -121,11 +122,12 @@ function page(ctx, { title, body, bodyClass = '', scripts = [] } = {}) {
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${esc(fullTitle)}</title>
-<meta name="description" content="GoyHub is the all-in-one CS2 companion app: match stats, crosshair &amp; config manager, skin tracker and performance presets. Free download.">
+<meta name="description" content="GoyHub is the all-in-one CS2 companion app: match stats, crosshair &amp; config manager, skin tracker and performance presets for Counter-Strike 2.">
 <link rel="icon" href="${FAVICON}">
 <meta name="theme-color" content="#0137B7">
-<link rel="stylesheet" href="/css/style.css">
-<script src="/js/boot.js"></script>
+<link rel="preload" href="${asset('/fonts/space-grotesk-var.woff2')}" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="${asset('/css/style.css')}">
+<script src="${asset('/js/boot.js')}"></script>
 </head>
 <body class="${esc(bodyClass)}">
 <a class="skip-link" href="#main">Skip to content</a>
@@ -137,7 +139,9 @@ ${ctx.needsTermsGate ? termsGate(ctx) : ''}
 ${body}
 </main>
 ${footer(ctx)}
-<script src="/js/main.js" defer></script>
+<script src="${asset('/js/main.js')}" defer></script>
+<script src="${asset('/js/fx.js')}" defer></script>
+<script src="${asset('/js/fingerprint.js')}" defer></script>
 ${extraScripts}
 </body>
 </html>`;

@@ -1,34 +1,61 @@
 import { page } from "./layout.js";
-import { esc, timeAgo } from "./util.js";
+import { esc, timeAgo, map } from "./util.js";
 import { TIER_LABELS, normalizeTier } from "../tiers.js";
 
-function profile(ctx, { account, stats, license, isPaid, sessions = [], currentSessionId, isAdminAccount = false, emailConfigured = false }) {
+const PAYMENT_STATUS = {
+  new: ['tag-banned', 'Awaiting payment'],
+  processing: ['tag-tier-paid', 'Confirming'],
+  settled: ['tag-report-resolved', 'Paid'],
+  expired: ['tag-banned', 'Expired'],
+  invalid: ['tag-banned', 'Failed'],
+};
+
+function profile(ctx, { account, stats, license, isPaid, sessions = [], currentSessionId, payments = [], isAdminAccount = false, emailConfigured = false }) {
   const csrf = `<input type="hidden" name="_csrf" value="${esc(ctx.csrfToken)}">`;
   const tier = normalizeTier(account.tier);
+
+  const paymentsPanel = payments.length === 0 ? '' : `
+    <div class="panel profile-card">
+      <h2>Payments</h2>
+      <p class="muted">Your recent membership purchases. Paid access is granted automatically once a
+        payment confirms on-chain.</p>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Date</th><th>Amount</th><th>Buys</th><th>Status</th></tr></thead>
+        <tbody>${map(payments, (p) => {
+          const [cls, label] = PAYMENT_STATUS[p.status] || ['tag-banned', esc(p.status)];
+          const buys = p.period_days ? `${esc(p.period_days)} days` : 'Lifetime';
+          return `<tr>
+            <td class="muted nowrap">${esc(timeAgo(p.created_at))}</td>
+            <td class="mono nowrap">${esc(p.amount)} ${esc(p.currency)}</td>
+            <td class="nowrap">${buys}</td>
+            <td><span class="tag ${cls}">${esc(label)}</span></td>
+          </tr>`;
+        })}</tbody>
+      </table></div>
+    </div>`;
 
   const sessionRows = sessions.map((s) => {
     const current = s.id === currentSessionId;
     return `<tr>
       <td>${current ? '<span class="tag tag-tier-paid">THIS DEVICE</span>' : ''}</td>
-      <td class="mono">${esc(s.ip || '—')}</td>
-      <td class="muted ua-cell" title="${esc(s.user_agent || '')}">${esc(String(s.user_agent || '—').slice(0, 60))}</td>
+      <td class="mono">${esc(s.ip || '-')}</td>
+      <td class="muted ua-cell" title="${esc(s.user_agent || '')}">${esc(String(s.user_agent || '-').slice(0, 60))}</td>
       <td class="muted nowrap">${esc(timeAgo(s.created_at))}</td>
       <td class="actions-cell">
         <form method="post" action="/profile/sessions/${esc(s.id)}/revoke" class="inline-form"
-              ${current ? 'data-confirm="This is the session you are using — revoking it signs you out here. Continue?"' : ''}>${csrf}
+              ${current ? 'data-confirm="This is the session you are using; revoking it signs you out here. Continue?"' : ''}>${csrf}
           <button class="btn btn-ghost btn-xs" type="submit">${current ? 'Sign out' : 'Revoke'}</button></form>
       </td></tr>`;
   }).join('');
 
   const upgradeNote = isPaid
     ? ''
-    : `<p class="muted">You are on the Free tier — the forum and app download are Paid benefits.
-        <a href="/store">See membership plans</a>.</p>`;
+    : `<p class="muted">You are on the Free tier; the forum and app download are Paid benefits.
+        <a href="/upgrade">See upgrade options</a>.</p>`;
 
   const body = `
 <div class="section profile-page">
   <div class="container narrow">
-    <p class="section-kicker">// YOUR ACCOUNT</p>
     <h1 class="section-title">Profile</h1>
 
     <div class="panel profile-card">
@@ -48,7 +75,7 @@ function profile(ctx, { account, stats, license, isPaid, sessions = [], currentS
       </div>
       <dl class="profile-facts">
         <div><dt>Member since</dt><dd>${esc(timeAgo(account.created_at))}</dd></div>
-        <div><dt>Last login</dt><dd>${esc(timeAgo(account.last_login_at))} · <span class="mono">${esc(account.last_login_ip || '—')}</span></dd></div>
+        <div><dt>Last login</dt><dd>${esc(timeAgo(account.last_login_at))} · <span class="mono">${esc(account.last_login_ip || '-')}</span></dd></div>
         <div><dt>Threads</dt><dd>${esc(stats.threads)}</dd></div>
         <div><dt>Posts</dt><dd>${esc(stats.posts)}</dd></div>
         <div><dt>Active sessions</dt><dd>${esc(stats.sessions)}</dd></div>
@@ -66,9 +93,11 @@ function profile(ctx, { account, stats, license, isPaid, sessions = [], currentS
       <p class="muted">The desktop loader signs in with your GoyHub username and password and receives a signed
         token like this one, proving your tier (<strong>${esc(TIER_LABELS[tier])}</strong>) without trusting the
         client. Tokens expire after 24 hours; the loader re-fetches automatically. You never need to copy this
-        by hand — it is shown for transparency.</p>
+        by hand; it is shown for transparency.</p>
       <pre class="mono code-block license-block">${esc(license.token)}</pre>
     </div>
+
+    ${paymentsPanel}
 
     <div class="panel profile-card">
       <h2>Change password</h2>
@@ -112,7 +141,7 @@ function profile(ctx, { account, stats, license, isPaid, sessions = [], currentS
     ${isAdminAccount ? '' : `<div class="panel profile-card danger-zone">
       <h2>Delete account</h2>
       <p class="muted">Deleting your account is permanent. Your forum posts stay so conversations survive,
-        reattributed to <span class="mono">[deleted]</span> — everything identifying you is removed
+        reattributed to <span class="mono">[deleted]</span>; everything identifying you is removed
         (see the <a href="/privacy">Privacy Policy</a>).</p>
       <form method="post" action="/profile/delete" class="stack"
             data-confirm="Permanently delete your account? This cannot be undone.">${csrf}

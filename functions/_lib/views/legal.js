@@ -31,7 +31,6 @@ function render(ctx, { title, kicker, sections, updated }) {
 <section class="section legal-page">
   <div class="container">
     <div class="page-head"><div>
-      <p class="section-kicker">${esc(kicker)}</p>
       <h1 class="section-title">${esc(title)}</h1>
     </div></div>
     <div class="legal-layout">
@@ -75,15 +74,22 @@ function terms(ctx) {
 
   const sections = [
     { id: 's1', title: 'Who we are', html: `
-      <p>GoyHub (the <strong>"Service"</strong>) is operated by <strong>${esc(c.legalName)}</strong>
-      (<strong>"we"</strong>, <strong>"us"</strong>, <strong>"our"</strong>), a company registered in the
-      ${j} under registration number ${esc(c.registrationNumber)}, with its registered office at
-      ${esc(c.addressLine)}, ${esc(c.city)}, ${j}.</p>
-      <p>The Service consists of this website, the GoyHub community forum, the GoyHub desktop application
-      for Windows, and any related software, downloads, content and support channels we make available.</p>` },
+      <p>Please read these Terms of Use carefully before creating an account, downloading the application,
+      or otherwise accessing or using GoyHub (the <strong>"Service"</strong>). The Service consists of this
+      website, the GoyHub community forum, the GoyHub desktop application for Windows, and any related
+      software, downloads, content and support channels we make available.</p>
+      <p>The Service is operated by <strong>${esc(c.legalName)}</strong> (<strong>"we"</strong>,
+      <strong>"us"</strong>, <strong>"our"</strong>), a company registered in the ${j} under registration
+      number ${esc(c.registrationNumber)}, with its registered office at ${esc(c.addressLine)},
+      ${esc(c.city)}, ${j}.</p>
+      <p>By accessing or using the Service, you agree to comply with these Terms of Use and all applicable
+      laws and regulations, and you accept responsibility for adhering to any local laws that apply to you.
+      If you do not agree to any part of these Terms, you are prohibited from accessing or using the Service.
+      All materials on the Service — including its design, source code, trademarks and written content —
+      are protected by applicable copyright and trademark law.</p>` },
 
     { id: 's2', title: 'Accepting these terms', html: `
-      <p>These Terms &amp; Conditions (the <strong>"Terms"</strong>) form a binding agreement between you and
+      <p>These Terms of Use (the <strong>"Terms"</strong>) form a binding agreement between you and
       us. You accept them by any of the following, whichever happens first:</p>
       <ul>
         <li>selecting <strong>"I accept"</strong> in the notice shown when you first open the Service;</li>
@@ -111,6 +117,8 @@ function terms(ctx) {
         <li>Do not share, sell, rent, transfer or lend your account, and do not let anyone else use it.</li>
         <li>Do not create an account on behalf of anyone else, or create a new account to evade a ban.</li>
         <li>Do not use bots, scripts or automated tooling to register accounts, or attempt to defeat our human-verification checks.</li>
+        <li>Keep the information on your profile accurate, complete and truthful, and update it if it changes.</li>
+        <li>If you purchase Paid access, use only a payment method that belongs to you.</li>
         <li>Tell us promptly at ${mailContact} if you believe your account has been accessed without your permission.</li>
       </ul>
       <p>We may refuse, reclaim or rename any username that impersonates another person, implies affiliation
@@ -120,14 +128,26 @@ function terms(ctx) {
       <p>The Service and the GoyHub application are <strong>licensed to you, not sold</strong>. Subject to your
       compliance with these Terms, we grant you a personal, limited, non-exclusive, non-transferable,
       non-sublicensable and revocable licence to download and use one copy of the GoyHub application on
-      devices you control, and to access the Service, in each case for your own personal, non-commercial use.</p>
+      devices you control, and to access the Service, in each case for your own personal, non-commercial use.
+      This licence is a grant of permission, not a transfer of ownership, and each copy is intended solely
+      for the private use of the account it was issued to.</p>
       <p>All rights not expressly granted to you are reserved by us. The GoyHub name, logo, site design,
       source code, compiled binaries, database schema, written content and all associated intellectual
-      property remain our property or that of our licensors.</p>` },
+      property remain our property or that of our licensors.</p>
+      <p>If we detect a copy of the application that has been shared, stolen or distributed in breach of this
+      licence, we may revoke that copy's access to future updates and to the Service, regardless of whose
+      account it is tied to.</p>` },
 
     { id: 's6', title: 'No tampering, cloning or copying', html: `
-      <p>This section is a material condition of the licence granted in section 5. You must not, and must not
-      permit or assist any other person to:</p>
+      <p>This section is a material condition of the licence granted in section 5. When using GoyHub, you must
+      not, and must not permit or assist any other person to:</p>
+      <ol>
+        <li>decompile, hack, patch, debug, or otherwise reverse engineer our products, or interfere with the operation of any software included in the Service;</li>
+        <li>use the Service, the application, or any of their materials for a commercial purpose;</li>
+        <li>use the Service if you are, directly or indirectly, involved in developing anti-cheat, detection or analysis systems aimed at identifying or flagging GoyHub or its users;</li>
+        <li>transfer, resell, or otherwise make paid materials from the Service available to a third party or to any other web server;</li>
+        <li>take any action intended to undermine the reputation or quality of our products.</li>
+      </ol>
       <h3>6.1 Copying and cloning</h3>
       <ul>
         <li>copy, reproduce, duplicate, mirror or archive the Service, the application, or any part of either, except for a single backup copy of the installer for your own personal use;</li>
@@ -147,36 +167,55 @@ function terms(ctx) {
         <li>probe, scan or test the vulnerability of any of our systems, or breach or circumvent any security or authentication measure, other than under a written authorisation from us.</li>
       </ul>
       <h3>6.3 Consequences</h3>
-      <p>Breach of this section terminates your licence immediately and automatically, without notice. You
-      acknowledge that a breach of this section may cause us harm for which damages alone are an inadequate
-      remedy, and that we may seek injunctive or other equitable relief in addition to any other remedy
-      available to us. Nothing in section 17 (Binding arbitration) prevents either party from seeking urgent
-      injunctive relief from a court to protect its intellectual property.</p>
+      <p>Breach of this section terminates your licence immediately and automatically, without notice, and we
+      may also terminate it at any time. Once your licence ends, you must stop using the application and
+      delete every copy of it and of any other downloaded materials in your possession, whether electronic or
+      printed. You acknowledge that a breach of this section may cause us harm for which damages alone are an
+      inadequate remedy, and that we may seek injunctive or other equitable relief in addition to any other
+      remedy available to us — including suspending your accounts under section 15. Nothing in section 17
+      (Binding arbitration) prevents either party from seeking urgent injunctive relief from a court to
+      protect its intellectual property.</p>
       <p>If you believe you have found a security vulnerability, please report it to ${mailContact} rather
       than exploiting it.</p>` },
 
     { id: 's7', title: 'Acceptable use', html: `
-      <p>When using the forum or any other part of the Service, you must not post, upload, link to or share:</p>
+      <p>When using the forum or any other part of the Service, you must not post, upload, link to, or engage
+      in:</p>
       <ul>
         <li>cheating software, aimbots, wallhacks, injectors, exploits, or instructions or links for obtaining them;</li>
         <li>offers to buy, sell, trade, boost or rent game accounts, or to arrange match-fixing or gambling;</li>
-        <li>harassment, threats, hate speech, or content targeting a person or group on the basis of a protected characteristic;</li>
+        <li>obscene, sexually explicit, hateful, harassing, threatening, or offensive content, or content targeting a person or group on the basis of a protected characteristic;</li>
+        <li>unsolicited political or religious content unrelated to Counter-Strike 2 or the Service;</li>
         <li>sexual content involving minors, or any other content that is unlawful in the jurisdictions where it can be viewed;</li>
-        <li>another person's private information (including real names, addresses, phone numbers or IP addresses) without their consent;</li>
-        <li>malware, phishing links, spam, chain messages, or repetitive promotional content;</li>
-        <li>content that infringes anyone's copyright, trademark, privacy or other rights.</li>
+        <li>another person's private information (including real names, addresses, phone numbers or IP addresses) without their consent, or any content you do not have the right to make public;</li>
+        <li>copyrighted material or trade secrets that are not yours to share;</li>
+        <li>malware, phishing links, spam, chain messages, or repetitive or duplicate promotional content;</li>
+        <li>advertising or promoting third-party products, services or organisations without our prior written consent;</li>
+        <li>content that infringes anyone's copyright, trademark, privacy or other rights, or that impersonates another person;</li>
+        <li>off-topic content unrelated to our community, or use of the Service other than for its intended purpose;</li>
+        <li>conduct that interferes with the operation of the Service or another user's ability to use it, or that evades bans or ignores instructions from moderators or administrators;</li>
+        <li>creating multiple accounts for yourself, whether to evade a ban or otherwise, or accounts otherwise identified as belonging to the same person through similar behaviour or IP addresses;</li>
+        <li>fraud, deception, DDoS or other attacks on our systems, or disclosure of other people's personal or private information.</li>
       </ul>
-      <p>You must also comply with all laws that apply to you, and with the terms of any third-party service
-      you use alongside GoyHub, including Steam and Counter-Strike 2.</p>` },
+      <p>Malicious activity under this section may result in the immediate suspension of your account, without
+      prior notice — see section 15. You must also comply with all laws that apply to you, and with the terms
+      of any third-party service you use alongside GoyHub, including Steam and Counter-Strike 2.</p>` },
 
     { id: 's8', title: 'Your content', html: `
       <p>You keep ownership of the threads, posts, configurations and other material you submit to the Service
-      (<strong>"Your Content"</strong>). We do not claim ownership of it.</p>
-      <p>By submitting Your Content, you grant us a worldwide, non-exclusive, royalty-free, transferable and
-      sublicensable licence to host, store, reproduce, adapt for formatting purposes, publish, display and
-      distribute Your Content for the purposes of operating, promoting and improving the Service. This licence
-      lasts as long as Your Content remains on the Service and, for content that others have quoted, replied to
-      or archived, for as long as reasonably necessary afterwards.</p>
+      (<strong>"Your Content"</strong>). We do not claim ownership of it, and we are not responsible for it: we
+      do not endorse or approve of opinions expressed in Your Content, and you are solely responsible for its
+      accuracy, legality and ethical character.</p>
+      <p>We may review, edit, hide or remove Your Content, and may submit it to third-party verification
+      services — including, but not limited to, spam-prevention services — as part of operating the Service.
+      Do not submit anything you consider private or confidential.</p>
+      <p>You must not create an account with a name resembling those of GoyHub staff, or otherwise impersonate
+      an administrative representative of the Service; doing so may result in the immediate suspension of your
+      account without prior notice.</p>
+      <p>By submitting Your Content, you grant us a non-exclusive, worldwide, perpetual, irrevocable,
+      royalty-free, transferable and sublicensable licence to host, store, reproduce, adapt for formatting
+      purposes, use, publish, republish and distribute Your Content in connection with operating, promoting and
+      improving the Service. You retain copyright ownership of Your Content.</p>
       <p>You represent that you have all rights necessary to grant this licence, and that Your Content does not
       breach section 7 or any third party's rights. Forum content is <strong>public</strong>: anything you post
       can be read by anyone with an internet connection and may be indexed by search engines. Do not post
@@ -187,8 +226,8 @@ function terms(ctx) {
       where content or conduct breaches these Terms, exposes us or other users to risk, or is the subject of a
       credible complaint — we may at our sole discretion and without prior notice:</p>
       <ul>
-        <li>edit, hide, lock, move or delete any thread, post or other content;</li>
         <li>issue a warning, restrict posting, suspend or permanently ban an account;</li>
+        <li>lock or move any thread, in addition to the content actions described in section 8;</li>
         <li>revoke access to the application and to any download;</li>
         <li>retain records of the conduct and the associated technical data described in our <a href="/privacy">Privacy Policy</a>;</li>
         <li>report conduct to law enforcement or other authorities where we believe it may be unlawful.</li>
@@ -202,22 +241,31 @@ function terms(ctx) {
       sponsored by or associated with Valve Corporation</strong>. "Counter-Strike", "Counter-Strike 2", "CS2"
       and "Steam" are trademarks of Valve Corporation, used here only to describe compatibility.</p>
       <p>Your use of Counter-Strike 2 and Steam remains governed by Valve's own agreements. GoyHub does not
-      read or modify game memory and does not inject code into the game. Even so, you are solely responsible
-      for ensuring that your use of any third-party tool complies with Valve's rules, and we accept no
-      responsibility for any action Valve takes against your game account.</p>` },
+      read or modify game memory and does not inject code into the game. Even so, our products, configuration
+      recommendations and performance presets are used <strong>entirely at your own risk</strong>. You are
+      solely responsible for ensuring that your use of any third-party tool complies with Valve's rules, and
+      the administration is not responsible for any in-game penalty, ban or restriction that Valve or any
+      other third party applies to your account.</p>` },
 
     { id: 's11', title: 'Availability & changes', html: `
-      <p>The Service is provided free of charge and on an "as available" basis. We do not guarantee any level
-      of availability, uptime, performance or data retention. We may change, suspend, limit or discontinue the
-      Service or any feature of it, in whole or in part, at any time and without liability to you.</p>
+      <p>Free features of the Service are provided on an "as available" basis. We do not guarantee any level
+      of availability, uptime, performance or data retention for free or Paid features alike. We may change,
+      suspend, limit or discontinue the Service or any feature of it, in whole or in part, at any time and
+      without liability to you.</p>
       <p>We may release updates to the application. Some updates may be required for continued use, and older
-      versions may stop working without notice.</p>` },
+      versions may stop working without notice.</p>
+      <p>Materials on the Service may contain technical, typographical or photographic errors. We do not
+      guarantee the accuracy, completeness or currency of any material, and while we are not obliged to update
+      it, we may change it at any time without prior notice.</p>
+      <p>Where Paid access is frozen or paused — for example while you take a break from the Service — it may
+      automatically resume 30 days after the freeze date, unless we state otherwise in an official GoyHub
+      channel.</p>` },
 
     { id: 's12', title: 'Disclaimers', html: `
       <p>To the fullest extent permitted by applicable law, the Service and everything provided through it are
-      supplied <strong>"as is" and "as available", without warranties of any kind</strong>, whether express,
-      implied or statutory, including any implied warranties of merchantability, fitness for a particular
-      purpose, title, accuracy and non-infringement.</p>
+      supplied <strong>"as is" and "as available"</strong>. GoyHub remains under active development, and we
+      make no warranties, express or implied, and hereby disclaim all other warranties, including any implied
+      warranties of merchantability, fitness for a particular purpose, title, accuracy and non-infringement.</p>
       <p>We do not warrant that:</p>
       <ul>
         <li>the Service will be uninterrupted, timely, secure or error-free;</li>
@@ -226,14 +274,22 @@ function terms(ctx) {
         <li>any defect will be corrected, or that the Service is free of viruses or other harmful components.</li>
       </ul>
       <p>Any configuration, launch option or setting you apply is applied at your own risk. You are responsible
-      for backing up your own game settings and files.</p>` },
+      for backing up your own game settings and files, and we strongly advise you to take your own precautions
+      against viruses and other destructive software — we are not responsible for any infection caused by
+      materials obtained through the Service.</p>` },
 
     { id: 's13', title: 'Limitation of liability', html: `
       <p>To the fullest extent permitted by applicable law, we (together with our directors, officers,
-      employees, contractors and agents) will not be liable for any indirect, incidental, special,
-      consequential, punitive or exemplary damages, nor for any loss of profits, revenue, goodwill, data, game
-      accounts, in-game items or opportunity, however caused and under any theory of liability, even if we have
-      been advised of the possibility of such damages.</p>
+      employees, contractors and agents) will not be liable for any of the following, whether or not the
+      damage or loss was anticipated, foreseeable, known or otherwise:</p>
+      <ul>
+        <li>data loss;</li>
+        <li>loss of income or expected profit;</li>
+        <li>loss of opportunity;</li>
+        <li>loss of, or damage to, business or personal reputation;</li>
+        <li>loss of game accounts or in-game items;</li>
+        <li>losses suffered by third parties, or any indirect, consequential, special, punitive or exemplary damages, arising out of the use of the Service, however caused and under any theory of liability, even if we have been advised of the possibility of such damages.</li>
+      </ul>
       <p>Our total aggregate liability arising out of or in connection with the Service or these Terms will not
       exceed the greater of (a) the total amount you have paid us in the twelve months before the event giving
       rise to the claim, or (b) USD 100.</p>
@@ -251,8 +307,9 @@ function terms(ctx) {
       <p>You may stop using the Service at any time and may ask us to close your account by contacting
       ${mailContact}.</p>
       <p>We may suspend or terminate your account and access to the Service at any time, with or without
-      notice, including where we believe you have breached these Terms or where continued access poses a risk
-      to us, other users or third parties.</p>
+      notice, including where we believe you have breached these Terms — such as through the malicious
+      activity described in section 7 — or where continued access poses a risk to us, other users or third
+      parties.</p>
       <p>On termination, your licence under section 5 ends immediately and you must stop using and delete all
       copies of the application. Sections 6, 8 (as to content already posted), 12, 13, 14, 17, 18 and 19
       survive termination. Content you posted remains on the forum, reattributed to
@@ -263,7 +320,10 @@ function terms(ctx) {
       <p>We may update these Terms from time to time. When we do, we will change the "last updated" date and
       version at the top of this page, and where the changes are material we will ask you to accept the new
       version the next time you open the Service. Changes take effect when published. Your continued use of the
-      Service after that point means you accept the revised Terms.</p>` },
+      Service after that point means you accept the revised Terms.</p>
+      <p>These Terms of Use apply to all products and services offered under the GoyHub brand, owned and
+      operated by <strong>${esc(c.legalName)}</strong>, registration number ${esc(c.registrationNumber)},
+      registered in the ${j}.</p>` },
 
     { id: 's17', title: 'Binding arbitration & class action waiver', html: `
       <p><strong>Please read this section carefully. It affects how disputes between you and us are resolved
@@ -334,42 +394,23 @@ function terms(ctx) {
         <li><strong>Language.</strong> These Terms are written in English. Any translation is provided for convenience, and the English version prevails.</li>
       </ul>` },
 
-    { id: 's20', title: 'Payments & memberships', html: `
-      <p>Paid membership is sold through the store on the Service. Prices are displayed in the currency shown
-      on the store page and are payable in cryptocurrency through our payment server. We do not accept card
-      payments, and we never receive or store your card, bank or wallet credentials.</p>
-      <p>A membership runs for the period stated on the plan you buy, beginning when your payment confirms. If
-      you already hold a paid membership, time you buy is <strong>added to the end</strong> of it rather than
-      replacing it. Memberships do <strong>not</strong> renew automatically: when the period ends the account
-      returns to the free tier until you buy again. A lifetime plan does not expire, but does not survive
-      closure of the account or a ban.</p>
-      <p><strong>Refunds.</strong> Cryptocurrency payments cannot be reversed by us. Once a payment has
-      confirmed, purchases are final except where a refund is required by consumer law that applies to you, or
-      where we choose to make one. If a payment confirms and your account is not upgraded, contact us with the
-      order reference and we will either complete the order or refund it.</p>
-      <p>We may change prices and what a plan includes at any time; a change never alters a membership already
-      bought. We may refuse or cancel an order, and may suspend or withdraw a membership without refund where
-      the account breaches these Terms — including sections 6 and 7.</p>
-      <p>Network (miner) fees are yours and are not part of the price. An underpaid, overpaid or late payment
-      may need to be settled by hand — contact us with the order reference shown on your order page.</p>` },
-
-    { id: 's21', title: 'Contact', html: contactBlock(c, 'Questions about these Terms, or opting out of arbitration under section 17.7? Get in touch:') },
+    { id: 's20', title: 'Contact', html: contactBlock(c, 'Questions about these Terms, or opting out of arbitration under section 17.7? Get in touch:') },
   ];
 
   sections.summary = summaryBlock([
-    'GoyHub is a free companion app and community forum for Counter-Strike 2 players.',
-    'You need an account to post and to download. Keep your password safe and don\'t share the account.',
-    '<strong>You may not tamper with, clone, copy, decompile or redistribute our software.</strong>',
-    'Don\'t cheat, harass people, or upload anything illegal. We can remove content and ban accounts.',
-    'You keep ownership of what you post, but you let us host and display it on the site.',
-    'Paid memberships are bought with cryptocurrency, do not auto-renew, and <strong>cannot be refunded once the payment confirms</strong> (section 20).',
+    'GoyHub is a companion app and community forum for Counter-Strike 2 players, with free and optional Paid tiers.',
+    'You need an account to post and to download. Keep your profile accurate and your password safe — don\'t share the account.',
+    '<strong>You may not tamper with, clone, copy, decompile or redistribute our software</strong>, use it commercially, or use it if you develop anti-cheat systems.',
+    'Don\'t cheat, harass people, commit fraud, or upload anything illegal — we can remove content and suspend accounts without notice.',
+    'You keep ownership of what you post, but you let us host, display and moderate it on the site.',
+    'Products, configs and presets are used <strong>at your own risk</strong> — we\'re not responsible for any in-game ban.',
     '<strong>Disputes go to binding private arbitration, individually — not to court and not as a class action.</strong> You can opt out within 30 days (section 17.7).',
     'The service is provided "as is", with no guarantee of uptime or fitness for any purpose.',
     'We are not affiliated with Valve Corporation.',
   ]);
 
   return render(ctx, {
-    title: 'Terms & Conditions',
+    title: 'Terms of Use',
     kicker: '// LEGAL',
     sections,
     updated: `Last updated: ${c.lastUpdated} · Version ${ctx.termsVersion}`,
@@ -408,7 +449,7 @@ function privacy(ctx) {
       <ul>
         <li><strong>IP address</strong> of the connecting device.</li>
         <li><strong>Browser user-agent string</strong> (browser and operating system identifiers).</li>
-        <li><strong>Event type and timestamp</strong> — specifically for account sign-up, successful login, failed login, blocked login attempt on a banned account, logout, file download, store orders being created, paid and completed, and administrator actions.</li>
+        <li><strong>Event type and timestamp</strong> — specifically for account sign-up, successful login, failed login, blocked login attempt on a banned account, logout, file download, and administrator actions.</li>
         <li><strong>Session records</strong> — a hashed session identifier, the IP address and user agent the session was created from, and its creation and expiry times.</li>
         <li><strong>Sign-up IP and most recent login IP</strong>, stored on your account record.</li>
         <li><strong>The username or email address entered in a failed sign-in attempt</strong> — recorded alongside the IP address and browser even where no such account exists, so that repeated attempts against real accounts can be investigated.</li>
@@ -423,16 +464,7 @@ function privacy(ctx) {
       with information the application needs to function — such as your linked game profile identifier, match
       statistics it retrieves on your behalf, saved configuration profiles, application version, and diagnostic
       and crash information.</p>
-      <h3>3.5 Purchase data</h3>
-      <p>If you buy a membership from the store we create an order record and keep it. It holds the plan you
-      chose, its price, currency and duration, an order reference, the identifier of the invoice raised on our
-      payment server, the order's status, and the times it was created, updated and completed. Your account
-      record also stores which tier you are on and the date your membership ends.</p>
-      <p>Payment itself is handled by our own <span class="mono">BTCPay Server</span>. The only information we
-      pass to it is the order reference, the amount, and your username and account number so that the payment
-      can be matched to your account. We do not receive or store wallet addresses, transaction contents, card
-      numbers or bank details, and we do not use a third-party card processor.</p>
-      <h3>3.6 Correspondence</h3>
+      <h3>3.5 Correspondence</h3>
       <p>If you contact us by email or through a support channel, we keep the message, your contact details and
       our reply.</p>` },
 
@@ -477,7 +509,12 @@ function privacy(ctx) {
       administrator action against an account is itself logged. Where the Service runs behind a reverse proxy or
       content delivery network <em>and is configured to trust it</em>, the IP we record is the client address
       that proxy reports; otherwise it is the address of the system that connected to us, which in such a
-      deployment may be the proxy rather than you.</p>` },
+      deployment may be the proxy rather than you.</p>
+      <p>We also collect a device fingerprint from your browser once per browsing session: device type, browser
+      and operating system, screen size, language, timezone, and a canvas-rendering signature. This does not use
+      cookies and works whether or not you are signed in. We use it for the same purposes as IP logging above —
+      chiefly recognising a banned account or an evasion attempt that returns under a new IP or account — and it is
+      visible to our administrators alongside the IP logs.</p>` },
 
     { id: 'p7', title: 'Public content', html: `
       <p>The forum is public. Your username, your posts, the time you posted, your join date and your post count
@@ -504,7 +541,6 @@ function privacy(ctx) {
         <li><strong>Security and IP logs</strong> — retained for as long as we judge necessary to protect the Service and to detect repeat abuse and ban evasion, which may be indefinitely. This is deliberate: short retention would defeat the purpose of the logs.</li>
         <li><strong>Session records</strong> — deleted automatically when they expire, and immediately when you log out or are banned.</li>
         <li><strong>Forum content</strong> — retained indefinitely as part of the public record of the forum, including after an account is closed.</li>
-        <li><strong>Order records</strong> — kept as our record of what was bought and paid for, including after an account is closed, for accounting, tax and dispute-resolution purposes.</li>
         <li><strong>Correspondence</strong> — for as long as needed to handle your request and keep a record of it.</li>
       </ul>
       <p>Where we no longer need data in identifiable form, we may anonymise it and keep it as aggregate
@@ -573,7 +609,6 @@ function privacy(ctx) {
     'We log the <strong>IP address, browser and timestamp</strong> of every sign-up, login, failed login, logout and download, for security and abuse prevention.',
     'Forum posts are public and are indexed by search engines.',
     'We use strictly necessary cookies to keep you signed in. We don\'t sell your data.',
-    'If you buy a membership we keep an order record; payment runs on our own server and we never see your wallet or card details.',
     'We keep security logs for as long as we consider necessary to protect the Service.',
   ]);
 

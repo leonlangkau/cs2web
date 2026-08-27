@@ -1,206 +1,163 @@
 /**
- * BTCPay Server client (Greenfield API v1).
+ * BTCPay Server integration (self-hosted, crypto-only checkout).
  *
- * BTCPay is self-hosted, so there is no SDK to pull in and nothing to trust
- * beyond one HTTPS call: create an invoice, send the buyer to its hosted
- * checkout, and learn about settlement two ways —
+ * Talks to a BTCPay Server over its Greenfield API to create hosted invoices,
+ * and verifies the store's signed webhooks so a paid invoice can grant a Paid
+ * membership without any human step. Nothing here trusts the client:
  *
- *   1. the webhook (POST /api/btcpay/webhook), authenticated by the
- *      HMAC-SHA256 `BTCPay-Sig` header over the exact raw body;
- *   2. polling this API when a buyer opens their order page, which is what
- *      makes checkout work before the webhook is wired up at all.
+ *   - Invoices are created server-to-server with the store API key; the price
+ *     and currency come from server config, never from the request.
+ *   - Every webhook is authenticated by an HMAC-SHA256 signature over the exact
+ *     raw request body (the shared webhook secret) — an unsigned or mis-signed
+ *     call is rejected before it can touch an account.
+ *   - Before crediting, the webhook handler re-fetches the invoice from BTCPay
+ *     and re-checks its status, amount and currency, so a forged "settled" body
+ *     (even one that somehow passed signature checks) cannot grant access.
  *
- * Neither path decides what a payment buys — see store.js. This module only
- * answers "did BTCPay say this invoice settled?".
- *
- * Configuration (all four are needed for a live checkout):
- *   BTCPAY_URL             https://btcpay.example.com
- *   BTCPAY_STORE_ID        the store's id from its BTCPay settings URL
- *   BTCPAY_API_KEY         API key with `btcpay.store.cancreateinvoice` +
- *                          `btcpay.store.canviewinvoices` (secret)
- *   BTCPAY_WEBHOOK_SECRET  the webhook's signing secret (secret) — without it
- *                          the webhook route refuses every delivery
+ * Built on fetch + Web Crypto only, so it runs unchanged on Cloudflare Workers
+ * and on Node 22 (the test harness).
  */
 import { hmacHex, safeEqual } from "./crypto.js";
 
-const REQUEST_TIMEOUT_MS = 10_000;
+/** 15s ceiling on any call to the BTCPay host so a stalled server can't hang a request. */
+const FETCH_TIMEOUT_MS = 15_000;
 
-class BtcpayError extends Error {
-  constructor(message, status = 0) {
-    super(message);
-    this.name = 'BtcpayError';
-    this.status = status;
-  }
-}
-
-/** Normalised config. An unparseable or non-HTTP(S) URL reads as unconfigured. */
-function btcpayConfig(env = {}) {
-  const raw = String(env.BTCPAY_URL || '').trim().replace(/\/+$/, '');
-  let url = '';
-  try {
-    const parsed = new URL(raw);
-    if (parsed.protocol === 'https:' || parsed.protocol === 'http:') url = raw;
-  } catch { /* leave unconfigured */ }
-  return {
-    url,
-    storeId: String(env.BTCPAY_STORE_ID || '').trim(),
-    apiKey: String(env.BTCPAY_API_KEY || '').trim(),
-    webhookSecret: String(env.BTCPAY_WEBHOOK_SECRET || '').trim(),
-  };
-}
-
-/** True when invoices can actually be created (the webhook secret is separate). */
-function isConfigured(env = {}) {
-  const cfg = btcpayConfig(env);
-  return Boolean(cfg.url && cfg.storeId && cfg.apiKey);
-}
-
-function hasWebhookSecret(env = {}) {
-  return Boolean(btcpayConfig(env).webhookSecret);
+/** Strip one trailing slash so `${url}/api/...` never doubles up. */
+function normalizeUrl(raw) {
+  const s = String(raw || '').trim();
+  return s.endsWith('/') ? s.slice(0, -1) : s;
 }
 
 /**
- * Which of the four settings are still missing — surfaced to staff on the
- * store page so "checkout isn't live" is a to-do list, not a mystery.
+ * Payment config read entirely from env / secrets. `configured` is true only
+ * when everything required to run an automated checkout AND validate its
+ * webhook is present — a half-set configuration never shows a pay button.
+ *
+ *   BTCPAY_URL            https base URL of the BTCPay Server
+ *   BTCPAY_STORE_ID       the store's id
+ *   BTCPAY_API_KEY        Greenfield API key (secret) — btcpay.store.cancreateinvoice
+ *   BTCPAY_WEBHOOK_SECRET the store webhook's signing secret (secret)
+ *   PAID_PRICE_AMOUNT     numeric price, e.g. "10.00"
+ *   PAID_PRICE_CURRENCY   ISO code, default "USD"
+ *   PAID_PERIOD_DAYS      membership length in days; empty/0 = lifetime
  */
-function missingSettings(env = {}) {
-  const cfg = btcpayConfig(env);
-  const missing = [];
-  if (!cfg.url) missing.push('BTCPAY_URL');
-  if (!cfg.storeId) missing.push('BTCPAY_STORE_ID');
-  if (!cfg.apiKey) missing.push('BTCPAY_API_KEY');
-  if (!cfg.webhookSecret) missing.push('BTCPAY_WEBHOOK_SECRET');
-  return missing;
+function btcpayConfig(env = {}) {
+  const url = normalizeUrl(env.BTCPAY_URL);
+  const storeId = String(env.BTCPAY_STORE_ID || '').trim();
+  const apiKey = String(env.BTCPAY_API_KEY || '').trim();
+  const webhookSecret = String(env.BTCPAY_WEBHOOK_SECRET || '').trim();
+
+  const amountNum = Number(env.PAID_PRICE_AMOUNT);
+  const amount = Number.isFinite(amountNum) && amountNum > 0 ? String(env.PAID_PRICE_AMOUNT).trim() : '';
+
+  const currencyRaw = String(env.PAID_PRICE_CURRENCY || 'USD').trim().toUpperCase();
+  const currency = /^[A-Z]{2,10}$/.test(currencyRaw) ? currencyRaw : 'USD';
+
+  const daysNum = Number(env.PAID_PERIOD_DAYS);
+  const periodDays = Number.isFinite(daysNum) && daysNum > 0 ? Math.floor(daysNum) : null;
+
+  const configured = Boolean(url && storeId && apiKey && webhookSecret && amount);
+  return { url, storeId, apiKey, webhookSecret, amount, currency, periodDays, configured };
 }
 
-async function api(env, path, { method = 'GET', body } = {}) {
-  const cfg = btcpayConfig(env);
-  if (!isConfigured(env)) throw new BtcpayError('BTCPay is not configured', 0);
+/** fetch() with an AbortController timeout, so the caller never hangs forever. */
+async function timedFetch(url, options) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+  try {
+    return await fetch(url, { ...options, signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
-  const init = {
-    method,
+/**
+ * Creates a hosted invoice for a single Paid membership purchase and returns
+ * { id, checkoutLink, status }. The member is bound to the invoice by an
+ * `orderId` carried in the invoice metadata; the webhook uses it to find the
+ * pending payment row. Throws on any non-2xx response.
+ */
+async function createInvoice(cfg, { orderId, userId, username, redirectUrl }) {
+  const endpoint = `${cfg.url}/api/v1/stores/${encodeURIComponent(cfg.storeId)}/invoices`;
+  const payload = {
+    amount: cfg.amount,
+    currency: cfg.currency,
+    metadata: {
+      orderId,
+      userId: String(userId),
+      username: String(username || ''),
+      itemDesc: 'GoyHub Paid membership',
+    },
+    checkout: {
+      redirectURL: redirectUrl,
+      redirectAutomatically: true,
+      // Only mark the invoice paid once the payment is actually confirmed on
+      // chain — never on a zero-conf "processing" state.
+      speedPolicy: 'MediumSpeed',
+    },
+  };
+
+  const res = await timedFetch(endpoint, {
+    method: 'POST',
     headers: {
       Authorization: `token ${cfg.apiKey}`,
       'Content-Type': 'application/json',
-      Accept: 'application/json',
     },
-  };
-  if (body !== undefined) init.body = JSON.stringify(body);
-  // A hung payment server must not hold a Worker request open to its own limit.
-  if (typeof AbortSignal !== 'undefined' && typeof AbortSignal.timeout === 'function') {
-    init.signal = AbortSignal.timeout(REQUEST_TIMEOUT_MS);
-  }
-
-  const endpoint = `${cfg.url}/api/v1/stores/${encodeURIComponent(cfg.storeId)}${path}`;
-  let res;
-  try {
-    res = await fetch(endpoint, init);
-  } catch (err) {
-    throw new BtcpayError(`BTCPay unreachable: ${err && err.message ? err.message : 'network error'}`, 0);
-  }
-
-  const text = await res.text();
-  let data = null;
-  try { data = text ? JSON.parse(text) : null; } catch { /* HTML error page, etc. */ }
+    body: JSON.stringify(payload),
+  });
 
   if (!res.ok) {
-    const first = Array.isArray(data) ? data[0] : data;
-    const detail = (first && (first.message || first.code)) || `HTTP ${res.status}`;
-    throw new BtcpayError(String(detail).slice(0, 200), res.status);
+    const detail = await res.text().catch(() => '');
+    throw new Error(`BTCPay createInvoice failed: ${res.status} ${detail.slice(0, 200)}`);
   }
-  return data;
+  const data = await res.json();
+  if (!data || !data.id || !data.checkoutLink) {
+    throw new Error('BTCPay createInvoice returned an unexpected payload');
+  }
+  return { id: data.id, checkoutLink: data.checkoutLink, status: data.status };
 }
 
-/**
- * Creates an invoice for one order. `orderRef` is our own reference: BTCPay
- * echoes it back in webhook metadata and it names the status page the buyer
- * is returned to.
- */
-async function createInvoice(env, { amount, currency, orderRef, itemDesc, buyerEmail, redirectUrl, userId, username }) {
-  const invoice = await api(env, '/invoices', {
-    method: 'POST',
-    body: {
-      amount: String(amount),
-      currency,
-      metadata: {
-        orderId: orderRef,
-        itemDesc,
-        buyerEmail: buyerEmail || null,
-        posData: { userId, username },
-      },
-      checkout: {
-        redirectURL: redirectUrl,
-        redirectAutomatically: true,
-        defaultLanguage: 'en',
-      },
-    },
+/** Fetches one invoice from the store. Returns the parsed invoice, or throws. */
+async function getInvoice(cfg, invoiceId) {
+  const endpoint = `${cfg.url}/api/v1/stores/${encodeURIComponent(cfg.storeId)}/invoices/${encodeURIComponent(invoiceId)}`;
+  const res = await timedFetch(endpoint, {
+    method: 'GET',
+    headers: { Authorization: `token ${cfg.apiKey}` },
   });
-  if (!invoice || !invoice.id) throw new BtcpayError('BTCPay returned no invoice id', 0);
-  return {
-    id: String(invoice.id),
-    checkoutLink: String(invoice.checkoutLink || ''),
-    status: String(invoice.status || 'New'),
-    amount: invoice.amount,
-    currency: invoice.currency,
-    expirationTime: invoice.expirationTime || null,
-  };
-}
-
-function getInvoice(env, invoiceId) {
-  return api(env, `/invoices/${encodeURIComponent(String(invoiceId))}`);
+  if (!res.ok) {
+    const detail = await res.text().catch(() => '');
+    throw new Error(`BTCPay getInvoice failed: ${res.status} ${detail.slice(0, 200)}`);
+  }
+  return res.json();
 }
 
 /**
- * BTCPay invoice status -> our order status. "Settled" means the payment is
- * confirmed and final; "Processing" means paid but not yet confirmed enough,
- * which is worth showing the buyer but is not something to grant access on.
+ * Verifies a BTCPay webhook signature. BTCPay sends `BTCPay-Sig: sha256=<hex>`,
+ * an HMAC-SHA256 of the EXACT raw request body keyed by the webhook secret — so
+ * the caller must pass the untouched body string, not a re-serialized object.
+ * Constant-time comparison; any malformed input returns false rather than
+ * throwing.
  */
-const INVOICE_STATUS = {
-  New: 'new',
-  Processing: 'processing',
-  Settled: 'paid',
-  Complete: 'paid',   // pre-2.0 alias, still seen on older servers
-  Confirmed: 'paid',  // ditto
-  Expired: 'expired',
-  Invalid: 'invalid',
-};
-
-/** Webhook event type -> our order status (null = informational only). */
-const WEBHOOK_EVENT = {
-  InvoiceCreated: 'new',
-  InvoiceReceivedPayment: 'processing',
-  InvoiceProcessing: 'processing',
-  InvoicePaymentSettled: null,
-  InvoiceSettled: 'paid',
-  InvoiceExpired: 'expired',
-  InvoiceInvalid: 'invalid',
-};
-
-function orderStatusForInvoice(invoiceStatus) {
-  return INVOICE_STATUS[String(invoiceStatus || '')] || null;
-}
-
-function orderStatusForEvent(eventType) {
-  const key = String(eventType || '');
-  return Object.prototype.hasOwnProperty.call(WEBHOOK_EVENT, key) ? WEBHOOK_EVENT[key] : undefined;
-}
-
-/**
- * Verifies BTCPay's `BTCPay-Sig: sha256=<hex>` header against the raw request
- * body. The raw text matters — re-serialising the parsed JSON would change the
- * bytes and break every signature.
- */
-async function verifyWebhookSignature(secret, rawBody, header) {
-  const provided = String(header || '').trim();
-  if (!secret || !provided) return false;
-  const prefix = 'sha256=';
-  if (provided.slice(0, prefix.length).toLowerCase() !== prefix) return false;
+async function verifyWebhookSignature(secret, rawBody, sigHeader) {
+  if (!secret || typeof rawBody !== 'string' || !sigHeader) return false;
+  const header = String(sigHeader).trim();
+  const provided = header.startsWith('sha256=') ? header.slice('sha256='.length) : header;
+  if (!/^[0-9a-fA-F]{64}$/.test(provided)) return false;
   const expected = await hmacHex(secret, rawBody);
-  return safeEqual(provided.slice(prefix.length).toLowerCase(), expected);
+  return safeEqual(expected, provided.toLowerCase());
 }
 
-export {
-  BtcpayError, btcpayConfig, isConfigured, hasWebhookSecret, missingSettings,
-  createInvoice, getInvoice, orderStatusForInvoice, orderStatusForEvent,
-  verifyWebhookSignature, INVOICE_STATUS, WEBHOOK_EVENT,
-};
+/**
+ * Computes the new paid_until (ms epoch) after crediting `periodDays`.
+ * periodDays === null grants a lifetime membership (returns null). Otherwise
+ * the period stacks on whatever is left — an unexpired member is extended, an
+ * expired/new one starts from now.
+ */
+function extendPaidUntil(currentPaidUntil, periodDays, now = Date.now()) {
+  if (periodDays === null || periodDays === undefined) return null;
+  const current = currentPaidUntil === null || currentPaidUntil === undefined ? 0 : Number(currentPaidUntil);
+  const base = current > now ? current : now;
+  return base + Math.floor(periodDays) * 86_400_000;
+}
+
+export { btcpayConfig, createInvoice, getInvoice, verifyWebhookSignature, extendPaidUntil };

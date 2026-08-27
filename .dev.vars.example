@@ -14,6 +14,12 @@ ADMIN_PASSWORD=choose-a-strong-password
 # tier with. Optional — falls back to CAPTCHA_SECRET if unset.
 # LICENSE_SECRET=replace_me_with_a_different_long_random_string
 
+# Where the real installer lives. Fetched server-side by /download/file and
+# streamed straight through — the URL itself is never sent to the browser.
+# Required for downloads to work — no fallback. Leave unset in dev and
+# /download/file will correctly return "unavailable" rather than fake content.
+# DOWNLOAD_URL=https://example.com/path/to/GoyHub-Setup-1.0.0.zip
+
 # Outbound email (optional in dev). Use provider "test" to capture messages
 # in-process (the smoke tests do), or a real provider + key.
 # EMAIL_PROVIDER=test
@@ -23,13 +29,13 @@ ADMIN_PASSWORD=choose-a-strong-password
 # TURNSTILE_SITE_KEY=1x00000000000000000000AA
 # TURNSTILE_SECRET_KEY=1x0000000000000000000000000000000AA
 
-# Store checkout against a BTCPay Server. All four are needed before the pay
-# button goes live; without them the store still renders and says checkout is
-# being set up. The smoke tests stub BTCPay out, so none of this is needed to
-# run `npm test`.
+# BTCPay Server crypto checkout (optional). Set all of these to turn the
+# /upgrade page into a real one-click crypto checkout that upgrades the account
+# automatically once a payment confirms. Full guide: BTCPAY-SETUP.md.
 # BTCPAY_URL=https://btcpay.example.com
 # BTCPAY_STORE_ID=your-store-id
-# BTCPAY_API_KEY=greenfield-api-key
-# BTCPAY_WEBHOOK_SECRET=webhook-signing-secret
-# STORE_CURRENCY=USD
-# STORE_PLANS=1m:1 Month:9.99:30,lifetime:Lifetime:149.99:0
+# BTCPAY_API_KEY=your-greenfield-api-key
+# BTCPAY_WEBHOOK_SECRET=the-store-webhook-signing-secret
+# PAID_PRICE_AMOUNT=10.00
+# PAID_PRICE_CURRENCY=USD
+# PAID_PERIOD_DAYS=30       # empty or 0 = lifetime membership

@@ -10,8 +10,24 @@
 (function () {
   'use strict';
 
-  var reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-  var hoverCapable = window.matchMedia('(hover: hover) and (pointer: fine)').matches;
+  var reducedMotion = false;
+  var hoverCapable = false;
+  try {
+    reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    hoverCapable = window.matchMedia('(hover: hover) and (pointer: fine)').matches;
+  } catch (e) { /* no matchMedia — motion allowed, hover effects off */ }
+
+  /* Every effect below is wrapped in safe(). This file is one IIFE and it owns
+     the reveals, which start at opacity 0 (.js .reveal in style.css) — so
+     without this a throw in any single effect leaves the rest of the page's
+     content permanently invisible instead of just dropping that one effect. */
+  function safe(fn) {
+    try {
+      fn();
+    } catch (err) {
+      if (window.console && window.console.error) window.console.error('[goyhub fx]', err);
+    }
+  }
 
   /* Theme-aware colors for canvas work: read the palette from CSS custom
      properties so canvases follow the light/dark toggle. */
@@ -20,13 +36,18 @@
     return v || fallback;
   }
   var themeListeners = [];
-  new MutationObserver(function () {
-    themeListeners.forEach(function (fn) { fn(); });
-  }).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+  safe(function () {
+    new MutationObserver(function () {
+      themeListeners.forEach(function (fn) { safe(fn); });
+    }).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+  });
 
   /* ---------- Reveal on scroll (React Bits AnimatedContent) ----------
      Containers marked data-stagger get cascading delays on their .reveal
      children; standalone .reveal elements animate individually. */
+  safe(function () {
+  // Disarms the boot.js watchdog: reveals are this file's responsibility.
+  document.documentElement.setAttribute('data-reveal-ready', '1');
   document.querySelectorAll('[data-stagger]').forEach(function (group) {
     var step = parseInt(group.getAttribute('data-stagger'), 10) || 70;
     var children = group.querySelectorAll('.reveal');
@@ -66,6 +87,7 @@
       revealEls.forEach(function (el) { io.observe(el); });
     }
   }
+  });
 
   /* ---------- SplitText ----------
      Elements marked data-split get their text split into per-character spans
@@ -119,9 +141,9 @@
       requestAnimationFrame(function () { root.classList.add('split-go'); });
     });
   }
-  if (!reducedMotion) {
-    document.querySelectorAll('[data-split]').forEach(splitElement);
-  }
+  safe(function () {
+    if (!reducedMotion) document.querySelectorAll('[data-split]').forEach(splitElement);
+  });
 
   /* ---------- DecryptedText ----------
      Elements marked data-decrypt scramble through random glyphs and settle
@@ -160,6 +182,7 @@
     }
     requestAnimationFrame(tick);
   }
+  safe(function () {
   if (!reducedMotion && 'IntersectionObserver' in window) {
     var dio = new IntersectionObserver(function (entries) {
       entries.forEach(function (entry) {
@@ -171,8 +194,10 @@
     }, { threshold: 0.5 });
     document.querySelectorAll('[data-decrypt]').forEach(function (el) { dio.observe(el); });
   }
+  });
 
   /* ---------- CountUp ---------- */
+  safe(function () {
   var counters = document.querySelectorAll('[data-count]');
   function animateCount(el) {
     var target = parseInt(el.getAttribute('data-count'), 10) || 0;
@@ -203,10 +228,12 @@
       counters.forEach(animateCount);
     }
   }
+  });
 
   /* ---------- SpotlightCard ----------
      A radial highlight follows the pointer across any .spotlight-card.
      One delegated listener, coordinates handed to CSS via custom properties. */
+  safe(function () {
   if (hoverCapable && !reducedMotion) {
     var spotRaf = null;
     var spotPending = null;
@@ -234,9 +261,11 @@
       }
     }, { passive: true });
   }
+  });
 
   /* ---------- Magnet ----------
      Primary hero CTA gently pulls toward the cursor. */
+  safe(function () {
   if (hoverCapable && !reducedMotion) {
     document.querySelectorAll('[data-magnet]').forEach(function (el) {
       var strength = 0.18;
@@ -253,10 +282,12 @@
       });
     });
   }
+  });
 
   /* ---------- ClickSpark ----------
      Short accent strokes burst from every click. Canvas overlay, drawn only
      while sparks are alive. */
+  safe(function () {
   if (!reducedMotion) {
     var sparkCanvas = document.createElement('canvas');
     sparkCanvas.className = 'click-spark-canvas';
@@ -312,17 +343,20 @@
       }
     }
   }
+  });
 
   /* ---------- Hero visibility gate ----------
      The aurora and particle loops only draw while the hero is on screen
      and the tab is visible. */
-  var heroEl = document.querySelector('.hero');
   var heroVisible = true;
-  if (heroEl && 'IntersectionObserver' in window) {
-    new IntersectionObserver(function (entries) {
-      heroVisible = entries[0].isIntersecting;
-    }, { threshold: 0 }).observe(heroEl);
-  }
+  safe(function () {
+    var heroEl = document.querySelector('.hero');
+    if (heroEl && 'IntersectionObserver' in window) {
+      new IntersectionObserver(function (entries) {
+        heroVisible = entries[0].isIntersecting;
+      }, { threshold: 0 }).observe(heroEl);
+    }
+  });
   function heroActive() { return heroVisible && !document.hidden; }
 
   /* ---------- Aurora (React Bits) ----------
@@ -331,7 +365,8 @@
      composited additively, rendered at 1/3 resolution and upscaled
      (the upscale doubles as the blur). ~30fps. */
   var auroraCanvas = document.getElementById('aurora-canvas');
-  if (auroraCanvas && !reducedMotion) {
+  safe(function () {
+    if (!auroraCanvas) return;
     (function () {
       var actx = auroraCanvas.getContext('2d');
       if (!actx) return;
@@ -360,20 +395,27 @@
         return hash(i) * (1 - u) + hash(i + 1) * u;
       }
 
+      var auroraSized = false;
       function sizeAurora() {
         var rect = auroraCanvas.getBoundingClientRect();
-        if (rect.width === aw && rect.height === ah) return;
+        if (auroraSized && rect.width === aw && rect.height === ah) return false;
+        auroraSized = true;
         aw = rect.width; ah = rect.height;
         auroraCanvas.width = Math.max(1, Math.round(aw));
         auroraCanvas.height = Math.max(1, Math.round(ah));
         ow = Math.max(1, Math.round(aw / 3));
         oh = Math.max(1, Math.round(ah / 3));
         off.width = ow; off.height = oh;
+        return true;
       }
       sizeAurora();
-      window.addEventListener('resize', sizeAurora);
+      window.addEventListener('resize', function () {
+        // Under reduced motion nothing is looping, so repaint the still frame.
+        if (sizeAurora() && reducedMotion) renderAurora(STILL_T);
+      });
 
       var lastAurora = 0;
+      var STILL_T = 6.2;
       var N = 56;
       function drawAuroraLayer(t, seed, baseFrac, ampFrac, alpha) {
         var base = oh * baseFrac;
@@ -398,12 +440,7 @@
         octx.fill();
         octx.globalAlpha = 1;
       }
-      function drawAurora(now) {
-        requestAnimationFrame(drawAurora);
-        if (!heroActive()) return;
-        if (now - lastAurora < 33) return;
-        lastAurora = now;
-        var t = now / 1000;
+      function renderAurora(t) {
         octx.globalCompositeOperation = 'source-over';
         octx.clearRect(0, 0, ow, oh);
         drawAuroraLayer(t, 0, 0.5, 0.22, 0.5);
@@ -421,16 +458,34 @@
         actx.clearRect(0, 0, auroraCanvas.width, auroraCanvas.height);
         actx.drawImage(off, 0, 0, ow, oh, 0, 0, auroraCanvas.width, auroraCanvas.height);
       }
+
+      if (reducedMotion) {
+        // Motion is off. Paint the curtain once at a fixed point in the noise
+        // field rather than skipping it: the hero keeps its background, it
+        // just doesn't move.
+        renderAurora(STILL_T);
+        themeListeners.push(function () { renderAurora(STILL_T); });
+        return;
+      }
+
+      function drawAurora(now) {
+        requestAnimationFrame(drawAurora);
+        if (!heroActive()) return;
+        if (now - lastAurora < 33) return;
+        lastAurora = now;
+        renderAurora(now / 1000);
+      }
       requestAnimationFrame(drawAurora);
     })();
-  }
+  });
 
   /* ---------- Particles (hero background) ----------
      Constellation field: linked drifting points plus rising accent embers,
      with gentle cursor repulsion. Colors track the active theme. */
+  safe(function () {
   var canvas = document.getElementById('hero-canvas');
-  if (!canvas || reducedMotion) return;
-  var ctx = canvas.getContext('2d');
+  if (!canvas) return;
+  var ctx = canvas.getContext && canvas.getContext('2d');
   if (!ctx) return;
 
   var colors = {};
@@ -450,14 +505,19 @@
   var LINK_DIST = 130;
   var resizeTimer = null;
 
+  var sized = false;
   function resize() {
     var rect = canvas.getBoundingClientRect();
+    var w = Math.max(1, Math.round(rect.width));
+    var h = Math.max(1, Math.round(rect.height));
     var nextDpr = Math.min(2, window.devicePixelRatio || 1);
     // Mobile browsers fire resize when the URL bar collapses during scroll —
-    // don't rebuild the field unless the canvas actually changed.
-    if (rect.width === width && rect.height === height && nextDpr === dpr) return;
-    width = rect.width;
-    height = rect.height;
+    // don't rebuild the field unless the canvas actually changed. `sized`
+    // guarantees the first call initialises even when the hero measures 0x0.
+    if (sized && w === width && h === height && nextDpr === dpr) return false;
+    sized = true;
+    width = w;
+    height = h;
     dpr = nextDpr;
     canvas.width = Math.round(width * dpr);
     canvas.height = Math.round(height * dpr);
@@ -465,11 +525,15 @@
     var count = Math.min(110, Math.max(35, Math.round((width * height) / 16000)));
     particles = [];
     for (var i = 0; i < count; i++) particles.push(makeParticle(true));
+    return true;
   }
 
   function scheduleResize() {
     if (resizeTimer) clearTimeout(resizeTimer);
-    resizeTimer = setTimeout(resize, 150);
+    resizeTimer = setTimeout(function () {
+      // Under reduced motion nothing is looping, so repaint the still frame.
+      if (resize() && reducedMotion) drawFrame(false);
+    }, 150);
   }
 
   function makeParticle(anywhere) {
@@ -486,22 +550,10 @@
     };
   }
 
-  canvas.parentElement.addEventListener('mousemove', function (e) {
-    var rect = canvas.getBoundingClientRect();
-    mouse.x = e.clientX - rect.left;
-    mouse.y = e.clientY - rect.top;
-  });
-  canvas.parentElement.addEventListener('mouseleave', function () {
-    mouse.x = -9999;
-    mouse.y = -9999;
-  });
-
   var frame = 0;
-  function draw() {
-    requestAnimationFrame(draw);
-    if (!heroActive()) return;
+  function drawFrame(animate) {
     ctx.clearRect(0, 0, width, height);
-    frame += 1;
+    if (animate) frame += 1;
 
     ctx.lineWidth = 1;
     for (var i = 0; i < particles.length; i++) {
@@ -527,36 +579,38 @@
     for (var k = 0; k < particles.length; k++) {
       var pt = particles[k];
 
-      var mdx = pt.x - mouse.x;
-      var mdy = pt.y - mouse.y;
-      var mdist2 = mdx * mdx + mdy * mdy;
-      if (mdist2 < 120 * 120 && mdist2 > 0.01) {
-        var f = 26 / mdist2;
-        pt.vx += mdx * f;
-        pt.vy += mdy * f;
-      }
-      pt.vx = Math.max(-0.9, Math.min(0.9, pt.vx)) * 0.995;
-      // Embers keep their upward drift but stay clamped so the cursor can't
-      // fling them off-canvas permanently.
-      pt.vy = pt.ember
-        ? Math.max(-1.4, Math.min(1.4, pt.vy))
-        : Math.max(-0.9, Math.min(0.9, pt.vy)) * 0.995;
+      if (animate) {
+        var mdx = pt.x - mouse.x;
+        var mdy = pt.y - mouse.y;
+        var mdist2 = mdx * mdx + mdy * mdy;
+        if (mdist2 < 120 * 120 && mdist2 > 0.01) {
+          var f = 26 / mdist2;
+          pt.vx += mdx * f;
+          pt.vy += mdy * f;
+        }
+        pt.vx = Math.max(-0.9, Math.min(0.9, pt.vx)) * 0.995;
+        // Embers keep their upward drift but stay clamped so the cursor can't
+        // fling them off-canvas permanently.
+        pt.vy = pt.ember
+          ? Math.max(-1.4, Math.min(1.4, pt.vy))
+          : Math.max(-0.9, Math.min(0.9, pt.vy)) * 0.995;
 
-      pt.x += pt.vx;
-      pt.y += pt.vy;
+        pt.x += pt.vx;
+        pt.y += pt.vy;
 
-      if (pt.ember && (pt.y < -12 || pt.y > height + 16)) {
-        particles[k] = makeParticle(false);
-        continue;
-      }
-      if (pt.x < -12) pt.x = width + 10;
-      if (pt.x > width + 12) pt.x = -10;
-      if (!pt.ember) {
-        if (pt.y < -12) pt.y = height + 10;
-        if (pt.y > height + 12) pt.y = -10;
+        if (pt.ember && (pt.y < -12 || pt.y > height + 16)) {
+          particles[k] = makeParticle(false);
+          continue;
+        }
+        if (pt.x < -12) pt.x = width + 10;
+        if (pt.x > width + 12) pt.x = -10;
+        if (!pt.ember) {
+          if (pt.y < -12) pt.y = height + 10;
+          if (pt.y > height + 12) pt.y = -10;
+        }
       }
 
-      var flicker = 0.75 + 0.25 * Math.sin(frame * 0.03 + pt.twinkle);
+      var flicker = animate ? 0.75 + 0.25 * Math.sin(frame * 0.03 + pt.twinkle) : 1;
       var alpha = (pt.alpha * flicker).toFixed(3);
       ctx.beginPath();
       ctx.arc(pt.x, pt.y, pt.r, 0, Math.PI * 2);
@@ -568,6 +622,34 @@
   }
 
   resize();
+  // Window resize also catches a display-scaling change or a drag to a second
+  // monitor, which alters devicePixelRatio without resizing the canvas box.
   window.addEventListener('resize', scheduleResize);
+  if ('ResizeObserver' in window) new ResizeObserver(scheduleResize).observe(canvas);
+
+  if (reducedMotion) {
+    // Motion is off (Windows "Animation effects", macOS "Reduce motion", or a
+    // browser setting). Paint one still frame instead of bailing out.
+    drawFrame(false);
+    themeListeners.push(function () { drawFrame(false); });
+    return;
+  }
+
+  canvas.parentElement.addEventListener('mousemove', function (e) {
+    var rect = canvas.getBoundingClientRect();
+    mouse.x = e.clientX - rect.left;
+    mouse.y = e.clientY - rect.top;
+  });
+  canvas.parentElement.addEventListener('mouseleave', function () {
+    mouse.x = -9999;
+    mouse.y = -9999;
+  });
+
+  function draw() {
+    requestAnimationFrame(draw);
+    if (!heroActive()) return;
+    drawFrame(true);
+  }
   requestAnimationFrame(draw);
+  });
 })();

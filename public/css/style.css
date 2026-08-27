@@ -587,6 +587,11 @@ a.nav-user:hover { color: var(--accent); }
   animation: reveal-rise 0.65s cubic-bezier(0.16, 1, 0.3, 1) both;
   animation-delay: var(--reveal-delay, 0ms);
 }
+/* Failsafe: boot.js adds .reveal-failsafe when fx.js never reported in (an
+   extension or filter blocked it, a stale cache 404s, the network dropped).
+   fx.js owns the reveals, so without this a dead fx.js leaves every revealed
+   element at opacity 0 and the page renders as an empty background. */
+.reveal-failsafe .reveal { opacity: 1; transform: none; animation: none; }
 @keyframes reveal-rise {
   from { opacity: 0; transform: translateY(22px); }
   to { opacity: 1; transform: none; }

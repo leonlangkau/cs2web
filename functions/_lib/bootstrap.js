@@ -162,6 +162,18 @@ async function ensureVanityUids(db) {
   }
 }
 
+/** And for payments.plan_id / plan_name (the catalogue shipped after checkout did). */
+async function ensurePaymentPlanColumns(db) {
+  const columns = await db.all('PRAGMA table_info(payments)');
+  if (columns.length === 0) return; // table not created yet; schema.sql covers it
+  if (!columns.some((c) => c.name === 'plan_id')) {
+    await db.run('ALTER TABLE payments ADD COLUMN plan_id TEXT');
+  }
+  if (!columns.some((c) => c.name === 'plan_name')) {
+    await db.run('ALTER TABLE payments ADD COLUMN plan_name TEXT');
+  }
+}
+
 /** Runs the DDL once per process/isolate. */
 const schemaReady = new WeakMap();
 
@@ -174,6 +186,7 @@ function ensureSchema(db) {
       await ensurePostEditColumns(db);
       await ensureEmailVerifiedColumn(db);
       await ensurePaidUntilColumn(db);
+      await ensurePaymentPlanColumns(db);
     })());
   }
   return schemaReady.get(db);

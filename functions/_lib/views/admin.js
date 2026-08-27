@@ -14,6 +14,7 @@ function head(ctx, heading) {
   <nav class="admin-tabs" aria-label="Admin sections">
     ${tab('/admin', 'Dashboard', p === '/admin')}
     ${tab('/admin/users', 'Users', p.startsWith('/admin/users'))}
+    ${tab('/admin/payments', 'Payments', p.startsWith('/admin/payments'))}
     ${tab('/admin/logs', 'IP logs', p.startsWith('/admin/logs'))}
     ${tab('/admin/fingerprints', 'Fingerprints', p.startsWith('/admin/fingerprints'))}
     ${tab('/admin/reports', 'Reports', p.startsWith('/admin/reports'))}
@@ -190,6 +191,62 @@ function users(ctx, { users: rows, q, page: current, pages, total, tiers, tierLa
   </div>
 </div>`;
   return page(ctx, { title: 'Admin · Users', body });
+}
+
+/**
+ * Crypto payments queue. Read-only for staff; the "Credit" button is full admin
+ * only, because it grants a paid membership without a confirmed payment.
+ * "Re-check" is staff-level — it only ever applies BTCPay's own verdict.
+ */
+function payments(ctx, { rows, status, statuses, page: current, pages, total, live, swept }) {
+  const csrf = `<input type="hidden" name="_csrf" value="${esc(ctx.csrfToken)}">`;
+  const canCredit = isFullAdmin(ctx.user);
+
+  const row = (p) => `<tr class="${p.credited_at ? 'row-resolved' : ''}">
+    <td class="mono detail-cell" title="${esc(p.order_id)}">${esc(String(p.order_id).slice(0, 10))}…</td>
+    <td>${p.username ? esc(p.username) : '<span class="muted">(gone)</span>'}</td>
+    <td>${esc(p.plan_name || 'Paid membership')}
+      <div class="muted">${esc(p.period_days ? `${p.period_days} days` : 'lifetime')}</div></td>
+    <td class="nowrap">${esc(p.amount)} ${esc(p.currency)}</td>
+    <td><span class="tag tag-pay tag-pay-${esc(p.status)}">${esc(p.status)}</span>
+      ${p.credited_at ? '<span class="tag tag-report-resolved">CREDITED</span>' : ''}</td>
+    <td class="mono detail-cell" title="${esc(p.invoice_id || '')}">${esc(p.invoice_id || '—')}</td>
+    <td class="muted nowrap">${esc(timeAgo(p.created_at))}</td>
+    <td class="actions-cell">
+      ${live && p.invoice_id && !p.credited_at ? `<form method="post" action="/admin/payments/${esc(p.id)}/recheck" class="inline-form">${csrf}
+        <button class="btn btn-ghost btn-xs" type="submit">Re-check</button></form>` : ''}
+      ${canCredit && !p.credited_at ? `<form method="post" action="/admin/payments/${esc(p.id)}/credit" class="inline-form"
+        data-confirm="Grant this membership without a confirmed payment?">${csrf}
+        <button class="btn btn-warn btn-xs" type="submit">Credit</button></form>` : ''}
+    </td></tr>`;
+
+  const body = `
+<div class="section admin-page">
+  <div class="container">
+    ${head(ctx, 'Payments')}
+    ${live
+      ? `<p class="muted">Unfinished payments are re-checked against BTCPay automatically — when a buyer
+          opens the store or their profile, when they return from checkout, and in a small sweep each time
+          this page loads${swept ? ` (${esc(swept)} re-checked just now)` : ''}. Nothing here needs a human
+          unless a payment is stuck.</p>`
+      : '<p class="muted">BTCPay is not configured, so no invoices can be created or re-checked.</p>'}
+    <form class="filter-bar" method="get" action="/admin/payments">
+      <select name="status" aria-label="Filter by status">
+        <option value="">All statuses</option>
+        ${map(statuses, (st) => `<option value="${esc(st)}" ${status === st ? 'selected' : ''}>${esc(st)}</option>`)}
+      </select>
+      <button class="btn btn-outline btn-sm" type="submit">Filter</button>
+      ${status ? '<a class="btn btn-ghost btn-sm" href="/admin/payments">Clear</a>' : ''}
+      <span class="muted">${esc(total)} payment${total === 1 ? '' : 's'}</span>
+    </form>
+    <div class="panel"><div class="table-wrap"><table>
+      <thead><tr><th>Order</th><th>User</th><th>Plan</th><th>Amount</th><th>Status</th><th>Invoice</th><th>Started</th><th></th></tr></thead>
+      <tbody>${rows.length ? map(rows, row) : '<tr><td colspan="8" class="muted center">No payments yet.</td></tr>'}</tbody>
+    </table></div></div>
+    ${pagination(current, pages, (n) => `/admin/payments?${new URLSearchParams({ ...(status ? { status } : {}), page: String(n) })}`)}
+  </div>
+</div>`;
+  return page(ctx, { title: 'Admin · Payments', body });
 }
 
 function logs(ctx, { logs: rows, q, event, events, important, page: current, pages, total, ipBans }) {
@@ -459,4 +516,4 @@ function forumAdmin(ctx, { categories, threads }) {
   return page(ctx, { title: 'Admin · Forum', body });
 }
 
-export { dashboard, users, logs, fingerprints, fingerprintDetail, reports, forumAdmin };
+export { dashboard, users, payments, logs, fingerprints, fingerprintDetail, reports, forumAdmin };

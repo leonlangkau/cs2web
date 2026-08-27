@@ -202,6 +202,8 @@ CREATE TABLE IF NOT EXISTS payments (
   amount      TEXT NOT NULL,
   currency    TEXT NOT NULL,
   period_days INTEGER,
+  plan_id     TEXT,
+  plan_name   TEXT,
   status      TEXT NOT NULL DEFAULT 'new' CHECK (status IN ('new','processing','settled','expired','invalid')),
   credited_at INTEGER,
   created_at  TEXT NOT NULL DEFAULT (datetime('now')),

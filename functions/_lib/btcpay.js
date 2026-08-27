@@ -18,6 +18,7 @@
  * and on Node 22 (the test harness).
  */
 import { hmacHex, safeEqual } from "./crypto.js";
+import { storePlans } from "./plans.js";
 
 /** 15s ceiling on any call to the BTCPay host so a stalled server can't hang a request. */
 const FETCH_TIMEOUT_MS = 15_000;
@@ -40,6 +41,8 @@ function normalizeUrl(raw) {
  *   PAID_PRICE_AMOUNT     numeric price, e.g. "10.00"
  *   PAID_PRICE_CURRENCY   ISO code, default "USD"
  *   PAID_PERIOD_DAYS      membership length in days; empty/0 = lifetime
+ *   STORE_PLANS           optional catalogue replacing the single price above,
+ *                         "id:Name:amount:days,…" (see plans.js)
  */
 function btcpayConfig(env = {}) {
   const url = normalizeUrl(env.BTCPAY_URL);
@@ -47,17 +50,18 @@ function btcpayConfig(env = {}) {
   const apiKey = String(env.BTCPAY_API_KEY || '').trim();
   const webhookSecret = String(env.BTCPAY_WEBHOOK_SECRET || '').trim();
 
-  const amountNum = Number(env.PAID_PRICE_AMOUNT);
-  const amount = Number.isFinite(amountNum) && amountNum > 0 ? String(env.PAID_PRICE_AMOUNT).trim() : '';
-
   const currencyRaw = String(env.PAID_PRICE_CURRENCY || 'USD').trim().toUpperCase();
   const currency = /^[A-Z]{2,10}$/.test(currencyRaw) ? currencyRaw : 'USD';
 
-  const daysNum = Number(env.PAID_PERIOD_DAYS);
-  const periodDays = Number.isFinite(daysNum) && daysNum > 0 ? Math.floor(daysNum) : null;
+  // The catalogue (STORE_PLANS, or the single PAID_PRICE_AMOUNT plan). `amount`
+  // and `periodDays` stay on the config as the DEFAULT plan, so every existing
+  // caller keeps working unchanged whether one plan is sold or four.
+  const plans = storePlans(env);
+  const amount = plans.length > 0 ? plans[0].amount : '';
+  const periodDays = plans.length > 0 ? plans[0].periodDays : null;
 
   const configured = Boolean(url && storeId && apiKey && webhookSecret && amount);
-  return { url, storeId, apiKey, webhookSecret, amount, currency, periodDays, configured };
+  return { url, storeId, apiKey, webhookSecret, amount, currency, periodDays, plans, configured };
 }
 
 /** fetch() with an AbortController timeout, so the caller never hangs forever. */
@@ -77,16 +81,18 @@ async function timedFetch(url, options) {
  * `orderId` carried in the invoice metadata; the webhook uses it to find the
  * pending payment row. Throws on any non-2xx response.
  */
-async function createInvoice(cfg, { orderId, userId, username, redirectUrl }) {
+async function createInvoice(cfg, { orderId, userId, username, redirectUrl, amount, itemDesc }) {
   const endpoint = `${cfg.url}/api/v1/stores/${encodeURIComponent(cfg.storeId)}/invoices`;
   const payload = {
-    amount: cfg.amount,
+    // Priced from the plan the member picked, falling back to the store's
+    // default plan. Never from anything the request body carried directly.
+    amount: amount || cfg.amount,
     currency: cfg.currency,
     metadata: {
       orderId,
       userId: String(userId),
       username: String(username || ''),
-      itemDesc: 'GoyHub Paid membership',
+      itemDesc: itemDesc || 'GoyHub Paid membership',
     },
     checkout: {
       redirectURL: redirectUrl,

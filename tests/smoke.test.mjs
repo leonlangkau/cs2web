@@ -1691,3 +1691,204 @@ test("btcpay: checkout creates an invoice and a settled webhook grants Paid (ide
     globalThis.fetch = realFetch;
   }
 });
+
+/* ---------------------------------------------------------------------------
+ * Multi-plan catalogue + fulfilment that does not depend on the webhook.
+ * ------------------------------------------------------------------------- */
+
+test("plans: STORE_PLANS parses, junk is dropped, single-price config still works", async () => {
+  const { storePlans, findPlan, parsePlans, planDuration } = await import("../functions/_lib/plans.js");
+
+  const parsed = parsePlans("m1:1 Month:9.99:30,bad:Nope:free:30,life:Lifetime:99:0,short:Missing:5");
+  assert.deepEqual(parsed.map((p) => p.id), ["m1", "life"], "only well-formed entries survive");
+  assert.equal(parsed[1].periodDays, null, "0 days means lifetime");
+
+  // Back-compat: the original single-price vars still produce exactly one plan.
+  const single = storePlans({ PAID_PRICE_AMOUNT: "10.00", PAID_PERIOD_DAYS: "30" });
+  assert.equal(single.length, 1);
+  assert.equal(single[0].amount, "10.00");
+  assert.equal(single[0].periodDays, 30);
+
+  // Nothing configured must never invent a price.
+  assert.deepEqual(storePlans({}), [], "no config, nothing for sale");
+  assert.equal(findPlan({ STORE_PLANS: "m1:1 Month:9.99:30" }, "nope"), null, "unknown id resolves to nothing");
+  assert.equal(planDuration(365), "1 year");
+  assert.equal(planDuration(null), "Never expires");
+});
+
+test("buy: /buy offers every plan and prices the invoice from the catalogue, not the request", async () => {
+  const BTCPAY_ENV = {
+    ...ENV,
+    BTCPAY_URL: "https://btcpay.test",
+    BTCPAY_STORE_ID: "STORE1",
+    BTCPAY_API_KEY: "greenfield-key",
+    BTCPAY_WEBHOOK_SECRET: "hook-secret-123",
+    STORE_PLANS: "m1:1 Month:9.99:30,life:Lifetime:149.99:0",
+    PAID_PRICE_CURRENCY: "USD",
+  };
+  const { app, db } = await buildTestApp(BTCPAY_ENV);
+
+  let created = null;
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (url, opts = {}) => {
+    const u = String(url);
+    if (opts.method === "POST" && u.endsWith("/invoices")) {
+      created = JSON.parse(opts.body);
+      return Response.json({ id: "INV_P", checkoutLink: "https://btcpay.test/i/INV_P", status: "New" });
+    }
+    return Response.json({}, { status: 404 });
+  };
+
+  try {
+    globalThis.PBKDF2_ITERATIONS_OVERRIDE = "10000";
+    const { hashPassword } = await import("../functions/_lib/crypto.js");
+    await db.run("INSERT INTO users (username, email, password_hash, tier) VALUES ('planbuyer','pb@e.com',?, 'user')",
+      await hashPassword("buyer-pass-123"));
+    const member = makeClient(app);
+    await member.get("/auth/login");
+    await member.post("/auth/login", { identifier: "planbuyer", password: "buyer-pass-123", next: "/" });
+
+    const html = await (await member.get("/buy")).text();
+    assert.ok(html.includes("1 Month") && html.includes("9.99"), "monthly plan offered at /buy");
+    assert.ok(html.includes("Lifetime") && html.includes("149.99"), "lifetime plan offered at /buy");
+    assert.ok(html.includes('name="plan" value="life"'), "each card carries only its plan id");
+
+    // Buying the lifetime plan must price the invoice at the lifetime price.
+    const res = await member.post("/upgrade/checkout", { plan: "life" });
+    assert.equal(res.status, 302);
+    assert.equal(created.amount, "149.99", "invoice priced from the catalogue entry");
+    const payment = await db.get("SELECT * FROM payments ORDER BY id DESC LIMIT 1");
+    assert.equal(payment.amount, "149.99");
+    assert.equal(payment.period_days, null, "lifetime stored as no period");
+    assert.equal(payment.plan_id, "life");
+
+    // A plan id that isn't in the catalogue is refused, not charged at a default.
+    const bogus = await member.post("/upgrade/checkout", { plan: "free-forever" });
+    assert.equal(bogus.headers.get("location"), "/buy");
+    assert.equal(Number((await db.get("SELECT COUNT(*) AS n FROM payments")).n), 1, "no row for an unknown plan");
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+});
+
+test("fulfilment: a settled invoice is credited without any webhook ever arriving", async () => {
+  const BTCPAY_ENV = {
+    ...ENV,
+    BTCPAY_URL: "https://btcpay.test",
+    BTCPAY_STORE_ID: "STORE1",
+    BTCPAY_API_KEY: "greenfield-key",
+    BTCPAY_WEBHOOK_SECRET: "hook-secret-123",
+    PAID_PRICE_AMOUNT: "10.00",
+    PAID_PRICE_CURRENCY: "USD",
+    PAID_PERIOD_DAYS: "30",
+  };
+  const { app, db } = await buildTestApp(BTCPAY_ENV);
+
+  let invoiceState = { id: "INV_R", status: "New", amount: "10.00", currency: "USD" };
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (url, opts = {}) => {
+    const u = String(url);
+    if (opts.method === "POST" && u.endsWith("/invoices")) {
+      return Response.json({ id: "INV_R", checkoutLink: "https://btcpay.test/i/INV_R", status: "New" });
+    }
+    if (u.endsWith("/invoices/INV_R")) return Response.json(invoiceState);
+    return Response.json({}, { status: 404 });
+  };
+
+  try {
+    globalThis.PBKDF2_ITERATIONS_OVERRIDE = "10000";
+    const { hashPassword } = await import("../functions/_lib/crypto.js");
+    await db.run("INSERT INTO users (username, email, password_hash, tier) VALUES ('lonebuyer','lb@e.com',?, 'user')",
+      await hashPassword("buyer-pass-123"));
+    const member = makeClient(app);
+    await member.get("/auth/login");
+    await member.post("/auth/login", { identifier: "lonebuyer", password: "buyer-pass-123", next: "/" });
+    await member.post("/upgrade/checkout", {});
+    const order = (await db.get("SELECT order_id FROM payments ORDER BY id DESC LIMIT 1")).order_id;
+
+    // Still unpaid: nothing is granted just because a page was loaded.
+    await member.get("/profile");
+    assert.equal((await db.get("SELECT tier FROM users WHERE username='lonebuyer'")).tier, "user");
+
+    // The buyer pays. No webhook is ever delivered — they just come back.
+    invoiceState = { ...invoiceState, status: "Settled" };
+    await member.get(`/upgrade/thanks?order=${order}`);
+
+    let user = await db.get("SELECT tier, paid_until FROM users WHERE username='lonebuyer'");
+    assert.equal(user.tier, "paid", "returning from checkout credits the payment");
+    assert.ok(Math.abs(Number(user.paid_until) - (Date.now() + 30 * 86_400_000)) < 60_000, "30 days granted");
+    const paid = await db.get("SELECT status, credited_at FROM payments WHERE order_id = ?", order);
+    assert.equal(paid.status, "settled");
+    assert.ok(paid.credited_at, "credit claimed exactly once");
+
+    // Loading more pages must not stack a second period on top.
+    const expiry = Number(user.paid_until);
+    await member.get("/profile");
+    await member.get("/buy");
+    user = await db.get("SELECT paid_until FROM users WHERE username='lonebuyer'");
+    assert.equal(Number(user.paid_until), expiry, "re-checks are idempotent");
+
+    // And a late webhook for the same invoice still can't double-credit.
+    const raw = JSON.stringify({ type: "InvoiceSettled", invoiceId: "INV_R", storeId: "STORE1" });
+    const sig = "sha256=" + crypto.createHmac("sha256", "hook-secret-123").update(raw).digest("hex");
+    const hookRes = await app.fetch(new Request("http://local/api/btcpay/webhook", {
+      method: "POST", headers: { "content-type": "application/json", "btcpay-sig": sig }, body: raw,
+    }), BTCPAY_ENV);
+    assert.equal(hookRes.status, 200);
+    assert.equal((await hookRes.json()).already, true, "late webhook sees the credit already claimed");
+    assert.equal(Number((await db.get("SELECT paid_until FROM users WHERE username='lonebuyer'")).paid_until), expiry);
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+});
+
+test("fulfilment: the admin sweep catches a buyer who paid and never came back", async () => {
+  const BTCPAY_ENV = {
+    ...ENV,
+    BTCPAY_URL: "https://btcpay.test",
+    BTCPAY_STORE_ID: "STORE1",
+    BTCPAY_API_KEY: "greenfield-key",
+    BTCPAY_WEBHOOK_SECRET: "hook-secret-123",
+    PAID_PRICE_AMOUNT: "10.00",
+    PAID_PRICE_CURRENCY: "USD",
+    PAID_PERIOD_DAYS: "30",
+  };
+  const { app, db } = await buildTestApp(BTCPAY_ENV);
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (url) => String(url).endsWith("/invoices/INV_S")
+    ? Response.json({ id: "INV_S", status: "Settled", amount: "10.00", currency: "USD" })
+    : Response.json({}, { status: 404 });
+
+  try {
+    globalThis.PBKDF2_ITERATIONS_OVERRIDE = "10000";
+    const { hashPassword } = await import("../functions/_lib/crypto.js");
+    await db.run("INSERT INTO users (username, email, password_hash, tier) VALUES ('ghostbuyer','gb@e.com',?, 'user')",
+      await hashPassword("x"));
+    const uid = (await db.get("SELECT id FROM users WHERE username='ghostbuyer'")).id;
+    // An invoice paid an hour ago whose buyer never returned and whose webhook
+    // never arrived.
+    await db.run(
+      `INSERT INTO payments (order_id, invoice_id, user_id, username, amount, currency, period_days, status, created_at, updated_at)
+       VALUES ('ORD_S', 'INV_S', ?, 'ghostbuyer', '10.00', 'USD', 30, 'new', datetime('now','-1 hour'), datetime('now','-1 hour'))`,
+      uid
+    );
+
+    const admin = makeClient(app);
+    await admin.get("/auth/login");
+    await admin.post("/auth/login", { identifier: "admin", password: "admin-test-password-1", next: "/admin" });
+
+    const html = await (await admin.get("/admin/payments")).text();
+    assert.ok(html.includes("ghostbuyer"), "the payment is listed in the queue");
+
+    const user = await db.get("SELECT tier, paid_until FROM users WHERE username='ghostbuyer'");
+    assert.equal(user.tier, "paid", "the sweep credited the abandoned payment");
+    assert.ok(Math.abs(Number(user.paid_until) - (Date.now() + 30 * 86_400_000)) < 60_000);
+    assert.ok(await db.get("SELECT id FROM ip_logs WHERE event = 'membership_granted'"), "grant audited");
+
+    // Members must not be able to reach the queue or its actions.
+    const member = makeClient(app);
+    assert.equal((await member.get("/admin/payments")).status, 404);
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+});

@@ -765,6 +765,21 @@ textarea { resize: vertical; min-height: 90px; }
 .upgrade-benefits li { margin: 0.45rem 0; color: var(--text-soft); }
 .upgrade-price { font-size: 1.3rem; margin-top: 1rem; font-family: var(--font-display); }
 .upgrade-note { border-radius: var(--radius-ctl); padding: 0.8rem 1.1rem; margin-bottom: 1.4rem; border: 1px solid rgba(15, 122, 69, 0.25); }
+/* Plan cards on /buy — one per membership length. */
+.plan-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 0.9rem; margin: 0.4rem 0 1.2rem; }
+.plan-card {
+  display: flex; flex-direction: column; gap: 0.3rem;
+  background: var(--bg-2); border: 1px solid var(--border);
+  border-radius: var(--radius-ctl); padding: 1.1rem 1rem;
+}
+.plan-card form { margin-top: auto; padding-top: 0.7rem; }
+.plan-card .btn { margin-top: 0; }
+.plan-name { font-family: var(--font-display); font-size: 1rem; font-weight: 700; margin: 0; }
+.plan-price { display: flex; align-items: baseline; gap: 0.3rem; margin: 0; }
+.plan-amount { font-family: var(--font-display); font-size: 1.7rem; font-weight: 700; line-height: 1.15; font-variant-numeric: tabular-nums; }
+.plan-currency { font-size: 0.75rem; color: var(--muted); letter-spacing: 0.06em; }
+.plan-term { font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.1em; color: var(--accent); margin-bottom: 0.4rem; }
+
 .pay-addresses { display: flex; flex-direction: column; gap: 0.6rem; margin-top: 1rem; }
 .pay-address { display: flex; gap: 0.8rem; align-items: baseline; background: var(--bg-2); border: 1px solid var(--border); border-radius: var(--radius-ctl); padding: 0.7rem 1rem; overflow-wrap: anywhere; }
 .pay-coin { font-weight: 800; min-width: 3.5rem; color: var(--accent); }
@@ -1129,6 +1144,11 @@ tbody tr.row-banned:hover td { background: var(--tint-danger); }
 .tag-password_reset_requested { background: var(--tint-warn); color: var(--warn); }
 .tag-password_reset { background: var(--accent-soft); color: var(--accent-ink); }
 .tag-email_verified { background: var(--tint-success); color: var(--success); }
+/* Payment status badges (admin queue) */
+.tag-pay-new, .tag-pay-processing { background: var(--tint-warn); color: var(--warn); }
+.tag-pay-settled { background: var(--tint-success); color: var(--success); }
+.tag-pay-expired { background: var(--panel-2); color: var(--muted); }
+.tag-pay-invalid { background: var(--tint-danger); color: var(--danger); }
 .tag-report-open { background: var(--tint-danger-strong); color: var(--danger); }
 .tag-report-resolved { background: var(--tint-success); color: var(--success); }
 /* Resolved reports: tinted surface, full-contrast text (an opacity dim

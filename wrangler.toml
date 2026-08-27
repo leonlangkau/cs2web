@@ -58,11 +58,21 @@ SIGNUP_SURGE_LIMIT = "30"
 #   BTCPAY_STORE_ID      the store's id (Store Settings → the id in the URL / General)
 #   PAID_PRICE_AMOUNT    numeric price per membership, e.g. "10.00"
 #   PAID_PRICE_CURRENCY  ISO currency the invoice is priced in (default "USD")
+#   STORE_PLANS          optional catalogue REPLACING the single price above, so
+#                        /buy can offer several lengths:
+#                          "id:Name:amount:days,…"   days 0 = lifetime
+#                        e.g. "m1:1 Month:9.99:30,m12:12 Months:79.99:365,life:Lifetime:149.99:0"
+#                        An entry that does not parse is dropped rather than sold
+#                        at a wrong price. Prices are read from here at checkout,
+#                        never from the buyer's form — the form only names a plan
+#                        id — and each order snapshots what it was sold at, so a
+#                        later price change never rewrites an in-flight purchase.
 #   PAID_PERIOD_DAYS     membership length in days; empty or "0" = lifetime
 # BTCPAY_URL = "https://btcpay.example.com"
 # BTCPAY_STORE_ID = ""
 # PAID_PRICE_AMOUNT = "10.00"
 # PAID_PRICE_CURRENCY = "USD"
+# STORE_PLANS = "m1:1 Month:9.99:30,m12:12 Months:79.99:365,life:Lifetime:149.99:0"
 # PAID_PERIOD_DAYS = "30"
 # RATE_LIMIT_CHECKOUT = "8"   # invoices a member can create per hour (abuse cap)
 #

@@ -10,6 +10,8 @@ import { EMAIL_RE, sendVerificationEmail, isDisposableEmail } from "./routes-aut
 import { isEmailConfigured } from "./email.js";
 import * as limits from "./limits.js";
 import { tooMany } from "./routes-main.js";
+import { btcpayConfig } from "./btcpay.js";
+import { reconcileForUser } from "./fulfil.js";
 import { DELETED_USERNAME, deletedUserId } from "./bootstrap.js";
 
 function register(app) {
@@ -18,6 +20,11 @@ function register(app) {
     if (gate) return gate;
     const db = c.get('db');
     const user = c.get('user');
+
+    // Someone who just paid comes here to check their tier. Settle any of their
+    // payments that BTCPay now reports as paid, before the page is rendered, so
+    // the tier they see is the tier they bought.
+    await reconcileForUser(c, btcpayConfig(c.get('cfg')), user.id);
 
     const one = async (sql, ...args) => Number((await db.get(sql, ...args))?.n || 0);
     const stats = {

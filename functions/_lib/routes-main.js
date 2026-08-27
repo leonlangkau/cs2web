@@ -10,6 +10,7 @@ import { meetsTier, isStaff } from "./tiers.js";
 import { issueLicense } from "./license.js";
 import { newToken } from "./crypto.js";
 import { btcpayConfig } from "./btcpay.js";
+import { reconcileForUser } from "./fulfil.js";
 
 /**
  * Per-download filename so the served attachment is never a predictable,
@@ -83,6 +84,7 @@ function paymentConfig(env = {}) {
       currency: btc.currency,
       amount: btc.amount,
       periodDays: btc.periodDays,
+      plans: btc.plans,
     },
     url: String(env.CRYPTO_PAY_URL || '').trim(),
     addresses,
@@ -158,11 +160,19 @@ function register(app) {
 
   app.get('/download', (c) => c.html(views.downloadPage(c.get('view'), { downloadMeta: DOWNLOAD_META })));
 
-  const buyPage = (c) => c.html(views.upgradePage(c.get('view'), {
-    pay: paymentConfig(c.get('cfg')),
-  }));
-  app.get('/upgrade', buyPage);
-  app.get('/buy', buyPage); // same page, friendlier URL
+  // The store. Before rendering, a signed-in member's own unfinished payments
+  // are re-checked against BTCPay and credited if they settled — so someone who
+  // paid and simply came back to the site is upgraded here, without waiting on
+  // a webhook that may be unconfigured, delayed or lost.
+  const buyPage = async (c) => {
+    const user = c.get('user');
+    if (user) await reconcileForUser(c, btcpayConfig(c.get('cfg')), user.id);
+    return c.html(views.upgradePage(c.get('view'), {
+      pay: paymentConfig(c.get('cfg')),
+    }));
+  };
+  app.get('/buy', buyPage);
+  app.get('/upgrade', buyPage); // older links and the tier gates point here
 
   // Paid members only: anonymous visitors are sent to log in, and a signed-in
   // Free account gets a clear "upgrade" message — the artifact is never

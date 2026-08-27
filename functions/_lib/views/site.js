@@ -1,6 +1,7 @@
 import { page } from "./layout.js";
 import { esc, timeAgo, map, emailLink } from "./util.js";
 import { meetsTier, tierOf, TIER_LABELS } from "../tiers.js";
+import { planDuration } from "../plans.js";
 
 const DOWNLOAD_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m0 0l-5-5m5 5l5-5M4 19h16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
 
@@ -214,26 +215,32 @@ function upgradePage(ctx, { pay }) {
 
   let payBlock;
   if (pay.btcpay && pay.btcpay.configured) {
-    // Automated, self-hosted BTCPay checkout — the account upgrades itself once
-    // the on-chain payment confirms (verified by a signed webhook server-side).
-    const periodText = pay.btcpay.periodDays
-      ? `${pay.btcpay.periodDays} days of Paid access`
-      : 'lifetime Paid access';
-    if (ctx.user) {
-      payBlock = `
-        <form method="post" action="/upgrade/checkout" class="stack">${csrf}
-          <button class="btn btn-primary btn-lg" type="submit">Pay with crypto${pay.price ? `, ${esc(pay.price)}` : ''}</button>
-        </form>
-        <p class="fineprint">You'll be taken to our self-hosted <strong>BTCPay</strong> checkout to pay in
-          Bitcoin (on-chain or Lightning). No card, no third-party processor, no personal details.
-          Your account upgrades to <strong>Paid</strong> automatically once the payment confirms;
-          usually a few minutes. This buys ${esc(periodText)}.</p>`;
-    } else {
-      payBlock = `
-        <a class="btn btn-primary btn-lg" href="/auth/login?next=%2Fupgrade">Log in to pay</a>
-        <p class="fineprint">Payments attach to your account, so you need to be signed in first;
-          it only takes a moment to <a href="/auth/signup">create a free account</a>.</p>`;
-    }
+    // Automated, self-hosted BTCPay checkout. One card per plan; the plan id is
+    // the only thing the form carries — the price attached to it is read from
+    // the server-side catalogue, never from this page.
+    const plans = pay.btcpay.plans || [];
+    const currency = pay.btcpay.currency;
+
+    const planCard = (plan) => `<article class="plan-card">
+        <h3 class="plan-name">${esc(plan.name)}</h3>
+        <p class="plan-price"><span class="plan-amount">${esc(plan.amount)}</span>
+          <span class="plan-currency">${esc(currency)}</span></p>
+        <p class="plan-term">${esc(planDuration(plan.periodDays))}</p>
+        ${ctx.user
+          ? `<form method="post" action="/upgrade/checkout">${csrf}
+              <input type="hidden" name="plan" value="${esc(plan.id)}">
+              <button class="btn btn-primary btn-block" type="submit">Pay with crypto</button>
+            </form>`
+          : `<a class="btn btn-outline btn-block" href="/auth/login?next=%2Fbuy">Sign in to buy</a>`}
+      </article>`;
+
+    payBlock = `
+      <div class="plan-grid">${map(plans, planCard)}</div>
+      <p class="fineprint">You'll be taken to our self-hosted <strong>BTCPay</strong> checkout to pay in
+        Bitcoin (on-chain or Lightning). No card, no third-party processor, no personal details.
+        Your account upgrades to <strong>Paid</strong> automatically once the payment confirms; usually a
+        few minutes, and it does not depend on you staying on the page.
+        ${ctx.user ? '' : 'Payments attach to your account, so sign in first — a free account takes a moment.'}</p>`;
   } else if (pay.url) {
     payBlock = `
       <a class="btn btn-primary btn-lg" href="${esc(pay.url)}" rel="noopener nofollow">Pay with crypto</a>
@@ -277,7 +284,7 @@ function upgradePage(ctx, { pay }) {
       ${pay.price ? `<p class="upgrade-price"><strong>${esc(pay.price)}</strong></p>` : ''}
     </div>
     <div class="panel profile-card">
-      <h2>Pay with crypto</h2>
+      <h2>Choose a plan</h2>
       ${payBlock}
     </div>
     <p class="fineprint">Payments are subject to our <a href="/terms">Terms &amp; Conditions</a>.

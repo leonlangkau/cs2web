@@ -44,6 +44,42 @@ It is written for **Ubuntu 24.04 LTS** on a **2 vCPU / 4 GB RAM** VPS, over
 
 ---
 
+## Plans, and how a payment becomes a membership
+
+`PAID_PRICE_AMOUNT` sells one membership length. To offer several, set
+`STORE_PLANS` instead (see `wrangler.toml`):
+
+```
+STORE_PLANS = "m1:1 Month:9.99:30,m12:12 Months:79.99:365,life:Lifetime:149.99:0"
+```
+
+`/buy` then shows one card per plan. The buyer's form carries only a plan **id**;
+the price and period are read from this catalogue server-side, snapshotted onto
+the order at checkout, and re-verified against the invoice before anything is
+granted. A later price change never alters an order already in flight.
+
+**Fulfilment does not depend on the webhook arriving.** The same verified
+credit path runs from four places:
+
+| Trigger | Covers |
+| --- | --- |
+| The signed `InvoiceSettled` webhook | The normal case — credited within seconds |
+| Returning to `/upgrade/thanks` after paying | Webhook unconfigured, delayed, or lost |
+| Loading `/buy` or `/profile` with an unfinished payment | Buyer wandered off and came back later |
+| A small sweep each time staff open **Admin → Payments** | Buyer who paid and never returned |
+
+Every one of those re-fetches the invoice from BTCPay with the store key and
+re-checks its status, amount, currency and order id before crediting. Crediting
+is claimed atomically, so all four racing at once still grant exactly once — and
+a member is never charged-but-not-upgraded because a single delivery went
+missing. This also means checkout is usable before the webhook is configured at
+all: it just credits when the buyer next loads a page instead of instantly.
+
+Admin → Payments lists every order with its live status, a **Re-check** button
+(staff — applies BTCPay's own verdict) and **Credit** (full admin — grants
+without a confirmed payment, for money that arrived out of band). Both are
+audited.
+
 ## 1. Point DNS at the VPS
 
 Create a DNS **A record** for the BTCPay hostname pointing to your VPS's public

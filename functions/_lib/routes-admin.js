@@ -5,9 +5,13 @@ import { requireAdmin, requireStaff, destroyUserSessions, audit, formBody, setFl
 import { TIERS, TIER_LABELS, STAFF_TIERS } from "./tiers.js";
 import { hashPassword } from "./crypto.js";
 import { setSetting, ANNOUNCEMENT_KEY } from "./settings.js";
+import { btcpayConfig } from "./btcpay.js";
+import { verifyAndCredit, sweepOpenPayments } from "./fulfil.js";
 
 const LOGS_PER_PAGE = 50;
 const USERS_PER_PAGE = 25;
+const PAYMENTS_PER_PAGE = 40;
+const PAYMENT_STATUSES = ['new', 'processing', 'settled', 'expired', 'invalid'];
 const FINGERPRINTS_PER_PAGE = 25;
 const LOG_EVENTS = ['signup', 'login', 'login_failed', 'login_blocked', 'logout', 'download',
   'admin_action', 'captcha_failed', 'terms_accepted', 'password_changed', 'loader_auth', 'loader_auth_failed',
@@ -157,6 +161,112 @@ function register(app) {
     )).map(maskUser);
 
     return c.html(views.users(c.get('view'), { users, q, page, pages, total, tiers: TIERS, tierLabels: TIER_LABELS }));
+  });
+
+  // --- Crypto payments -----------------------------------------------------
+
+  const findPayment = async (c) => {
+    const id = intParam(c.req.param('id'), -1);
+    return id > 0 ? c.get('db').get('SELECT * FROM payments WHERE id = ?', id) : null;
+  };
+
+  app.get('/admin/payments', async (c) => {
+    const db = c.get('db');
+    const cfg = btcpayConfig(c.get('cfg'));
+    const url = new URL(c.req.url);
+
+    // Opportunistic safety net: Pages Functions have no cron, so the sweep of
+    // payments whose buyer never came back rides along with this page load.
+    // Bounded (a handful of rows) so opening the queue is never a thundering
+    // herd against the payment server.
+    const swept = (await sweepOpenPayments(c, cfg)).length;
+
+    const status = PAYMENT_STATUSES.includes(url.searchParams.get('status'))
+      ? url.searchParams.get('status') : '';
+    const where = status ? 'WHERE status = ?' : '';
+    const params = status ? [status] : [];
+    const total = Number((await db.get(`SELECT COUNT(*) AS n FROM payments ${where}`, ...params)).n);
+    const pages = Math.max(1, Math.ceil(total / PAYMENTS_PER_PAGE));
+    const page = Math.max(1, Math.min(pages, intParam(url.searchParams.get('page'))));
+    const rows = await db.all(
+      `SELECT * FROM payments ${where} ORDER BY id DESC LIMIT ? OFFSET ?`,
+      ...params, PAYMENTS_PER_PAGE, (page - 1) * PAYMENTS_PER_PAGE
+    );
+
+    return c.html(views.payments(c.get('view'), {
+      rows, status, statuses: PAYMENT_STATUSES, page, pages, total,
+      live: cfg.configured, swept,
+    }));
+  });
+
+  // Ask BTCPay again about one payment and apply whatever it says. Staff-level:
+  // it can only ever act on the store's own verdict.
+  app.post('/admin/payments/:id/recheck', async (c) => {
+    const payment = await findPayment(c);
+    if (!payment) return notFound(c, 'No such payment.');
+    const cfg = btcpayConfig(c.get('cfg'));
+    if (!cfg.configured) {
+      setFlash(c, 'error', 'BTCPay is not configured — nothing to re-check against.');
+      return c.redirect(backTo(c, '/admin/payments'), 302);
+    }
+    const verdict = await verifyAndCredit(c, cfg, payment, `re-check by ${c.get('user').username}`);
+    setFlash(c, verdict.granted ? 'success' : 'error', verdict.granted
+      ? `Order ${payment.order_id}: settled — membership granted.`
+      : `Order ${payment.order_id}: ${verdict.reason === 'already' ? 'already credited'
+        : verdict.reason === 'not_settled' ? `not paid yet (${verdict.status || 'unknown'})`
+        : verdict.reason}.`);
+    return c.redirect(backTo(c, '/admin/payments'), 302);
+  });
+
+  // Grant a membership by hand — for money that arrived out of band, or an
+  // invoice BTCPay has lost. Full admin only, and always audited as manual.
+  app.post('/admin/payments/:id/credit', async (c) => {
+    const gate = requireAdmin(c);
+    if (gate) return gate;
+    const db = c.get('db');
+    const payment = await findPayment(c);
+    if (!payment) return notFound(c, 'No such payment.');
+    if (payment.credited_at) {
+      setFlash(c, 'error', `Order ${payment.order_id} was already credited.`);
+      return c.redirect(backTo(c, '/admin/payments'), 302);
+    }
+
+    const target = await db.get('SELECT id, tier, paid_until FROM users WHERE id = ?', payment.user_id);
+    if (!target) {
+      setFlash(c, 'error', `Order ${payment.order_id}: that account no longer exists.`);
+      return c.redirect(backTo(c, '/admin/payments'), 302);
+    }
+    const claim = await db.run(
+      "UPDATE payments SET status = 'settled', credited_at = ?, updated_at = datetime('now') WHERE id = ? AND credited_at IS NULL",
+      Date.now(), payment.id
+    );
+    if (claim.changes === 0) {
+      setFlash(c, 'error', `Order ${payment.order_id} was credited by something else just now.`);
+      return c.redirect(backTo(c, '/admin/payments'), 302);
+    }
+
+    if (!STAFF_TIERS.has(String(target.tier))) {
+      const days = payment.period_days === null || payment.period_days === undefined
+        ? null : Number(payment.period_days);
+      if (days === null) {
+        await db.run("UPDATE users SET tier = 'paid', paid_until = NULL WHERE id = ?", target.id);
+      } else {
+        const ms = Math.floor(days) * 86_400_000;
+        const now = Date.now();
+        await db.run(
+          `UPDATE users SET tier = 'paid', paid_until = CASE
+             WHEN tier = 'paid' AND paid_until IS NULL THEN NULL
+             WHEN paid_until IS NULL OR paid_until < ? THEN ? + ?
+             ELSE paid_until + ? END
+           WHERE id = ?`,
+          now, now, ms, ms, target.id
+        );
+      }
+    }
+    await adminAudit(c, `manually credited payment ${payment.order_id} for ${payment.username} `
+      + `(${payment.amount} ${payment.currency}${payment.period_days ? `, ${payment.period_days}d` : ', lifetime'})`);
+    setFlash(c, 'success', `Order ${payment.order_id} credited — ${payment.username} is now Paid.`);
+    return c.redirect(backTo(c, '/admin/payments'), 302);
   });
 
   app.post('/admin/users/:id/ban', async (c) => {

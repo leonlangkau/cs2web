@@ -68,10 +68,19 @@ Copy `.dev.vars.example` to `.dev.vars` and set `CAPTCHA_SECRET` and
   download are Paid+ benefits, staff tiers unlock the admin panel
 - `/profile`: tier + loader license, change password/email, per-session revoke,
   sign-out-everywhere, self-serve account deletion
-- `/upgrade`: automated **crypto-only** checkout via a self-hosted **BTCPay
-  Server** — one click creates an invoice, and a signed webhook upgrades the
-  account to Paid automatically once the payment confirms on-chain (honest
-  "coming soon" until configured). Setup: [BTCPAY-SETUP.md](BTCPAY-SETUP.md)
+- `/buy`: automated **crypto-only** checkout via a self-hosted **BTCPay
+  Server** — pick a plan, pay the invoice in Bitcoin, and the account becomes
+  Paid automatically once the payment confirms on-chain (honest "coming soon"
+  until configured). One price by default, or several membership lengths with
+  `STORE_PLANS`. Setup: [BTCPAY-SETUP.md](BTCPAY-SETUP.md)
+- **Fulfilment does not hang on the webhook**: the same verified credit path also
+  runs when the buyer returns from checkout, when they next open `/buy` or
+  `/profile` with an unfinished payment, and in a bounded sweep when staff open
+  Admin → Payments. Every path re-fetches the invoice from BTCPay and re-checks
+  status, amount, currency and order before granting; crediting is claimed
+  atomically, so all of them racing still grant exactly once
+- **Admin → Payments**: the order queue, with re-check (staff) and manual credit
+  (full admin), both audited
 - Loader API: `POST /api/loader/auth` (username+password → tier + signed
   license) and `POST /api/loader/verify` (server-side check, live tier)
 
@@ -128,6 +137,7 @@ Set as `[vars]`/secrets in `wrangler.toml` / the Pages dashboard (see DEPLOY.md)
 | `SIGNUP_SURGE_LIMIT` | `30` | Site-wide signups per 10 min before registration pauses |
 | `BTCPAY_URL` / `BTCPAY_STORE_ID` / `BTCPAY_API_KEY`* / `BTCPAY_WEBHOOK_SECRET`* | unset | Self-hosted BTCPay Server checkout. All set → `/upgrade` shows a one-click crypto pay button and grants Paid automatically on a confirmed, signature-verified webhook. `*` = secret. See [BTCPAY-SETUP.md](BTCPAY-SETUP.md) |
 | `PAID_PRICE_AMOUNT` / `PAID_PRICE_CURRENCY` / `PAID_PERIOD_DAYS` | unset / `USD` / lifetime | Membership price, currency and length (days; empty = lifetime) for BTCPay invoices |
+| `STORE_PLANS` | unset | Sell several lengths at `/buy` instead of one price — `"id:Name:amount:days,…"`, days `0` = lifetime. Prices are read server-side; the form only names a plan id |
 | `CRYPTO_PAY_URL` / `CRYPTO_PAY_ADDRESSES` / `PAID_PRICE` | unset | Fallback checkout when BTCPay isn't configured (hosted link / manual addresses / price string) |
 | `EMAIL_PROVIDER` + `EMAIL_API_KEY` + `EMAIL_FROM` | unset (disabled) | Outbound email: `cloudflare` (Email Service SMTPS relay) / `resend` / `sendgrid` / `mailchannels` |
 | `TURNSTILE_SITE_KEY` / `TURNSTILE_SECRET_KEY` | unset | Optional Cloudflare Turnstile on signup |

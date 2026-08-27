@@ -17,13 +17,12 @@
 import * as views from "./views/site.js";
 import * as limits from "./limits.js";
 import { newToken } from "./crypto.js";
-import { audit, requireAuth, clientIp, setFlash } from "./middleware.js";
+import { audit, requireAuth, clientIp, setFlash, formBody } from "./middleware.js";
 import { tooMany } from "./routes-main.js";
 import { isStaff, normalizeTier } from "./tiers.js";
-import { btcpayConfig, createInvoice, getInvoice, verifyWebhookSignature } from "./btcpay.js";
-
-/** Invoice statuses BTCPay reports as fully paid + confirmed. */
-const SETTLED_STATUSES = new Set(['settled', 'complete', 'confirmed']);
+import { btcpayConfig, createInvoice, verifyWebhookSignature } from "./btcpay.js";
+import { verifyAndCredit, reconcileForUser } from "./fulfil.js";
+import { findPlan, planDuration } from "./plans.js";
 
 function register(app) {
   // Start a purchase: create a pending payment row + a BTCPay invoice, then
@@ -58,13 +57,24 @@ function register(app) {
     const verdict = await limits.check(db, 'checkout', String(user.id), env);
     if (!verdict.ok) return tooMany(c, verdict.retryAfterSec);
 
+    // Which plan. The id names a catalogue entry; its price and period are read
+    // from OUR catalogue, never from the request — a body that names an unknown
+    // plan is refused rather than quietly charged at the default price.
+    const body = await formBody(c);
+    const requested = String(body.plan || '').trim();
+    const plan = requested ? findPlan(env, requested) : (cfg.plans[0] || null);
+    if (!plan) {
+      setFlash(c, 'error', 'That membership plan is not available.');
+      return c.redirect('/buy', 302);
+    }
+
     const orderId = newToken(16);
     // Snapshot price/period onto the row NOW, so a later config change can't
     // retroactively alter an in-flight order.
     await db.run(
-      `INSERT INTO payments (order_id, user_id, username, amount, currency, period_days, status)
-       VALUES (?, ?, ?, ?, ?, ?, 'new')`,
-      orderId, user.id, user.username, cfg.amount, cfg.currency, cfg.periodDays
+      `INSERT INTO payments (order_id, user_id, username, amount, currency, period_days, plan_id, plan_name, status)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'new')`,
+      orderId, user.id, user.username, plan.amount, cfg.currency, plan.periodDays, plan.id, plan.name
     );
 
     const origin = new URL(c.req.url).origin;
@@ -73,6 +83,8 @@ function register(app) {
     try {
       const invoice = await createInvoice(cfg, {
         orderId, userId: user.id, username: user.username, redirectUrl,
+        amount: plan.amount,
+        itemDesc: `GoyHub Paid — ${plan.name} (${planDuration(plan.periodDays)})`,
       });
       await db.run(
         "UPDATE payments SET invoice_id = ?, updated_at = datetime('now') WHERE order_id = ?",
@@ -80,7 +92,7 @@ function register(app) {
       );
       await audit(c, 'checkout_created', {
         userId: user.id, username: user.username,
-        detail: `order ${orderId} invoice ${invoice.id}`,
+        detail: `order ${orderId} invoice ${invoice.id} — ${plan.name} ${plan.amount} ${cfg.currency}`,
       });
       return c.redirect(invoice.checkoutLink, 302);
     } catch (err) {
@@ -94,21 +106,31 @@ function register(app) {
       });
       console.error('BTCPay checkout failed:', err);
       setFlash(c, 'error', 'Could not start checkout: the payment server was unreachable. Please try again in a moment.');
-      return c.redirect('/upgrade', 302);
+      return c.redirect('/buy', 302);
     }
   });
 
-  // Where BTCPay sends the member back after they pay. The upgrade itself is
-  // applied by the webhook, not here — this page just reflects current status.
+  // Where BTCPay sends the member back after they pay. This does not wait for
+  // the webhook: it re-checks the invoice against BTCPay right now and credits
+  // it if it has settled, so a member who pays and returns is upgraded even if
+  // the webhook is unconfigured, delayed or lost entirely.
   app.get('/upgrade/thanks', async (c) => {
     const gate = requireAuth(c);
     if (gate) return gate;
     const db = c.get('db');
     const user = c.get('user');
+    const cfg = btcpayConfig(c.get('cfg'));
     const order = String(new URL(c.req.url).searchParams.get('order') || '').slice(0, 64);
-    const payment = order
-      ? await db.get('SELECT status, credited_at FROM payments WHERE order_id = ? AND user_id = ?', order, user.id)
+
+    let payment = order
+      ? await db.get('SELECT * FROM payments WHERE order_id = ? AND user_id = ?', order, user.id)
       : null;
+
+    if (payment && !payment.credited_at && cfg.configured) {
+      await verifyAndCredit(c, cfg, payment, 'return from checkout');
+      payment = await db.get('SELECT * FROM payments WHERE id = ?', payment.id);
+    }
+
     return c.html(views.upgradeThanksPage(c.get('view'), { payment }));
   });
 
@@ -169,115 +191,35 @@ function register(app) {
       return c.json({ ok: true, ignored: type || 'unhandled' }, 200);
     }
 
-    // --- InvoiceSettled: the only path that grants membership ---
-
-    // Idempotency: already credited by an earlier delivery of this event.
-    if (payment.credited_at) return c.json({ ok: true, already: true }, 200);
-
-    // Never trust the webhook body's own amount/status. Re-fetch the invoice
-    // from BTCPay with the store key and re-validate from scratch. A transient
-    // fetch failure returns 5xx so BTCPay retries later.
-    let invoice;
-    try {
-      invoice = await getInvoice(cfg, invoiceId);
-    } catch (err) {
-      console.error('BTCPay getInvoice failed in webhook:', err);
-      return c.json({ ok: false, error: 'verify_failed' }, 502);
-    }
-
-    const invStatus = String(invoice.status || '').toLowerCase();
-    if (!SETTLED_STATUSES.has(invStatus)) {
-      // Signed webhook said Settled but the store doesn't agree yet. If the
-      // invoice is still New/Processing this is likely store-side lag between
-      // the webhook firing and the API reflecting it — ask BTCPay to retry (503)
-      // rather than permanently dropping a real settlement. Only genuinely
-      // terminal states (Expired/Invalid) are acknowledged as final.
-      const terminal = invStatus === 'expired' || invStatus === 'invalid';
-      await audit(c, 'btcpay_webhook_rejected', {
-        userId: payment.user_id, username: payment.username,
-        detail: `order ${payment.order_id}: status ${invoice.status} not settled`,
-      });
-      return c.json({ ok: false, error: 'not_settled' }, terminal ? 200 : 503);
-    }
-
-    // Amount, currency and order must match what we priced at checkout.
-    const amountOk = Number(invoice.amount) === Number(payment.amount);
-    const currencyOk = String(invoice.currency || '').toUpperCase() === String(payment.currency).toUpperCase();
-    const orderOk = !invoice.metadata || !invoice.metadata.orderId
-      || String(invoice.metadata.orderId) === String(payment.order_id);
-    if (!amountOk || !currencyOk || !orderOk) {
-      await audit(c, 'btcpay_webhook_rejected', {
-        userId: payment.user_id, username: payment.username,
-        detail: `order ${payment.order_id}: mismatch amount=${invoice.amount}/${payment.amount} `
-          + `cur=${invoice.currency}/${payment.currency} orderOk=${orderOk}`,
-      });
-      return c.json({ ok: false, error: 'mismatch' }, 200);
-    }
-
-    // Look up the buyer BEFORE claiming the credit, so a missing user never
-    // leaves a credit-claim stranded.
-    const target = await db.get('SELECT id, tier, paid_until FROM users WHERE id = ?', payment.user_id);
-
-    // Claim the credit atomically: only the delivery that flips credited_at
-    // from NULL wins, so concurrent deliveries can't double-grant.
-    const claim = await db.run(
-      "UPDATE payments SET status = 'settled', credited_at = ?, updated_at = datetime('now') WHERE id = ? AND credited_at IS NULL",
-      Date.now(), payment.id
-    );
-    if (claim.changes === 0) return c.json({ ok: true, already: true }, 200);
-
-    if (!target) {
-      // A deleted user cascades its payment rows, so this is nearly impossible —
-      // acknowledge (credit already claimed) so BTCPay stops retrying.
-      await audit(c, 'btcpay_webhook_rejected', {
-        username: payment.username, detail: `order ${payment.order_id}: user gone`,
-      });
-      return c.json({ ok: true, ignored: 'user_gone' }, 200);
-    }
-
-    // Staff already sit above Paid and never expire — record the payment but
-    // don't touch their tier. Everyone else is granted/renewed Paid. The new
-    // expiry is computed in SQL against the row's LIVE value (not a value read
-    // earlier), so two invoices settling at once extend rather than clobber
-    // each other. If the grant fails we roll the claim back so BTCPay's retry
-    // re-processes it, rather than leaving the member charged-but-not-upgraded.
-    if (!isStaff(target)) {
-      const periodDays = payment.period_days === null || payment.period_days === undefined
-        ? null : Number(payment.period_days);
-      try {
-        if (periodDays === null) {
-          // Lifetime purchase.
-          await db.run("UPDATE users SET tier = 'paid', paid_until = NULL WHERE id = ?", target.id);
-        } else {
-          const ms = Math.floor(periodDays) * 86_400_000;
-          const now = Date.now();
-          await db.run(
-            `UPDATE users SET tier = 'paid', paid_until = CASE
-               WHEN tier = 'paid' AND paid_until IS NULL THEN NULL          -- keep an existing lifetime
-               WHEN paid_until IS NULL OR paid_until < ? THEN ? + ?         -- new/expired: start from now
-               ELSE paid_until + ? END                                      -- active: extend from current expiry
-             WHERE id = ?`,
-            now, now, ms, ms, target.id
-          );
-        }
-      } catch (err) {
-        await db.run(
-          "UPDATE payments SET credited_at = NULL, status = 'processing', updated_at = datetime('now') WHERE id = ?",
-          payment.id
-        ).catch(() => {});
-        console.error('BTCPay grant failed after credit claim:', err);
+    // --- InvoiceSettled: verify against BTCPay and credit ---
+    // The work itself lives in fulfil.js, because the webhook is no longer the
+    // only thing that can credit a payment (see /upgrade/thanks and the sweep).
+    // Status codes below are what BTCPay's retry logic reads: 5xx = come back,
+    // 2xx = done, stop retrying.
+    const verdict = await verifyAndCredit(c, cfg, payment, 'webhook');
+    switch (verdict.reason) {
+      case 'verify_failed':
+        // Couldn't reach the store to confirm — ask BTCPay to redeliver.
+        return c.json({ ok: false, error: 'verify_failed' }, 502);
+      case 'not_settled':
+        await audit(c, 'btcpay_webhook_rejected', {
+          userId: payment.user_id, username: payment.username,
+          detail: `order ${payment.order_id}: status ${verdict.status} not settled`,
+        });
+        // Only genuinely terminal states are final; New/Processing is store-side
+        // lag between the webhook firing and the API reflecting it, so retry.
+        return c.json({ ok: false, error: 'not_settled' }, verdict.terminal ? 200 : 503);
+      case 'mismatch':
+        return c.json({ ok: false, error: 'mismatch' }, 200);
+      case 'user_gone':
+        return c.json({ ok: true, ignored: 'user_gone' }, 200);
+      case 'grant_failed':
         return c.json({ ok: false, error: 'grant_failed' }, 500);
-      }
-      // No session teardown: loadContext reads tier/paid_until fresh on every
-      // request, so the upgrade is live on the member's next page load.
+      case 'already':
+        return c.json({ ok: true, already: true }, 200);
+      default:
+        return c.json({ ok: true, granted: true }, 200);
     }
-
-    await audit(c, 'membership_granted', {
-      userId: target.id, username: payment.username,
-      detail: `order ${payment.order_id} invoice ${invoiceId} — ${payment.amount} ${payment.currency}`
-        + (payment.period_days ? ` for ${payment.period_days}d` : ' lifetime'),
-    });
-    return c.json({ ok: true, granted: true }, 200);
   });
 }
 

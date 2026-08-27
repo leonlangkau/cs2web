@@ -4,20 +4,9 @@ import { meetsTier, tierOf, TIER_LABELS } from "../tiers.js";
 import { planDuration } from "../plans.js";
 
 const DOWNLOAD_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m0 0l-5-5m5 5l5-5M4 19h16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
-// Same arrow, but classed so the click choreography in fx.js can animate it
-// against a companion checkmark that draws in on success.
 const DL_ARROW_ICON = '<svg class="dl-arrow" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m0 0l-5-5m5 5l5-5M4 19h16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
 const DL_CHECK_ICON = '<svg class="dl-check" viewBox="0 0 24 24" aria-hidden="true"><path d="M4.5 12.6l4.8 4.9L19.5 6.5" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>';
 
-/**
- * The one download button used across the site. Always points at the audited,
- * server-side-streaming /download/file route — the choreography in fx.js only
- * animates the button around the browser's own download, never intercepts it,
- * so with no JavaScript this stays a plain working link.
- *
- * The arrow/check pair, label span and progress strip are the pieces fx.js
- * drives; data-download is its hook.
- */
 function downloadBtn(label) {
   return `<a class="btn btn-primary btn-lg btn-download" href="/download/file" rel="nofollow" data-download`
     + `><span class="dl-icon" aria-hidden="true">${DL_ARROW_ICON}${DL_CHECK_ICON}</span>`
@@ -27,23 +16,23 @@ function downloadBtn(label) {
 
 const FEATURES = [
   ['<path d="M4 20V10m6 10V4m6 16v-7m4 7H2" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>',
-    'Match stats &amp; heatmaps',
-    'Automatic post-match breakdowns: K/D, ADR, utility damage and position heatmaps for every map you queue.'],
+    'Precision aimbot',
+    'Customizable smoothing, FOV, and target selection. Lock onto heads with humanized movement curves that bypass anti-cheat heuristics.'],
   ['<circle cx="12" cy="12" r="8" fill="none" stroke="currentColor" stroke-width="2"/><path d="M12 2v5m0 10v5M2 12h5m10 0h5" stroke="currentColor" stroke-width="2"/>',
-    'Crosshair &amp; config manager',
-    "Save, preview and share crosshair codes and autoexecs. One click to apply a pro's full setup."],
+    'Wallhack &amp; ESP',
+    'See enemies through walls with player boxes, health bars, weapon info, and skeleton ESP. Fully customizable colors and filters.'],
   ['<path d="M13 2L4 14h6l-1 8 9-12h-6l1-8z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/>',
-    'FPS boost presets',
-    'Curated video settings and launch options per GPU tier. Squeeze every frame out of your rig, safely.'],
+    'Triggerbot',
+    'Auto-fire the millisecond your crosshair touches a hitbox. Adjustable delay and hitchance for maximum legitimacy.'],
   ['<rect x="3" y="5" width="18" height="14" rx="2" fill="none" stroke="currentColor" stroke-width="2"/><path d="M3 10h18M8 15h4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>',
-    'Skin inventory tracker',
-    'Track your inventory value over time with price history charts and float details for every item.'],
+    'Skin changer',
+    'Equip any knife, glove, or weapon skin in your local inventory. StatTrak, stickers, and wear float fully customizable.'],
   ['<path d="M17 21v-2a4 4 0 00-4-4H7a4 4 0 00-4 4v2M9 11a4 4 0 100-8 4 4 0 000 8zm12 10v-2a4 4 0 00-3-3.87M15 3.13a4 4 0 010 7.75" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>',
-    'Community configs',
-    'Browse setups shared on the forum, upvote what works and publish your own with one click.'],
+    'Movement hacks',
+    'Auto-bunnyhop, auto-strafe, edge jump, and perfect jumpbug. Movement recorder for complex jumps and shortcuts.'],
   ['<path d="M12 3l7 4v5c0 4.4-3 8.5-7 9-4-.5-7-4.6-7-9V7l7-4z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M9 12l2 2 4-4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>',
-    'Clean &amp; VAC-safe',
-    'GoyHub never touches game memory. No injectors, no overlays in ranked, no risk to your account.'],
+    'Undetected &amp; secure',
+    'Kernel-level driver, signed binaries, and external rendering. No VAC detections in 3+ years. Stream-proof overlay options.'],
 ];
 
 function home(ctx, { stats, recentThreads, downloadMeta }) {
@@ -51,19 +40,19 @@ function home(ctx, { stats, recentThreads, downloadMeta }) {
   const canViewForum = meetsTier(ctx.user, 'paid');
 
   const heroCta = canDownload
-    ? `<span class="star-border" data-magnet>${downloadBtn('Download for Windows')}</span>`
+    ? `<span class="star-border" data-magnet>${downloadBtn('Download Loader')}</span>`
     : ctx.user
       ? '<span class="star-border" data-magnet><a class="btn btn-primary btn-lg" href="/upgrade">Upgrade to download</a></span>'
       : '<span class="star-border" data-magnet><a class="btn btn-primary btn-lg" href="/auth/signup">Create a free account</a></span>';
 
   const bottomCta = canDownload
-    ? `<p class="reveal">${downloadBtn('Download for Windows')}</p>
+    ? `<p class="reveal">${downloadBtn('Download Loader')}</p>
        <p class="fineprint mono reveal">SHA-256: ${esc(downloadMeta.sha256)}</p>`
     : ctx.user
       ? `<p class="reveal"><a class="btn btn-primary btn-lg" href="/upgrade">Upgrade to download</a></p>
-         <p class="fineprint reveal">The download is a Paid membership benefit.</p>`
+         <p class="fineprint reveal">The cheat loader is a Paid membership benefit.</p>`
       : `<p class="reveal"><a class="btn btn-primary btn-lg" href="/auth/signup">Create a free account</a></p>
-         <p class="fineprint reveal">Downloads are a Paid membership benefit. Already have an account? <a href="/auth/login?next=%2Fdownload">Log in</a>.</p>`;
+         <p class="fineprint reveal">The cheat loader is a Paid membership benefit. Already have an account? <a href="/auth/login?next=%2Fdownload">Log in</a>.</p>`;
 
   const recent = !canViewForum
     ? '<p class="muted reveal">The forum is a Paid membership benefit. <a href="/upgrade">See upgrade options</a>.</p>'
@@ -82,20 +71,19 @@ function home(ctx, { stats, recentThreads, downloadMeta }) {
   <div class="hero-grid-overlay" aria-hidden="true"></div>
   <div class="container hero-inner">
     <div class="hero-copy">
-      <p class="hero-kicker" data-decrypt>// THE CS2 COMPANION APP</p>
-      <h1 class="hero-title"><span data-split>Play smarter.</span><br>
-        <span class="hero-line2"><span class="gradient-text">Aim harder.</span></span></h1>
-      <p class="hero-sub reveal">Match stats, crosshair codes, configs and performance presets in one
-        lightweight app. Stop tabbing out, start ranking up.</p>
+      <p class="hero-kicker" data-decrypt>// PREMIUM CS2 CHEAT</p>
+      <h1 class="hero-title"><span data-split>Dominate every match.</span><br>
+        <span class="hero-line2"><span class="gradient-text">Never lose again.</span></span></h1>
+      <p class="hero-sub reveal">Aimbot, wallhack, ESP, skin changer and movement hacks in one lightweight loader. Stop grinding, start winning.</p>
       <div class="hero-cta reveal">
         ${heroCta}
         <a class="btn btn-outline btn-lg" href="/forum">Join the community</a>
       </div>
     </div>
     <div class="hero-cards" aria-hidden="true">
-      <div class="hud-card hud-card-1"><span class="hud-label">HEADSHOT %</span><span class="hud-value">61.4</span><span class="hud-trend up">▲ 4.2 this week</span></div>
-      <div class="hud-card hud-card-2"><span class="hud-label">AVG FPS</span><span class="hud-value">387</span><span class="hud-trend up">▲ 24 this week</span></div>
-      <div class="hud-card hud-card-3"><span class="hud-label">RATING</span><span class="hud-value">1.27</span><span class="hud-trend">last 20 matches</span></div>
+      <div class="hud-card hud-card-1"><span class="hud-label">HEADSHOT %</span><span class="hud-value">94.2</span><span class="hud-trend up">▲ 32.8 this week</span></div>
+      <div class="hud-card hud-card-2"><span class="hud-label">WIN RATE</span><span class="hud-value">87%</span><span class="hud-trend up">▲ 41 this week</span></div>
+      <div class="hud-card hud-card-3"><span class="hud-label">RANK</span><span class="hud-value">Global</span><span class="hud-trend">from Silver 2</span></div>
     </div>
   </div>
   <div class="hero-fade" aria-hidden="true"></div>
@@ -103,8 +91,8 @@ function home(ctx, { stats, recentThreads, downloadMeta }) {
 
 <section class="section stats-strip" id="stats">
   <div class="container stats-grid" data-stagger="90">
-    <div class="stat reveal"><span class="stat-value" data-count="${esc(stats.users)}">${esc(stats.users)}</span><span class="stat-label">Registered players</span></div>
-    <div class="stat reveal"><span class="stat-value" data-count="${esc(stats.downloads)}">${esc(stats.downloads)}</span><span class="stat-label">Downloads served</span></div>
+    <div class="stat reveal"><span class="stat-value" data-count="${esc(stats.users)}">${esc(stats.users)}</span><span class="stat-label">Cheaters registered</span></div>
+    <div class="stat reveal"><span class="stat-value" data-count="${esc(stats.downloads)}">${esc(stats.downloads)}</span><span class="stat-label">Loaders served</span></div>
     <div class="stat reveal"><span class="stat-value" data-count="${esc(stats.threads)}">${esc(stats.threads)}</span><span class="stat-label">Forum threads</span></div>
     <div class="stat reveal"><span class="stat-value" data-count="${esc(stats.posts)}">${esc(stats.posts)}</span><span class="stat-label">Posts &amp; replies</span></div>
   </div>
@@ -112,7 +100,7 @@ function home(ctx, { stats, recentThreads, downloadMeta }) {
 
 <section class="section" id="features">
   <div class="container">
-    <h2 class="section-title reveal">Everything you alt-tab for.<br>Now in one place.</h2>
+    <h2 class="section-title reveal">Everything you need to rage.<br>All in one place.</h2>
     <div class="features-grid" data-stagger="70">
       ${map(FEATURES, ([icon, title, copy], i) => `<article class="feature-card spotlight-card reveal${i === 0 || i === 5 ? ' feature-featured' : ''}">
         <div class="feature-icon" aria-hidden="true"><svg viewBox="0 0 24 24">${icon}</svg></div>
@@ -130,8 +118,8 @@ function home(ctx, { stats, recentThreads, downloadMeta }) {
 
 <section class="section download-cta" id="download">
   <div class="container center">
-    <h2 class="section-title reveal">Ready to rank up?</h2>
-    <p class="muted reveal">Windows 10/11 (64-bit) · ${esc(downloadMeta.sizeKb)} KB installer</p>
+    <h2 class="section-title reveal">Ready to dominate?</h2>
+    <p class="muted reveal">Windows 10/11 (64-bit) · ${esc(downloadMeta.sizeKb)} KB loader</p>
     ${bottomCta}
   </div>
 </section>`;
@@ -154,12 +142,12 @@ function downloadPage(ctx, { downloadMeta }) {
   const gateNote = canDownload
     ? ''
     : ctx.user
-      ? '<div class="muted">The download is a Paid-tier benefit. <a href="/upgrade">See upgrade options</a>.</div>'
-      : '<div class="muted">Downloads are available to Paid members. Signing up is free; upgrading unlocks the download.</div>';
+      ? '<div class="muted">The cheat loader is a Paid-tier benefit. <a href="/upgrade">See upgrade options</a>.</div>'
+      : '<div class="muted">The cheat loader is available to Paid members. Signing up is free; upgrading unlocks the download.</div>';
 
   const licenseBlock = canDownload ? `
     <h2>Loader license</h2>
-    <p class="muted">The loader signs in with your GoyHub username and password and receives a signed token
+    <p class="muted">The loader signs in with your username and password and receives a signed token
       proving your account is <strong>${esc(TIER_LABELS[tierOf(ctx.user)])}</strong>, with no separate key to manage.
       Tokens expire after 24 hours and the loader re-fetches them automatically. You can inspect yours on your
       <a href="/profile">profile page</a>.</p>` : '';
@@ -167,8 +155,8 @@ function downloadPage(ctx, { downloadMeta }) {
   const body = `
 <div class="section download-page">
   <div class="container narrow">
-    <h1 class="section-title">Get GoyHub v${esc(ctx.appVersion)}</h1>
-    <p class="muted">The installer is small, fast and clean. No bundled junk, no background miners, no nonsense.</p>
+    <h1 class="section-title">Get the Cheat Loader v${esc(ctx.appVersion)}</h1>
+    <p class="muted">The loader is small, fast and undetected. No bundled junk, no data logging, no nonsense.</p>
     <div class="download-box reveal">
       <div>
         <strong>${esc(downloadMeta.name)}</strong>
@@ -181,16 +169,16 @@ function downloadPage(ctx, { downloadMeta }) {
     <p class="muted">Always check the checksum before installing. If it does not match, delete the file.</p>
     <pre class="mono code-block">SHA-256  ${esc(downloadMeta.sha256)}</pre>
     ${licenseBlock}
-    <h2>Install in 3 steps</h2>
+    <h2>Inject in 3 steps</h2>
     <ol class="steps" data-stagger="90">
-      <li class="reveal">Run the downloaded installer and follow the prompts.</li>
-      <li class="reveal">Sign in with your GoyHub account (or <a href="/auth/signup">create one free</a>).</li>
-      <li class="reveal">Launch CS2. GoyHub picks up your matches automatically.</li>
+      <li class="reveal">Run the downloaded loader and follow the prompts.</li>
+      <li class="reveal">Sign in with your account (or <a href="/auth/signup">create one free</a>).</li>
+      <li class="reveal">Launch CS2. The cheat injects automatically and the menu appears.</li>
     </ol>
     <h2>System requirements</h2>
     <ul class="muted"><li>Windows 10 or 11, 64-bit</li><li>2 GB RAM · 200 MB disk space</li><li>Counter-Strike 2 installed via Steam</li></ul>
-    <p class="fineprint">See our <a href="/privacy">Privacy Policy</a>. Installing GoyHub is subject to our
-      <a href="/terms">Terms &amp; Conditions</a>. Trouble installing? Ask in the
+    <p class="fineprint">See our <a href="/privacy">Privacy Policy</a>. Using this cheat is subject to our
+      <a href="/terms">Terms &amp; Conditions</a>. Trouble injecting? Ask in the
       <a href="/forum/c/support">Support forum</a>.</p>
   </div>
 </div>`;
@@ -215,18 +203,12 @@ function errorPage(ctx, { code, title, message, action }) {
   return page(ctx, { title, body });
 }
 
-/**
- * Paid-membership upgrade page. There is no automated checkout yet — the
- * `pay` config (from env vars) decides what this shows: a hosted checkout
- * link, manual crypto addresses, or a "coming soon" note. Never fakes a
- * payment flow that doesn't exist.
- */
 function upgradePage(ctx, { pay }) {
   const benefits = `
     <ul class="upgrade-benefits">
-      <li><strong>Community forum</strong>: full access to every category, threads, replies and the shoutbox.</li>
-      <li><strong>App download</strong>: the GoyHub desktop app for Windows, with updates.</li>
-      <li><strong>Loader license</strong>: a signed token so the app knows your account is Paid.</li>
+      <li><strong>Community forum</strong>: full access to configs, exploits, and the shoutbox.</li>
+      <li><strong>Cheat loader</strong>: the desktop loader for Windows, with auto-updates.</li>
+      <li><strong>Loader license</strong>: a signed token so the cheat knows your account is Paid.</li>
       <li><strong>Priority support</strong>: Paid member reports get looked at first.</li>
     </ul>`;
 
@@ -234,12 +216,7 @@ function upgradePage(ctx, { pay }) {
 
   let payBlock;
   const catalogue = (pay.btcpay && pay.btcpay.plans) || [];
-  // A configured BTCPay with nothing in the shop yet is not a checkout —
-  // fall through to the honest "coming soon" rather than an empty grid.
   if (pay.btcpay && pay.btcpay.configured && catalogue.length > 0) {
-    // Automated, self-hosted BTCPay checkout. One card per plan; the plan id is
-    // the only thing the form carries — the price attached to it is read from
-    // the server-side catalogue, never from this page.
     const plans = catalogue;
     const currency = pay.btcpay.currency;
 
@@ -317,11 +294,6 @@ function upgradePage(ctx, { pay }) {
   return page(ctx, { title: 'Upgrade', body });
 }
 
-/**
- * Landing page BTCPay redirects back to after a member pays. The upgrade is
- * applied by the signed webhook, not here — this page only reflects the current
- * state of the member's most recent order.
- */
 function upgradeThanksPage(ctx, { payment }) {
   const credited = payment && payment.credited_at;
   const note = credited

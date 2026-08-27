@@ -158,4 +158,29 @@ CREATE TABLE IF NOT EXISTS ip_bans (
   expires_at INTEGER,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
+
+-- Crypto membership payments via a self-hosted BTCPay Server (see
+-- functions/_lib/btcpay.js). One row per checkout: created when the member
+-- starts a purchase, then advanced by BTCPay's signed webhook. \`order_id\` is
+-- our own random id, embedded in the invoice metadata and used to bind an
+-- incoming webhook back to the member who started it. \`credited_at\` (ms epoch)
+-- is the idempotency guard — set exactly once, so a replayed or duplicate
+-- "settled" webhook can never grant a second membership period. Amounts are
+-- stored as TEXT to preserve the exact decimal the invoice was priced at.
+CREATE TABLE IF NOT EXISTS payments (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  order_id    TEXT NOT NULL UNIQUE,
+  invoice_id  TEXT UNIQUE,
+  user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  username    TEXT,
+  amount      TEXT NOT NULL,
+  currency    TEXT NOT NULL,
+  period_days INTEGER,
+  status      TEXT NOT NULL DEFAULT 'new' CHECK (status IN ('new','processing','settled','expired','invalid')),
+  credited_at INTEGER,
+  created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_payments_user ON payments(user_id);
+CREATE INDEX IF NOT EXISTS idx_payments_status ON payments(status);
 `;

@@ -10,8 +10,9 @@ import crypto from "node:crypto";
 import { buildTestApp, createNodeAdapter } from "./harness.mjs";
 import { leadingZeroBits } from "../functions/_lib/captcha.js";
 import { seed } from "../functions/_lib/bootstrap.js";
-import { verifyPassword } from "../functions/_lib/crypto.js";
+import { verifyPassword, hashPassword } from "../functions/_lib/crypto.js";
 import { verifyLicense } from "../functions/_lib/license.js";
+import { verifyWebhookSignature, extendPaidUntil, btcpayConfig } from "../functions/_lib/btcpay.js";
 import { verifyTurnstile } from "../functions/_lib/turnstile.js";
 import { scrambledFilename } from "../functions/_lib/routes-main.js";
 import { smtpConversation, buildMessage } from "../functions/_lib/smtp.js";
@@ -1342,4 +1343,163 @@ test("subscriptions: per-user day adjustment, mass adjustment, unambiguous API f
   const life = await (await api("/api/loader/auth", { username: "sub_life", password: "supersecret1" })).json();
   assert.ok(life.subscription.lifetime === true && life.subscription.daysLeft === null && life.paid === true,
     "lifetime is explicit: paid=true, daysLeft=null, lifetime=true");
+});
+
+test("btcpay: signature verification and paid-until math", async () => {
+  const secret = "webhook-signing-secret";
+  const raw = JSON.stringify({ type: "InvoiceSettled", invoiceId: "X", storeId: "S" });
+  const good = crypto.createHmac("sha256", secret).update(raw).digest("hex");
+
+  assert.equal(await verifyWebhookSignature(secret, raw, `sha256=${good}`), true, "correct signature accepted");
+  assert.equal(await verifyWebhookSignature(secret, raw, good), true, "accepts a bare hex signature too");
+  assert.equal(await verifyWebhookSignature(secret, raw, `sha256=${"0".repeat(64)}`), false, "wrong signature rejected");
+  assert.equal(await verifyWebhookSignature(secret, raw + " ", `sha256=${good}`), false, "tampered body rejected");
+  assert.equal(await verifyWebhookSignature(secret, raw, ""), false, "missing signature rejected");
+  assert.equal(await verifyWebhookSignature("", raw, `sha256=${good}`), false, "no secret configured rejects");
+
+  const now = 1_000_000_000_000;
+  const DAY = 86_400_000;
+  assert.equal(extendPaidUntil(null, null, now), null, "lifetime purchase => null expiry");
+  assert.equal(extendPaidUntil(null, 30, now), now + 30 * DAY, "new member counts from now");
+  assert.equal(extendPaidUntil(now - DAY, 30, now), now + 30 * DAY, "expired member counts from now");
+  assert.equal(extendPaidUntil(now + 10 * DAY, 30, now), now + 40 * DAY, "active member extends from current expiry");
+
+  // configured is all-or-nothing on the required pieces.
+  assert.equal(btcpayConfig({}).configured, false, "empty env is not configured");
+  assert.equal(btcpayConfig({
+    BTCPAY_URL: "https://b.test/", BTCPAY_STORE_ID: "s", BTCPAY_API_KEY: "k",
+    BTCPAY_WEBHOOK_SECRET: "w", PAID_PRICE_AMOUNT: "10",
+  }).configured, true, "all required pieces => configured");
+  assert.equal(btcpayConfig({
+    BTCPAY_URL: "https://b.test", BTCPAY_STORE_ID: "s", BTCPAY_API_KEY: "k", PAID_PRICE_AMOUNT: "10",
+  }).configured, false, "missing webhook secret => not configured");
+  assert.equal(btcpayConfig({ BTCPAY_URL: "https://b.test/" }).url, "https://b.test", "trailing slash trimmed");
+});
+
+test("btcpay: checkout creates an invoice and a settled webhook grants Paid (idempotently)", async () => {
+  const BTCPAY_ENV = {
+    ...ENV,
+    BTCPAY_URL: "https://btcpay.test",
+    BTCPAY_STORE_ID: "STORE1",
+    BTCPAY_API_KEY: "greenfield-key",
+    BTCPAY_WEBHOOK_SECRET: "hook-secret-123",
+    PAID_PRICE_AMOUNT: "10.00",
+    PAID_PRICE_CURRENCY: "USD",
+    PAID_PERIOD_DAYS: "30",
+  };
+  const { app, db } = await buildTestApp(BTCPAY_ENV);
+
+  // A real BTCPay server would be reached over fetch(); stub it so the test is
+  // hermetic. POST /invoices returns a new invoice; GET /invoices/:id returns
+  // whatever `settledInvoice` currently holds.
+  const realFetch = globalThis.fetch;
+  let settledInvoice = null;
+  globalThis.fetch = async (url, opts = {}) => {
+    const u = String(url);
+    const jsonRes = (status, obj) => new Response(JSON.stringify(obj), {
+      status, headers: { "content-type": "application/json" },
+    });
+    if (opts.method === "POST" && /\/api\/v1\/stores\/STORE1\/invoices$/.test(u)) {
+      // Echo the caller's Authorization to prove the key is sent.
+      assert.equal(opts.headers.Authorization, "token greenfield-key", "store API key sent");
+      return jsonRes(200, { id: "INV123", checkoutLink: "https://btcpay.test/i/INV123", status: "New" });
+    }
+    if (u.endsWith("/api/v1/stores/STORE1/invoices/INV123")) {
+      return jsonRes(200, settledInvoice);
+    }
+    return jsonRes(404, {});
+  };
+
+  try {
+    globalThis.PBKDF2_ITERATIONS_OVERRIDE = "10000";
+    const memberPw = "buyer-pass-123";
+    await db.run(
+      "INSERT INTO users (username, email, password_hash, tier) VALUES (?, ?, ?, 'user')",
+      "buyer", "buyer@example.com", await hashPassword(memberPw)
+    );
+
+    const member = makeClient(app);
+    await member.get("/auth/login");
+    let res = await member.post("/auth/login", { identifier: "buyer", password: memberPw, next: "/" });
+    assert.ok(res.status === 302 && member.jar.has("ghsession"), "member logged in");
+
+    // The upgrade page shows the automated pay button now that BTCPay is set.
+    let html = await (await member.get("/upgrade")).text();
+    assert.ok(html.includes('action="/upgrade/checkout"') && html.includes("Pay with crypto"), "checkout form shown");
+
+    // Start checkout -> a pending payment row + redirect to the BTCPay invoice.
+    res = await member.raw("POST", "/upgrade/checkout", { _csrf: member.jar.get("ghcsrf") });
+    assert.equal(res.status, 302, "checkout redirects");
+    assert.equal(res.headers.get("location"), "https://btcpay.test/i/INV123", "redirects to the BTCPay invoice");
+
+    const buyer = await db.get("SELECT id FROM users WHERE username = 'buyer'");
+    const payment = await db.get("SELECT * FROM payments WHERE user_id = ?", buyer.id);
+    assert.ok(payment && payment.invoice_id === "INV123" && payment.status === "new", "pending payment row created");
+    assert.equal(payment.amount, "10.00");
+    assert.equal(payment.period_days, 30);
+    assert.ok(await db.get("SELECT id FROM ip_logs WHERE event = 'checkout_created'"), "checkout audited");
+
+    // Helper to POST a signed webhook exactly as BTCPay would.
+    const sendWebhook = (bodyObj, { sig } = {}) => {
+      const body = JSON.stringify(bodyObj);
+      const signature = sig ?? "sha256=" + crypto.createHmac("sha256", "hook-secret-123").update(body).digest("hex");
+      return app.fetch(new Request("http://local/api/btcpay/webhook", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "btcpay-sig": signature,
+          "content-length": String(Buffer.byteLength(body)),
+        },
+        body,
+      }), BTCPAY_ENV);
+    };
+
+    const settledBody = { type: "InvoiceSettled", invoiceId: "INV123", storeId: "STORE1" };
+
+    // A forged (bad-signature) webhook must be rejected and grant nothing.
+    res = await sendWebhook(settledBody, { sig: "sha256=" + "0".repeat(64) });
+    assert.equal(res.status, 400, "bad signature rejected");
+    assert.equal((await db.get("SELECT tier FROM users WHERE id = ?", buyer.id)).tier, "user", "no grant on bad signature");
+    assert.ok(await db.get("SELECT id FROM ip_logs WHERE event = 'btcpay_webhook_rejected'"), "rejection audited");
+
+    // A validly-signed webhook whose invoice the store reports as Settled grants Paid.
+    settledInvoice = { id: "INV123", status: "Settled", amount: "10.00", currency: "USD", metadata: { orderId: payment.order_id } };
+    res = await sendWebhook(settledBody);
+    assert.equal(res.status, 200, "signed settled webhook accepted");
+    assert.deepEqual(await res.json(), { ok: true, granted: true }, "reports granted");
+
+    let row = await db.get("SELECT tier, paid_until FROM users WHERE id = ?", buyer.id);
+    assert.equal(row.tier, "paid", "member upgraded to paid");
+    assert.ok(Math.abs(Number(row.paid_until) - (Date.now() + 30 * 86_400_000)) < 5 * 60_000, "paid_until ~30 days out");
+    const credited = await db.get("SELECT status, credited_at FROM payments WHERE invoice_id = 'INV123'");
+    assert.ok(credited.status === "settled" && credited.credited_at, "payment marked settled + credited");
+    assert.ok(await db.get("SELECT id FROM ip_logs WHERE event = 'membership_granted'"), "grant audited");
+
+    // Idempotency: replaying the same settled webhook must NOT extend again.
+    const paidBefore = Number(row.paid_until);
+    res = await sendWebhook(settledBody);
+    assert.equal(res.status, 200);
+    assert.deepEqual(await res.json(), { ok: true, already: true }, "replay is a no-op");
+    row = await db.get("SELECT paid_until FROM users WHERE id = ?", buyer.id);
+    assert.equal(Number(row.paid_until), paidBefore, "replayed webhook did not extend the membership");
+
+    // An amount that doesn't match the priced invoice must not grant.
+    await db.run(
+      "INSERT INTO payments (order_id, invoice_id, user_id, username, amount, currency, period_days, status) VALUES ('ord2','INV999',?,?,'10.00','USD',30,'new')",
+      buyer.id, "buyer"
+    );
+    settledInvoice = { id: "INV999", status: "Settled", amount: "0.01", currency: "USD", metadata: { orderId: "ord2" } };
+    globalThis.fetch = (async (url, opts = {}) => {
+      const u = String(url);
+      if (u.endsWith("/invoices/INV999")) return new Response(JSON.stringify(settledInvoice), { status: 200, headers: { "content-type": "application/json" } });
+      return new Response("{}", { status: 404 });
+    });
+    res = await sendWebhook({ type: "InvoiceSettled", invoiceId: "INV999", storeId: "STORE1" });
+    assert.equal(res.status, 200);
+    assert.deepEqual(await res.json(), { ok: false, error: "mismatch" }, "amount mismatch is not credited");
+    const notCredited = await db.get("SELECT credited_at FROM payments WHERE invoice_id = 'INV999'");
+    assert.equal(notCredited.credited_at, null, "mismatched invoice left uncredited");
+  } finally {
+    globalThis.fetch = realFetch;
+  }
 });

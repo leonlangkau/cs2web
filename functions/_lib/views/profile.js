@@ -1,10 +1,38 @@
 import { page } from "./layout.js";
-import { esc, timeAgo } from "./util.js";
+import { esc, timeAgo, map } from "./util.js";
 import { TIER_LABELS, normalizeTier } from "../tiers.js";
 
-function profile(ctx, { account, stats, license, isPaid, sessions = [], currentSessionId, isAdminAccount = false, emailConfigured = false }) {
+const PAYMENT_STATUS = {
+  new: ['tag-banned', 'Awaiting payment'],
+  processing: ['tag-tier-paid', 'Confirming'],
+  settled: ['tag-report-resolved', 'Paid'],
+  expired: ['tag-banned', 'Expired'],
+  invalid: ['tag-banned', 'Failed'],
+};
+
+function profile(ctx, { account, stats, license, isPaid, sessions = [], currentSessionId, payments = [], isAdminAccount = false, emailConfigured = false }) {
   const csrf = `<input type="hidden" name="_csrf" value="${esc(ctx.csrfToken)}">`;
   const tier = normalizeTier(account.tier);
+
+  const paymentsPanel = payments.length === 0 ? '' : `
+    <div class="panel profile-card">
+      <h2>Payments</h2>
+      <p class="muted">Your recent membership purchases. Paid access is granted automatically once a
+        payment confirms on-chain.</p>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Date</th><th>Amount</th><th>Buys</th><th>Status</th></tr></thead>
+        <tbody>${map(payments, (p) => {
+          const [cls, label] = PAYMENT_STATUS[p.status] || ['tag-banned', esc(p.status)];
+          const buys = p.period_days ? `${esc(p.period_days)} days` : 'Lifetime';
+          return `<tr>
+            <td class="muted nowrap">${esc(timeAgo(p.created_at))}</td>
+            <td class="mono nowrap">${esc(p.amount)} ${esc(p.currency)}</td>
+            <td class="nowrap">${buys}</td>
+            <td><span class="tag ${cls}">${esc(label)}</span></td>
+          </tr>`;
+        })}</tbody>
+      </table></div>
+    </div>`;
 
   const sessionRows = sessions.map((s) => {
     const current = s.id === currentSessionId;
@@ -69,6 +97,8 @@ function profile(ctx, { account, stats, license, isPaid, sessions = [], currentS
         by hand — it is shown for transparency.</p>
       <pre class="mono code-block license-block">${esc(license.token)}</pre>
     </div>
+
+    ${paymentsPanel}
 
     <div class="panel profile-card">
       <h2>Change password</h2>

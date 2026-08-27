@@ -37,9 +37,16 @@ function register(app) {
     // The license is shown to every signed-in member — the loader needs a
     // verifiable "this account is Free" just as much as "this is Paid".
     const license = await issueLicense(user, c.get('cfg'));
+    // Recent crypto payments (if any), newest first, so a member can see an
+    // in-flight or past purchase and its status.
+    const payments = await db.all(
+      `SELECT amount, currency, period_days, status, credited_at, created_at
+       FROM payments WHERE user_id = ? ORDER BY id DESC LIMIT 5`,
+      user.id
+    );
     return c.html(views.profile(c.get('view'), {
       account, stats, license, isPaid: meetsTier(user, 'paid'),
-      sessions, currentSessionId: c.get('sessionId'),
+      sessions, currentSessionId: c.get('sessionId'), payments,
       isAdminAccount: isFullAdmin(user),
       emailConfigured: isEmailConfigured(c.get('cfg')),
     }));

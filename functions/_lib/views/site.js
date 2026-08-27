@@ -216,8 +216,31 @@ function upgradePage(ctx, { pay }) {
       <li><strong>Priority support</strong> — Paid member reports get looked at first.</li>
     </ul>`;
 
+  const csrf = `<input type="hidden" name="_csrf" value="${esc(ctx.csrfToken)}">`;
+
   let payBlock;
-  if (pay.url) {
+  if (pay.btcpay && pay.btcpay.configured) {
+    // Automated, self-hosted BTCPay checkout — the account upgrades itself once
+    // the on-chain payment confirms (verified by a signed webhook server-side).
+    const periodText = pay.btcpay.periodDays
+      ? `${pay.btcpay.periodDays} days of Paid access`
+      : 'lifetime Paid access';
+    if (ctx.user) {
+      payBlock = `
+        <form method="post" action="/upgrade/checkout" class="stack">${csrf}
+          <button class="btn btn-primary btn-lg" type="submit">Pay with crypto${pay.price ? ` — ${esc(pay.price)}` : ''}</button>
+        </form>
+        <p class="fineprint">You'll be taken to our self-hosted <strong>BTCPay</strong> checkout to pay in
+          Bitcoin (on-chain or Lightning). No card, no third-party processor, no personal details.
+          Your account upgrades to <strong>Paid</strong> automatically once the payment confirms —
+          usually a few minutes. This buys ${esc(periodText)}.</p>`;
+    } else {
+      payBlock = `
+        <a class="btn btn-primary btn-lg" href="/auth/login?next=%2Fupgrade">Log in to pay</a>
+        <p class="fineprint">Payments attach to your account, so you need to be signed in first —
+          it only takes a moment to <a href="/auth/signup">create a free account</a>.</p>`;
+    }
+  } else if (pay.url) {
     payBlock = `
       <a class="btn btn-primary btn-lg" href="${esc(pay.url)}" rel="noopener nofollow">Pay with crypto</a>
       <p class="fineprint">Checkout is handled by our payment processor. Your account upgrades
@@ -271,4 +294,34 @@ function upgradePage(ctx, { pay }) {
   return page(ctx, { title: 'Upgrade', body });
 }
 
-export { home, downloadPage, errorPage, upgradePage, DOWNLOAD_ICON };
+/**
+ * Landing page BTCPay redirects back to after a member pays. The upgrade is
+ * applied by the signed webhook, not here — this page only reflects the current
+ * state of the member's most recent order.
+ */
+function upgradeThanksPage(ctx, { payment }) {
+  const credited = payment && payment.credited_at;
+  const note = credited
+    ? `<div class="flash flash-success upgrade-note">Payment confirmed — your account is now
+        <strong>Paid</strong>. Everything is unlocked. Thank you!</div>
+       <p><a class="btn btn-primary" href="/profile">Go to your profile</a></p>`
+    : `<p>Thanks! Your payment is being confirmed on the blockchain — this usually takes a few minutes.
+        Your account upgrades to <strong>Paid</strong> automatically as soon as it confirms; you don't
+        need to do anything else.</p>
+       <p class="muted">You can safely close this page. Check your
+        <a href="/profile">profile</a> again shortly to see your new tier.</p>`;
+  const body = `
+<div class="section upgrade-page">
+  <div class="container narrow">
+    <p class="section-kicker">// MEMBERSHIP</p>
+    <h1 class="section-title">Payment received</h1>
+    <div class="panel profile-card">
+      ${note}
+    </div>
+    <p class="fineprint">Questions about a payment? ${emailLink(ctx.company.contactEmail)}.</p>
+  </div>
+</div>`;
+  return page(ctx, { title: 'Thank you', body });
+}
+
+export { home, downloadPage, errorPage, upgradePage, upgradeThanksPage, DOWNLOAD_ICON };

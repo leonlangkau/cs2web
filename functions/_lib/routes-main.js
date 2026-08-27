@@ -9,6 +9,7 @@ import { audit, clientIp, requireAuth, requireTier, acceptTerms, formBody, setFl
 import { meetsTier } from "./tiers.js";
 import { issueLicense } from "./license.js";
 import { newToken } from "./crypto.js";
+import { btcpayConfig } from "./btcpay.js";
 
 /**
  * Per-download filename so the served attachment is never a predictable,
@@ -46,10 +47,14 @@ async function siteStats(db) {
 }
 
 /**
- * Payment configuration, entirely env-driven so checkout can be switched on
- * later without a code change:
- *   CRYPTO_PAY_URL       hosted checkout link (e.g. a Coinbase Commerce /
- *                        NOWPayments page) — shown as the primary button
+ * Payment configuration for the /upgrade page, entirely env-driven.
+ *
+ * Preferred path is a self-hosted BTCPay Server (see btcpay.js): when it is
+ * fully configured, the page shows a real one-click "Pay with crypto" button
+ * that creates an invoice and upgrades the account automatically once the
+ * payment confirms on-chain. The older fields stay as fallbacks so a site can
+ * still run a hosted link or manual addresses without BTCPay:
+ *   CRYPTO_PAY_URL       hosted checkout link (Coinbase Commerce, NOWPayments…)
  *   CRYPTO_PAY_ADDRESSES manual fallback, "BTC:bc1...,ETH:0x...,LTC:ltc1..."
  *   PAID_PRICE           display string, e.g. "$10 / month"
  * With none set, the upgrade page shows an honest "coming soon" + contact.
@@ -65,10 +70,23 @@ function paymentConfig(env = {}) {
       return coin && address ? { coin, address } : null;
     })
     .filter(Boolean);
+
+  const btc = btcpayConfig(env);
+  // Display price: the explicit PAID_PRICE string wins; otherwise compose one
+  // from the BTCPay amount/currency when that path is configured.
+  const price = String(env.PAID_PRICE || '').trim()
+    || (btc.configured ? `${btc.amount} ${btc.currency}` : '');
+
   return {
+    btcpay: {
+      configured: btc.configured,
+      currency: btc.currency,
+      amount: btc.amount,
+      periodDays: btc.periodDays,
+    },
     url: String(env.CRYPTO_PAY_URL || '').trim(),
     addresses,
-    price: String(env.PAID_PRICE || '').trim(),
+    price,
   };
 }
 

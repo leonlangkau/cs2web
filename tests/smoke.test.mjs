@@ -20,9 +20,11 @@ import { smtpConversation, buildMessage } from "../functions/_lib/smtp.js";
 import { isEmailConfigured } from "../functions/_lib/email.js";
 import buildSchema from "../scripts/build-schema.cjs";
 import buildInstaller from "../scripts/build-installer.cjs";
+import buildAssets from "../scripts/build-assets.cjs";
 
 const schemaInSync = buildSchema.isInSync;
 const installerInSync = buildInstaller.isInSync;
+const assetsInSync = buildAssets.isInSync;
 
 const ENV = {
   ADMIN_USERNAME: "admin",
@@ -83,6 +85,7 @@ async function solveCaptcha(client) {
 test("build artifacts are in sync with their sources", () => {
   assert.ok(schemaInSync(), "functions/_lib/schema-sql.js is stale — run npm run build");
   assert.ok(installerInSync(), "functions/_lib/installer-data.js is stale — run npm run build");
+  assert.ok(assetsInSync(), "functions/_lib/asset-manifest.js is stale — run npm run build");
 });
 
 test("admin password stays in sync with the ADMIN_PASSWORD secret across reboots", async () => {

@@ -1,4 +1,5 @@
 import { esc } from "./util.js";
+import { asset } from "../asset-manifest.js";
 import { isStaff, meetsTier } from "../tiers.js";
 
 const BRAND_MARK = `<svg class="brand-mark" viewBox="0 0 32 32" aria-hidden="true">
@@ -113,7 +114,7 @@ function page(ctx, { title, body, bodyClass = '', scripts = [] } = {}) {
   const flash = ctx.flash
     ? `<div class="flash flash-${ctx.flash.type === 'error' ? 'error' : 'success'}" role="status"><div class="container">${esc(ctx.flash.message)}</div></div>`
     : '';
-  const extraScripts = scripts.map((src) => `<script src="${esc(src)}" defer></script>`).join('\n');
+  const extraScripts = scripts.map((src) => `<script src="${esc(asset(src))}" defer></script>`).join('\n');
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -124,9 +125,9 @@ function page(ctx, { title, body, bodyClass = '', scripts = [] } = {}) {
 <meta name="description" content="GoyHub is the all-in-one CS2 companion app: match stats, crosshair &amp; config manager, skin tracker and performance presets for Counter-Strike 2.">
 <link rel="icon" href="${FAVICON}">
 <meta name="theme-color" content="#0137B7">
-<link rel="preload" href="/fonts/space-grotesk-var.woff2" as="font" type="font/woff2" crossorigin>
-<link rel="stylesheet" href="/css/style.css">
-<script src="/js/boot.js"></script>
+<link rel="preload" href="${asset('/fonts/space-grotesk-var.woff2')}" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="${asset('/css/style.css')}">
+<script src="${asset('/js/boot.js')}"></script>
 </head>
 <body class="${esc(bodyClass)}">
 <a class="skip-link" href="#main">Skip to content</a>
@@ -138,9 +139,9 @@ ${ctx.needsTermsGate ? termsGate(ctx) : ''}
 ${body}
 </main>
 ${footer(ctx)}
-<script src="/js/main.js" defer></script>
-<script src="/js/fx.js" defer></script>
-<script src="/js/fingerprint.js" defer></script>
+<script src="${asset('/js/main.js')}" defer></script>
+<script src="${asset('/js/fx.js')}" defer></script>
+<script src="${asset('/js/fingerprint.js')}" defer></script>
 ${extraScripts}
 </body>
 </html>`;

@@ -139,7 +139,7 @@ test("public pages, forum, legal, gate, auth, captcha, admin, moderation, downlo
   let res = await anon.get("/");
   let html = await res.text();
   assert.equal(res.status, 200);
-  assert.ok(html.includes("Play smarter.") && html.includes("hero-canvas"), "landing renders");
+  assert.ok(html.includes("Dominate every match.") && html.includes("hero-canvas"), "landing renders");
   assert.ok(String(res.headers.get("content-security-policy")).includes("default-src 'self'"), "CSP header");
 
   // The forum is a Paid-tier benefit — anonymous visitors are gated out

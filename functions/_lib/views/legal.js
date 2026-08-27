@@ -31,7 +31,6 @@ function render(ctx, { title, kicker, sections, updated }) {
 <section class="section legal-page">
   <div class="container">
     <div class="page-head"><div>
-      <p class="section-kicker">${esc(kicker)}</p>
       <h1 class="section-title">${esc(title)}</h1>
     </div></div>
     <div class="legal-layout">

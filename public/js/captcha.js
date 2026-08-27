@@ -171,7 +171,7 @@
             tokenField.value = challenge.token;
             solutionField.value = String(counter);
             if (submitBtn) submitBtn.disabled = false;
-            setState('done', 'Verified — you can sign up now.');
+            setState('done', 'Verified. You can sign up now.');
             return;
           }
           counter++;

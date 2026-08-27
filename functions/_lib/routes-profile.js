@@ -85,7 +85,7 @@ function register(app) {
       return c.redirect('/profile', 302);
     }
     if (isDisposableEmail(email, c.get('cfg'))) {
-      setFlash(c, 'error', 'Disposable email addresses cannot be used — use a real inbox.');
+      setFlash(c, 'error', 'Disposable email addresses cannot be used; use a real inbox.');
       return c.redirect('/profile', 302);
     }
     const taken = await db.get('SELECT id FROM users WHERE email = ? AND id != ?', email, user.id);
@@ -123,7 +123,7 @@ function register(app) {
       await destroySession(c);
       return c.redirect('/auth/login', 302);
     }
-    setFlash(c, 'success', 'Session revoked — that device is signed out.');
+    setFlash(c, 'success', 'Session revoked. That device is signed out.');
     return c.redirect('/profile', 302);
   });
 

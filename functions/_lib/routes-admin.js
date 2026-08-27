@@ -221,7 +221,7 @@ function register(app) {
     const user = await findUser(c);
     if (!user) return notFound(c, 'No such user.');
     if (user.tier !== 'paid') {
-      setFlash(c, 'error', `${user.username} is not on the Paid tier — set their tier first.`);
+      setFlash(c, 'error', `${user.username} is not on the Paid tier; set their tier first.`);
       return c.redirect(backTo(c, '/admin/users'), 302);
     }
     const body = await formBody(c);
@@ -237,8 +237,8 @@ function register(app) {
     const next = Math.max(now, base + Math.round(delta) * 86_400_000);
     await db.run('UPDATE users SET paid_until = ? WHERE id = ?', next, user.id);
     const left = Math.max(0, Math.round((next - now) / 86_400_000));
-    await adminAudit(c, `adjusted #${user.id} (${user.username}) subscription by ${delta}d — ${left}d left`);
-    setFlash(c, 'success', `${user.username}: ${delta > 0 ? '+' : ''}${Math.round(delta)} days — ${left} day${left === 1 ? '' : 's'} remaining.`);
+    await adminAudit(c, `adjusted #${user.id} (${user.username}) subscription by ${delta}d; ${left}d left`);
+    setFlash(c, 'success', `${user.username}: ${delta > 0 ? '+' : ''}${Math.round(delta)} days; ${left} day${left === 1 ? '' : 's'} remaining.`);
     return c.redirect(backTo(c, '/admin/users'), 302);
   });
 
@@ -593,7 +593,7 @@ function register(app) {
     }
     const first = await db.get('SELECT MIN(id) AS m FROM posts WHERE thread_id = ?', post.thread_id);
     if (Number(first.m) === post.id) {
-      setFlash(c, 'error', 'That is the opening post — delete the whole thread instead.');
+      setFlash(c, 'error', 'That is the opening post; delete the whole thread instead.');
       return c.redirect(backTo(c, `/forum/t/${post.thread_id}`), 302);
     }
     await db.run('DELETE FROM posts WHERE id = ?', id);

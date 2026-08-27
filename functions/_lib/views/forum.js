@@ -56,7 +56,7 @@ function index(ctx, { categories, recent, shouts }) {
 <div class="section forum-page">
   <div class="container">
     <div class="page-head">
-      <div><p class="section-kicker">// COMMUNITY</p><h1 class="section-title">Forum</h1></div>
+      <div><h1 class="section-title">Forum</h1></div>
       <div class="forum-head-actions">
         <form method="get" action="/forum/search" class="forum-search" role="search">
           <input type="search" name="q" minlength="2" maxlength="100" required
@@ -255,7 +255,7 @@ function newThread(ctx, { categories, errors = [], values = {} }) {
         </select></label>
       <label><span>Title</span>
         <input type="text" name="title" required minlength="3" maxlength="120"
-               placeholder="Be specific — good titles get better answers"
+               placeholder="Be specific: good titles get better answers"
                value="${esc(values.title || '')}"></label>
       <label><span>Body</span>
         <textarea name="body" rows="10" required maxlength="10000"

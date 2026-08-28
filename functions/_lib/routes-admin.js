@@ -8,7 +8,7 @@ import { setSetting, ANNOUNCEMENT_KEY } from "./settings.js";
 import { btcpayConfig } from "./btcpay.js";
 import { verifyAndCredit, sweepOpenPayments } from "./fulfil.js";
 import { grantMembership } from "./membership.js";
-import { onchainConfig, maybeScan, creditOrder, matchTransfer, orderView } from "./onchain.js";
+import { onchainConfig, maybeScan, creditOrder, matchTransfer, orderView, isLiveOrder } from "./onchain.js";
 import { requiredConfirmations, explorerLink } from "./chains.js";
 import { fromUnits, parseUnits } from "./units.js";
 import { storePlans, planDuration } from "./plans.js";
@@ -460,17 +460,29 @@ function register(app) {
     const transfers = [];
     for (const t of stranded) {
       const asset = cfg.byKey[t.asset];
-      const candidates = await db.all(
+      // Every uncredited order for the coin, not just the open ones. The
+      // transfer is often parked precisely BECAUSE its owner's order was
+      // cancelled or expired — offering only live orders would list everyone
+      // except the person whose money this is. Nearest quote first, so the
+      // likely owner is the default choice rather than something to hunt for.
+      const paid = parseUnits(t.units) ?? 0n;
+      const candidates = (await db.all(
         `SELECT * FROM chain_orders
-          WHERE asset = ? AND credited_at IS NULL AND status <> 'cancelled' AND match_until >= ?
-          ORDER BY id DESC LIMIT 25`, t.asset, now
-      );
+          WHERE asset = ? AND credited_at IS NULL
+            AND created_at >= datetime('now', '-30 days')
+          ORDER BY id DESC LIMIT 60`, t.asset
+      )).map((o) => {
+        const expected = parseUnits(o.expected_units) ?? 0n;
+        return { row: o, distance: paid > expected ? paid - expected : expected - paid };
+      }).sort((a, b) => (a.distance > b.distance ? 1 : a.distance < b.distance ? -1 : 0))
+        .slice(0, 25)
+        .map((entry) => ({ ...decorateOrder(cfg, entry.row), closed: !isLiveOrder(entry.row, now) }));
       transfers.push({
         ...t,
         symbol: asset ? asset.symbol : String(t.asset).toUpperCase(),
         amount: asset ? `${fromUnits(parseUnits(t.units) ?? 0n, asset.decimals)} ${asset.symbol}` : String(t.units),
         explorer: asset ? explorerLink(asset, t.tx_hash) : '',
-        candidates: candidates.map((o) => decorateOrder(cfg, o)),
+        candidates,
       });
     }
 

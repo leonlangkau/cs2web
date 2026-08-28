@@ -57,6 +57,17 @@ const TAG_SLOTS = 1000;
  */
 const AMOUNT_RESERVE_DAYS = 30;
 
+/**
+ * How much nearer the best-matching quote must be than the runner-up before an
+ * inexact payment is attributed to it.
+ *
+ * Quotes for the same plan are spaced about a cent apart, so a payment that
+ * rounding moved a fraction of a cent still sits far nearer its own quote than
+ * anyone else's. A payment that is genuinely between two of them is a coin
+ * toss, and goes to the admin queue instead.
+ */
+const NEAREST_QUOTE_MARGIN = 4n;
+
 /** Statuses that mean a human, not another scan, decides what a transfer paid for. */
 const RESOLVED_TRANSFER_STATUSES = new Set(['unmatched', 'ambiguous', 'ignored']);
 
@@ -388,33 +399,48 @@ async function matchTransfer(c, cfg, transfer, { now = Date.now(), source = 'sca
     verdict = 'ambiguous';
     note = `${exact.length} orders were quoted this exact amount — needs a human`;
   } else {
-    // --- 2. No exact amount: only act when the answer is genuinely unique ---
+    // --- 2. No exact amount: the nearest quote, when it is clearly nearest ----
     //
-    // The underpayment tolerance is far wider than the spacing between quotes
-    // (about ten cents against about one), so any two orders for the same plan
-    // sit inside each other's range. Judging that against the live set alone
-    // therefore answered "who is still waiting?" rather than "who paid?".
-    // Checked against every reserved order, a near-miss is only attributed when
-    // there is genuinely nobody else it could belong to.
-    const covered = recent.filter((o) => {
+    // Wallets send exactly what you paste, but exchange withdrawal forms round,
+    // and a buyer who retypes the figure drops a digit. Those payments are
+    // still obviously somebody's: they sit a hair away from ONE quote and far
+    // from every other, because quotes are spaced deliberately.
+    //
+    // So rather than refusing whenever a second order is technically in range —
+    // which it always is, since the tolerance is far wider than that spacing —
+    // this takes the nearest quote, and only gives up when the runner-up is
+    // close enough that "nearest" would be a coin toss.
+    const scored = recent.map((o) => {
       const min = parseUnits(o.min_units);
       const expected = parseUnits(o.expected_units);
-      if (min === null || expected === null) return false;
+      if (min === null || expected === null) return null;
       // Bounded on BOTH sides. Overpaying a little is ordinary and credits;
       // paying a large multiple is a mistake worth a human, not a silent
       // membership at fifty times the price.
-      return units >= min && units <= expected + (expected * BigInt(cfg.overpayBp)) / 10_000n;
-    });
+      const ceiling = expected + (expected * BigInt(cfg.overpayBp)) / 10_000n;
+      if (units < min || units > ceiling) return null;
+      return { order: o, distance: units > expected ? units - expected : expected - units };
+    }).filter(Boolean).sort((a, b) => (a.distance > b.distance ? 1 : a.distance < b.distance ? -1 : 0));
 
-    if (covered.length === 1 && isLiveOrder(covered[0], now)) {
-      order = covered[0];
-      verdict = 'matched';
-    } else if (covered.length === 1) {
+    const best = scored[0];
+    const runnerUp = scored[1];
+    // "Clearly nearest" means the next candidate is several times further away.
+    const clear = best && (!runnerUp
+      || runnerUp.distance >= best.distance * BigInt(NEAREST_QUOTE_MARGIN));
+
+    if (!best) {
       verdict = 'unmatched';
-      note = `close to order ${covered[0].order_id}, which is no longer open — needs a human`;
-    } else if (covered.length > 1) {
+    } else if (!clear) {
       verdict = 'ambiguous';
-      note = `${covered.length} orders could account for this amount — needs a human`;
+      note = `${scored.length} orders are about equally close to this amount — needs a human`;
+    } else if (!isLiveOrder(best.order, now)) {
+      // The nearest quote is somebody's, but their order can no longer take a
+      // payment. Their money must not fall through to whoever is still queued.
+      verdict = 'unmatched';
+      note = `closest to order ${best.order.order_id}, which is no longer open — needs a human`;
+    } else {
+      order = best.order;
+      verdict = 'matched';
     }
   }
 
@@ -749,7 +775,7 @@ async function quoteAll(db, env, cfg, plan) {
 }
 
 export {
-  onchainConfig, createOrder, RESOLVED_TRANSFER_STATUSES, quoteAsset, quoteAll, uniqueExpected, minimumFor,
+  onchainConfig, createOrder, RESOLVED_TRANSFER_STATUSES, isLiveOrder, quoteAsset, quoteAll, uniqueExpected, minimumFor,
   matchTransfer, creditOrder, scanAsset, maybeScan, reconcileOrder, reconcileForUser,
   submitTransactionRef, recordTransfer, orderView, LIVE_ORDERS_SQL, TAG_SLOTS,
 };

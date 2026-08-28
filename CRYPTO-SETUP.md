@@ -174,7 +174,7 @@ Add to `wrangler.toml` under `[vars]`:
 | `CRYPTO_ASSETS` | all configured | Allowlist, e.g. `"eth,sol"` — offer fewer coins than your addresses cover |
 | `CRYPTO_ETH_CONFIRMATIONS` | `12` | Blocks before ETH/USDT-ERC20 money counts (~2.5 min). Lower is faster and less safe |
 | `CRYPTO_SOL_CONFIRMATIONS` | `1` | Solana is read at `finalized`, which is already irreversible |
-| `CRYPTO_UNDERPAY_TOLERANCE_PCT` | `1` | How far under the quote still counts as paid — covers exchange withdrawal rounding. Capped at 20% |
+| `CRYPTO_UNDERPAY_TOLERANCE_PCT` | `1` | How far under the quote still counts as paid — covers exchange withdrawal rounding. Capped at 20%. Raising it widens what is accepted without making misattribution more likely, since a payment still has to be clearly nearest to one quote |
 | `CRYPTO_OVERPAY_TOLERANCE_PCT` | `100` | How far over still reads as this order's payment. Beyond it (a misplaced decimal point, say) a person decides, rather than fifty times the price silently buying one month |
 | `CRYPTO_PAY_WINDOW_MINUTES` | `60` | How long a quote is honoured |
 | `CRYPTO_MATCH_HOURS` | `48` | How long a **late** payment is still matched back to its order |
@@ -182,6 +182,27 @@ Add to `wrangler.toml` under `[vars]`:
 | `CRYPTO_SCAN_DEPTH` | `25` | How many recent transactions each scan looks back over |
 | `RATE_LIMIT_CRYPTO_ORDER` | `12` | Orders a member can open per hour |
 | `RATE_LIMIT_CRYPTO_TX` | `10` | Transaction hashes a member can submit per hour |
+
+### How much slack to allow
+
+`CRYPTO_UNDERPAY_TOLERANCE_PCT` (default `1`) and `CRYPTO_OVERPAY_TOLERANCE_PCT`
+(default `100`) set the window around a quote in which a payment still counts.
+On a $10 plan the defaults accept anything from $9.90 to $20.
+
+Widening the window is cheap. It does **not** make it likelier that money lands
+on the wrong account, because the window only decides what is *considered* — the
+payment is then attributed to whichever quote it is nearest, by a clear margin
+or not at all. What widening actually buys is fewer trips to the admin queue
+when a buyer's exchange rounds aggressively:
+
+```toml
+CRYPTO_UNDERPAY_TOLERANCE_PCT = "3"     # accept down to $9.70 on a $10 plan
+CRYPTO_OVERPAY_TOLERANCE_PCT  = "50"    # hold anything above $15 for a human
+```
+
+What it costs is revenue per short payment, and a little room for someone to
+probe for the cheapest amount that still upgrades them — at 3% on a $10 plan,
+thirty cents. Set it to what you would rather not argue with a customer about.
 
 ### Different addresses per token
 
@@ -282,13 +303,15 @@ Worth knowing before you trust it with money:
   person's payment landing on another person's account, and it is why an amount
   is never reissued to a second buyer while the first one's money might still be
   in flight.
-- **A near-miss is only attributed when nothing else could explain it.** The
-  underpayment tolerance is far wider than the spacing between quotes, so two
-  orders for the same plan always sit inside each other's range. Anything that
-  is not an exact amount is therefore checked against every recent order, not
-  just the open ones, and goes to a human the moment there is more than one
-  candidate. The practical cost: on a busy day, a payment that is not exact may
-  wait for an admin. That is the intended trade.
+- **A near-miss goes to the quote it is nearest.** Exchange withdrawal forms
+  round and buyers retype figures, so a payment often lands a hair off. Because
+  quotes are spaced deliberately, such a payment still sits far nearer its own
+  quote than anyone else's, and that is who gets it — checked against every
+  recent order, not just the open ones. It is only handed to a human when the
+  runner-up is close enough that "nearest" would be a coin toss, or when the
+  nearest quote belongs to an order that can no longer take a payment (in which
+  case the admin queue names that order, so crediting the right person is one
+  click).
 - **A provider outage is never read as "nobody paid".** A failed lookup throws
   and is reported; it never returns an empty result that could expire a paid
   order. When the provider comes back, the payment that was there all along is

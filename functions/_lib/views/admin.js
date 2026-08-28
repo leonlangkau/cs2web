@@ -441,7 +441,7 @@ function chain(ctx, { config, orders, transfers, status, statuses, page: current
     <td class="actions-cell">
       ${canCredit && t.candidates.length > 0 ? `<form method="post" action="/admin/crypto/transfers/${esc(t.id)}/assign" class="inline-form">${csrf}
         <select name="order" aria-label="Credit this payment to">
-          ${map(t.candidates, (o) => `<option value="${esc(o.order_id)}">${esc(o.username)} — ${esc(o.expectedAmount)} ${esc(o.symbol)} (${esc(o.plan_name || 'membership')})</option>`)}
+          ${map(t.candidates, (o) => `<option value="${esc(o.order_id)}">${esc(o.username)} — ${esc(o.expectedAmount)} ${esc(o.symbol)} (${esc(o.plan_name || 'membership')})${o.closed ? ' · closed' : ''}</option>`)}
         </select>
         <button class="btn btn-warn btn-xs" type="submit">Credit to</button></form>` : ''}
       ${t.status !== 'ignored' ? `<form method="post" action="/admin/crypto/transfers/${esc(t.id)}/ignore" class="inline-form">${csrf}

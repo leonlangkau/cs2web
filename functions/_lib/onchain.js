@@ -45,6 +45,18 @@ import { storeCurrency } from "./plans.js";
 /** How many distinct amounts a single price band is split into. */
 const TAG_SLOTS = 1000;
 
+/**
+ * How long a quoted amount stays bound to the order it was quoted for.
+ *
+ * An order stops being payable long before its amount stops being MEANINGFUL.
+ * The amount was handed to exactly one person, so for as long as their money
+ * might still be in flight it identifies them and nobody else — whether their
+ * order was since cancelled, expired, or already paid. Matching against only
+ * the live set is what let one person's payment land on another person's
+ * account.
+ */
+const AMOUNT_RESERVE_DAYS = 30;
+
 /** Statuses that mean a human, not another scan, decides what a transfer paid for. */
 const RESOLVED_TRANSFER_STATUSES = new Set(['unmatched', 'ambiguous', 'ignored']);
 
@@ -75,6 +87,10 @@ function positiveNumber(value, fallback, min = 0) {
  *   CRYPTO_UNDERPAY_TOLERANCE_PCT how far under the quote still counts as paid
  *                                 (default 1%) — covers exchange withdrawal
  *                                 rounding and rate drift
+ *   CRYPTO_OVERPAY_TOLERANCE_PCT  how far over still reads as that order's
+ *                                 payment (default 100%); beyond it, a human
+ *                                 decides rather than one membership silently
+ *                                 absorbing a large multiple of the price
  *   CRYPTO_SCAN_INTERVAL_SECONDS  floor on how often the chains are polled
  *   CRYPTO_SCAN_SECRET            lets an external cron call POST /api/crypto/scan
  */
@@ -87,6 +103,10 @@ function onchainConfig(env = {}) {
     matchHours: Math.max(1, positiveNumber(env.CRYPTO_MATCH_HOURS, 48, 1)),
     // Basis points, so the comparison stays integer-exact.
     toleranceBp: Math.min(2000, Math.round(positiveNumber(env.CRYPTO_UNDERPAY_TOLERANCE_PCT, 1, 0) * 100)),
+    // How far OVER the quote still reads as paying that order. Overpaying a
+    // little is ordinary; a large multiple is a mistake, and silently turning
+    // it into one membership would be the wrong favour.
+    overpayBp: Math.round(positiveNumber(env.CRYPTO_OVERPAY_TOLERANCE_PCT, 100, 0) * 100),
     scanIntervalSeconds: Math.max(5, positiveNumber(env.CRYPTO_SCAN_INTERVAL_SECONDS, 20, 5)),
     scanSecret: String(env.CRYPTO_SCAN_SECRET ?? '').trim(),
   };
@@ -113,6 +133,19 @@ const LIVE_ORDERS_SQL = `SELECT * FROM chain_orders
   WHERE asset = ? AND credited_at IS NULL AND status <> 'cancelled' AND match_until >= ?`;
 
 /**
+ * Every order whose amount is still spoken for, whatever became of the order.
+ * This is the set matching works against; `isLive` below then decides which of
+ * them can still legitimately RECEIVE a payment.
+ */
+const RESERVED_ORDERS_SQL = `SELECT * FROM chain_orders
+  WHERE asset = ? AND created_at >= datetime('now', '-${AMOUNT_RESERVE_DAYS} days')`;
+
+/** Can this order still take a payment, or is it merely holding its amount? */
+function isLiveOrder(order, now) {
+  return !order.credited_at && order.status !== 'cancelled' && Number(order.match_until) >= now;
+}
+
+/**
  * Picks an amount that is at least `base` and shared with no other live order
  * for the same coin. Uniqueness is what makes an anonymous transfer
  * attributable, so a band with no free slot left returns null and the checkout
@@ -123,7 +156,9 @@ async function uniqueExpected(db, asset, base, now) {
   const band = step * BigInt(TAG_SLOTS);
   const floor = ceilTo(base, band);
 
-  const rows = await db.all(`${LIVE_ORDERS_SQL} LIMIT 2000`, asset.key, now);
+  // Reserved, not merely live: reissuing an amount that a cancelled or expired
+  // order was quoted would put two people's payments on one number.
+  const rows = await db.all(`${RESERVED_ORDERS_SQL} LIMIT 4000`, asset.key);
   const taken = new Set(rows.map((r) => String(r.expected_units)));
 
   for (let attempt = 0; attempt < 24; attempt += 1) {
@@ -269,6 +304,25 @@ async function creditOrder(c, cfg, order, transfer, source) {
 }
 
 /**
+ * Does `units` still pay for the order, valued at TODAY's rate?
+ *
+ * Only consulted when a payment lands after its quote expired. Returns ok when
+ * no live rate can be established — an outage in our price feed is our problem,
+ * not a reason to hold somebody's money.
+ */
+async function quoteStillCovers(db, env, cfg, order, units) {
+  const asset = cfg.byKey[order.asset];
+  if (!asset) return { ok: true };
+  const quote = await getRate(db, env, asset.priceSymbol, order.fiat_currency).catch(() => null);
+  if (!quote) return { ok: true };
+  const needed = fiatToUnits(order.fiat_amount, quote.rate, asset.decimals);
+  if (needed === null || needed <= 0n) return { ok: true };
+  const floor = minimumFor(needed, cfg.toleranceBp);
+  if (units >= floor) return { ok: true };
+  return { ok: false, shortBy: fromUnits(floor - units, asset.decimals) };
+}
+
+/**
  * Decides which order — if any — an incoming transfer paid for, and credits it
  * when it is confirmed enough.
  *
@@ -298,35 +352,89 @@ async function matchTransfer(c, cfg, transfer, { now = Date.now(), source = 'sca
   // between us and the chain, nothing more.
   const paidAt = Number(transfer.block_time) || 0;
   const bornBefore = paidAt > 0 ? paidAt + ORDER_CLOCK_GRACE_SECONDS : null;
-  const candidates = bornBefore === null
-    ? await db.all(`${LIVE_ORDERS_SQL} ORDER BY id ASC LIMIT 500`, asset.key, now)
+  const recent = bornBefore === null
+    ? await db.all(`${RESERVED_ORDERS_SQL} ORDER BY id ASC LIMIT 500`, asset.key)
     : await db.all(
-      `${LIVE_ORDERS_SQL} AND CAST(strftime('%s', created_at) AS INTEGER) <= ?
-       ORDER BY id ASC LIMIT 500`, asset.key, now, bornBefore
+      `${RESERVED_ORDERS_SQL} AND CAST(strftime('%s', created_at) AS INTEGER) <= ?
+       ORDER BY id ASC LIMIT 500`, asset.key, bornBefore
     );
-
-  const exact = candidates.filter((o) => parseUnits(o.expected_units) === units);
-  const covered = candidates.filter((o) => {
-    const min = parseUnits(o.min_units);
-    return min !== null && units >= min;
-  });
 
   let order = null;
   let verdict = 'unmatched';
-  if (exact.length > 0) {
-    order = exact[0];
-    verdict = 'matched';
-  } else if (covered.length === 1) {
-    order = covered[0];
-    verdict = 'matched';
-  } else if (covered.length > 1) {
+  let note = 'no order was quoted this amount';
+
+  // --- 1. An exact amount names its owner, and only its owner ---------------
+  //
+  // Searched across every reserved order rather than only the live ones. This
+  // is the guard that matters: the amount was quoted to exactly one person, so
+  // if it turns up we know whose money it is even when their order has since
+  // been cancelled, expired, or paid. Matching exact amounts against the live
+  // set alone let a payment fall through to whoever was still queued.
+  const exact = recent.filter((o) => parseUnits(o.expected_units) === units);
+  if (exact.length === 1) {
+    const owner = exact[0];
+    if (owner.credited_at) {
+      // Their order is already paid, and this is a DIFFERENT transaction for
+      // the same amount — almost always a buyer who paid twice. Crediting it
+      // again would be wrong and dropping it would be theft, so a human looks.
+      verdict = 'unmatched';
+      note = `a second payment for order ${owner.order_id}, which is already paid `
+        + '— likely a duplicate, may be owed a refund';
+    } else {
+      order = owner;
+      verdict = 'matched';
+    }
+  } else if (exact.length > 1) {
     verdict = 'ambiguous';
+    note = `${exact.length} orders were quoted this exact amount — needs a human`;
+  } else {
+    // --- 2. No exact amount: only act when the answer is genuinely unique ---
+    //
+    // The underpayment tolerance is far wider than the spacing between quotes
+    // (about ten cents against about one), so any two orders for the same plan
+    // sit inside each other's range. Judging that against the live set alone
+    // therefore answered "who is still waiting?" rather than "who paid?".
+    // Checked against every reserved order, a near-miss is only attributed when
+    // there is genuinely nobody else it could belong to.
+    const covered = recent.filter((o) => {
+      const min = parseUnits(o.min_units);
+      const expected = parseUnits(o.expected_units);
+      if (min === null || expected === null) return false;
+      // Bounded on BOTH sides. Overpaying a little is ordinary and credits;
+      // paying a large multiple is a mistake worth a human, not a silent
+      // membership at fifty times the price.
+      return units >= min && units <= expected + (expected * BigInt(cfg.overpayBp)) / 10_000n;
+    });
+
+    if (covered.length === 1 && isLiveOrder(covered[0], now)) {
+      order = covered[0];
+      verdict = 'matched';
+    } else if (covered.length === 1) {
+      verdict = 'unmatched';
+      note = `close to order ${covered[0].order_id}, which is no longer open — needs a human`;
+    } else if (covered.length > 1) {
+      verdict = 'ambiguous';
+      note = `${covered.length} orders could account for this amount — needs a human`;
+    }
+  }
+
+  // --- 3. A payment made after the quote expired is re-checked at today's price
+  //
+  // `expires_at` was only ever used for display, so a buyer could sit on a
+  // quote, wait for the coin to fall, and pay the frozen amount — a free option
+  // on the price. Money that arrives after the window closed still counts, but
+  // only if it still covers what the plan costs now.
+  if (order && paidAt > 0 && Number(order.expires_at) < paidAt * 1000) {
+    const fresh = await quoteStillCovers(db, c.get('cfg'), cfg, order, units);
+    if (!fresh.ok) {
+      note = `paid ${fresh.shortBy} short of what ${order.fiat_amount} ${order.fiat_currency} `
+        + 'costs at today\'s rate, on a quote that had expired — needs a human';
+      verdict = 'unmatched';
+      order = null;
+    }
   }
 
   if (!order) {
-    const note = verdict === 'ambiguous'
-      ? `${covered.length} live orders could account for this amount — needs a human`
-      : 'no live order expects this amount';
     await db.run(
       `UPDATE chain_transfers SET status = ?, note = ?, updated_at = datetime('now')
        WHERE id = ? AND status <> 'credited'`,
@@ -417,15 +525,15 @@ async function scanAsset(c, cfg, asset, { now = Date.now(), source = 'scan' } = 
   const cursor = await readCursor(db, asset.key);
   const out = { asset: asset.key, seen: 0, matched: 0, credited: 0, unmatched: 0, error: null };
 
-  let transfers;
+  let result;
   try {
     if (asset.chain === 'ethereum') {
-      transfers = await fetchIncoming(cfg, asset, {
+      result = await fetchIncoming(cfg, asset, {
         sinceBlock: Math.max(0, cursor.block - ETH_CURSOR_LAG_BLOCKS),
       });
     } else {
       const known = await knownHashes(db, asset.key);
-      transfers = await fetchIncoming(cfg, asset, { known, limit: MAX_TX_LOOKUPS_PER_SCAN });
+      result = await fetchIncoming(cfg, asset, { known, limit: MAX_TX_LOOKUPS_PER_SCAN });
     }
   } catch (err) {
     // A provider that is down must never look like "nothing has been paid".
@@ -434,7 +542,11 @@ async function scanAsset(c, cfg, asset, { now = Date.now(), source = 'scan' } = 
     return out;
   }
 
-  let highestBlock = cursor.block;
+  const transfers = result.transfers || [];
+  // The provider reports where its own reading got to. Taking the cursor from
+  // the payments alone would stall it whenever a window held only unrelated
+  // traffic, and re-read that same window forever.
+  let highestBlock = Math.max(cursor.block, Number(result.highestBlock) || 0);
   for (const transfer of transfers) {
     highestBlock = Math.max(highestBlock, Number(transfer.block) || 0);
     if (transfer.units <= 0n) {

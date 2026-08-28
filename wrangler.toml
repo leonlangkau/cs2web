@@ -100,6 +100,10 @@ SIGNUP_SURGE_LIMIT = "100"
 #   CRYPTO_SOL_CONFIRMATIONS      Solana is read at `finalized` already (default 1)
 #   CRYPTO_UNDERPAY_TOLERANCE_PCT how far under the quote still counts as paid,
 #                                 covering exchange withdrawal rounding (default 1)
+#   CRYPTO_OVERPAY_TOLERANCE_PCT  how far OVER still reads as that order's payment
+#                                 (default 100); past it a human decides, so a
+#                                 misplaced decimal point never quietly buys one
+#                                 month at fifty times the price
 #   CRYPTO_PAY_WINDOW_MINUTES     how long a quote is honoured (default 60)
 #   CRYPTO_MATCH_HOURS            how long a LATE payment is still matched to its
 #                                 order (default 48) — money that arrives slowly

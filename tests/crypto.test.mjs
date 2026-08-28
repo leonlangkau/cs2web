@@ -107,10 +107,22 @@ async function withChain(chain, fn) {
       if (action === "eth_getBlockByNumber") {
         return json({ result: { timestamp: `0x${(chain.blockTime || nowSeconds()).toString(16)}` } });
       }
-      const rows = action === "txlist" ? (chain.txlist || [])
+      const all = action === "txlist" ? (chain.txlist || [])
         : action === "txlistinternal" ? (chain.internal || [])
           : action === "tokentx" ? (chain.tokentx || []) : null;
-      if (rows === null) throw new Error(`unexpected explorer action: ${action}`);
+      if (all === null) throw new Error(`unexpected explorer action: ${action}`);
+
+      // Page and sort the way a real explorer does. This matters: reading only
+      // the newest page is exactly how a payment got buried behind dust, so a
+      // stub that ignores paging would hide the bug it is meant to catch.
+      const sorted = [...all].sort((a, b) => (q.get("sort") === "asc"
+        ? Number(a.blockNumber) - Number(b.blockNumber)
+        : Number(b.blockNumber) - Number(a.blockNumber)));
+      const from = Number(q.get("startblock") || 0);
+      const inRange = sorted.filter((r) => Number(r.blockNumber) >= from);
+      const size = Number(q.get("offset") || 100);
+      const page = Number(q.get("page") || 1);
+      const rows = inRange.slice((page - 1) * size, page * size);
       return rows.length
         ? json({ status: "1", message: "OK", result: rows })
         : json({ status: "0", message: "No transactions found", result: [] });
@@ -121,7 +133,14 @@ async function withChain(chain, fn) {
       const body = JSON.parse(String(init.body || "{}"));
       const reply = (result) => json({ jsonrpc: "2.0", id: body.id, result });
       if (body.method === "getTokenAccountsByOwner") {
-        return reply({ value: (chain.tokenAccounts || []).map((pubkey) => ({ pubkey })) });
+        return reply({
+          value: (chain.tokenAccounts || []).map((pubkey) => ({
+            pubkey,
+            account: { data: { parsed: { info: { tokenAmount: {
+              amount: String((chain.balances || {})[pubkey] || "0"),
+            } } } } },
+          })),
+        });
       }
       if (body.method === "getSignaturesForAddress") {
         return reply((chain.signatures || []).map((s) => ({
@@ -153,9 +172,9 @@ async function withChain(chain, fn) {
 const nowSeconds = () => Math.floor(Date.now() / 1000);
 
 /** An Ethereum transfer of `units` wei to our address, `confs` blocks deep. */
-const ethTx = (hash, units, { latest = 1000, confs = 20, to = ETH_ADDRESS, at = nowSeconds() } = {}) => ({
+const ethTx = (hash, units, { latest = 1000, confs = 20, to = ETH_ADDRESS, at = nowSeconds(), block } = {}) => ({
   hash, to, from: "0x1111111111111111111111111111111111111111",
-  value: String(units), blockNumber: String(latest - confs + 1),
+  value: String(units), blockNumber: String(block === undefined ? latest - confs + 1 : block),
   timeStamp: String(at), isError: "0", txreceipt_status: "1",
 });
 
@@ -171,6 +190,9 @@ const solTx = (signature, units, { address = SOL_ADDRESS, at = nowSeconds() } = 
 
 /** The throttle exists to protect the upstream APIs; tests fast-forward past it. */
 const elapseScanWindow = (db) => db.run("DELETE FROM settings WHERE key = 'chain_scan_at'");
+
+/** Rates are cached for 90s. Dropping the cache is how a test says "time passed". */
+const elapseRateCache = (db) => db.run("DELETE FROM settings WHERE key LIKE 'rate:%'");
 
 /** Signs a member up and opens an order, returning the stored row. */
 async function openOrder(app, db, env, username, asset = "eth") {
@@ -618,6 +640,227 @@ test("a provider outage never looks like 'nobody paid'", async () => {
     await elapseScanWindow(db);
     const recovered = await (await client.get(`/pay/${order.order_id}/status`)).json();
     assert.equal(recovered.credited, true, "nothing was lost by the outage");
+  });
+});
+
+/* ------------------------------------------------------------------ *
+ * Spoofing: taking somebody else's payment, or paying less than the price
+ * ------------------------------------------------------------------ */
+
+test("a payment credits the person it was quoted to, even after they cancel", async () => {
+  // The amount is the only thing tying an anonymous transfer to an account, so
+  // it has to stay bound to whoever was quoted it — including once their order
+  // stops being live. Matching against only the LIVE set answered "who is still
+  // waiting?" instead of "who paid?", and handed Alice's money to Bob.
+  const { app, db } = await buildTestApp(CHAIN_ENV);
+  const chain = { rates: { ETH: "3000" }, latestBlock: 1000, txlist: [] };
+
+  await withChain(chain, async () => {
+    const alice = await openOrder(app, db, CHAIN_ENV, "alice");
+    await alice.client.post(`/pay/${alice.order.order_id}/cancel`);
+    assert.equal((await db.get("SELECT status FROM chain_orders WHERE id = ?", alice.order.id)).status,
+      "cancelled");
+
+    // Bob checks out and is now the only order still open.
+    const bob = await openOrder(app, db, CHAIN_ENV, "bob");
+
+    // Alice's exchange withdrawal lands anyway, for the amount SHE was quoted.
+    chain.txlist = [ethTx(TX_A, alice.order.expected_units, { confs: 30 })];
+    await elapseScanWindow(db);
+    await bob.client.get(`/pay/${bob.order.order_id}/status`);
+
+    assert.equal((await db.get("SELECT tier FROM users WHERE username = 'bob'")).tier, "user",
+      "Bob is not upgraded on Alice's money");
+    assert.equal((await db.get("SELECT tier FROM users WHERE username = 'alice'")).tier, "paid",
+      "Alice paid exactly what she was quoted, so Alice gets the membership");
+  });
+});
+
+test("a payment that arrives after the matching window still belongs to its buyer", async () => {
+  const { app, db } = await buildTestApp(CHAIN_ENV);
+  const chain = { rates: { ETH: "3000" }, latestBlock: 1000, txlist: [] };
+
+  await withChain(chain, async () => {
+    const late = await openOrder(app, db, CHAIN_ENV, "late_payer");
+    // Push their order past match_until, so it is no longer live.
+    await db.run("UPDATE chain_orders SET match_until = ? WHERE id = ?", Date.now() - 1000, late.order.id);
+
+    const other = await openOrder(app, db, CHAIN_ENV, "other_buyer");
+    chain.txlist = [ethTx(TX_A, late.order.expected_units, { confs: 30 })];
+    await elapseScanWindow(db);
+    await other.client.get(`/pay/${other.order.order_id}/status`);
+
+    assert.equal((await db.get("SELECT tier FROM users WHERE username = 'other_buyer'")).tier, "user",
+      "a stranger is never credited with a late payer's money");
+    assert.equal((await db.get("SELECT tier FROM users WHERE username = 'late_payer'")).tier, "paid",
+      "and the late payer is not robbed of what they paid for");
+  });
+});
+
+test("paying twice does not buy a stranger a membership", async () => {
+  const { app, db } = await buildTestApp(CHAIN_ENV);
+  const chain = { rates: { ETH: "3000" }, latestBlock: 1000, txlist: [] };
+
+  await withChain(chain, async () => {
+    const buyer = await openOrder(app, db, CHAIN_ENV, "double_payer");
+    chain.txlist = [ethTx(TX_A, buyer.order.expected_units, { confs: 30 })];
+    await elapseScanWindow(db);
+    await buyer.client.get(`/pay/${buyer.order.order_id}/status`);
+    const once = await db.get("SELECT tier, paid_until FROM users WHERE username = 'double_payer'");
+    assert.equal(once.tier, "paid");
+
+    // Somebody else is now the only open order.
+    const bystander = await openOrder(app, db, CHAIN_ENV, "bystander");
+
+    // The buyer's wallet sends a SECOND transaction for the same amount.
+    chain.txlist.push(ethTx(TX_B, buyer.order.expected_units, { confs: 30 }));
+    await elapseScanWindow(db);
+    await bystander.client.get(`/pay/${bystander.order.order_id}/status`);
+
+    assert.equal((await db.get("SELECT tier FROM users WHERE username = 'bystander'")).tier, "user",
+      "the duplicate does not become somebody else's membership");
+    const after = await db.get("SELECT paid_until FROM users WHERE username = 'double_payer'");
+    assert.equal(String(after.paid_until), String(once.paid_until),
+      "nor a second period for the payer");
+    const dup = await db.get("SELECT * FROM chain_transfers WHERE tx_hash = ?", TX_B);
+    assert.equal(dup.status, "unmatched", "it is queued for a human");
+    assert.ok(/already paid|duplicate/i.test(dup.note || ""), "and labelled as the duplicate it is");
+  });
+});
+
+test("a large overpayment is held for a human, not silently sold one membership", async () => {
+  const { app, db } = await buildTestApp(CHAIN_ENV);
+  const chain = { rates: { ETH: "3000" }, latestBlock: 1000, txlist: [] };
+
+  await withChain(chain, async () => {
+    const { client, order } = await openOrder(app, db, CHAIN_ENV, "fat_finger");
+    // A misplaced decimal point: fifty times the price.
+    chain.txlist = [ethTx(TX_A, BigInt(order.expected_units) * 50n, { confs: 30 })];
+    await elapseScanWindow(db);
+    await client.get(`/pay/${order.order_id}/status`);
+
+    assert.equal((await db.get("SELECT tier FROM users WHERE username = 'fat_finger'")).tier, "user",
+      "fifty times the price does not quietly become one month");
+    assert.equal((await db.get("SELECT status FROM chain_transfers ORDER BY id DESC LIMIT 1")).status,
+      "unmatched", "it waits for someone to decide what to do with it");
+
+  });
+});
+
+test("a modest overpayment is ordinary and still credits", async () => {
+  // Its own store, because with two orders open at once a non-exact amount sits
+  // inside both of their ranges and is correctly refused as ambiguous — the
+  // deliberate trade this design makes, and the reason wallets are told to send
+  // the exact figure.
+  const { app, db } = await buildTestApp(CHAIN_ENV);
+  const chain = { rates: { ETH: "3000" }, latestBlock: 1000, txlist: [] };
+
+  await withChain(chain, async () => {
+    const { client, order } = await openOrder(app, db, CHAIN_ENV, "rounder");
+    chain.txlist = [ethTx(TX_A, (BigInt(order.expected_units) * 105n) / 100n, { confs: 30 })];
+    await elapseScanWindow(db);
+    await client.get(`/pay/${order.order_id}/status`);
+    assert.equal((await db.get("SELECT tier FROM users WHERE username = 'rounder'")).tier, "paid",
+      "5% over is just an overpayment");
+  });
+});
+
+test("an expired quote cannot be paid at yesterday's price once the coin falls", async () => {
+  // Otherwise the quote is a free option: open an order, wait, and pay the
+  // frozen amount only if the market moved in your favour.
+  const { app, db } = await buildTestApp(CHAIN_ENV);
+  const chain = { rates: { ETH: "3000" }, latestBlock: 1000, txlist: [] };
+
+  await withChain(chain, async () => {
+    const { client, order } = await openOrder(app, db, CHAIN_ENV, "optioner");
+    // The pay window closes...
+    await db.run("UPDATE chain_orders SET expires_at = ? WHERE id = ?", Date.now() - 3600_000, order.id);
+    // ...and ETH halves, so the quoted amount is now worth half the plan price.
+    chain.rates.ETH = "1500";
+    chain.txlist = [ethTx(TX_A, order.expected_units, { confs: 30 })];
+    await elapseScanWindow(db);
+    await elapseRateCache(db);
+    await client.get(`/pay/${order.order_id}/status`);
+
+    assert.equal((await db.get("SELECT tier FROM users WHERE username = 'optioner'")).tier, "user",
+      "a stale quote does not buy a membership at half price");
+    const held = await db.get("SELECT * FROM chain_transfers ORDER BY id DESC LIMIT 1");
+    assert.equal(held.status, "unmatched");
+    assert.ok(/expired/i.test(held.note || ""), "and says why it is being held");
+  });
+});
+
+test("an expired quote still pays when the price has not moved against us", async () => {
+  const { app, db } = await buildTestApp(CHAIN_ENV);
+  const chain = { rates: { ETH: "3000" }, latestBlock: 1000, txlist: [] };
+
+  await withChain(chain, async () => {
+    const { client, order } = await openOrder(app, db, CHAIN_ENV, "slow_but_honest");
+    await db.run("UPDATE chain_orders SET expires_at = ? WHERE id = ?", Date.now() - 3600_000, order.id);
+    chain.txlist = [ethTx(TX_A, order.expected_units, { confs: 30 })];
+    await elapseScanWindow(db);
+    await client.get(`/pay/${order.order_id}/status`);
+
+    assert.equal((await db.get("SELECT tier FROM users WHERE username = 'slow_but_honest'")).tier,
+      "paid", "someone who simply paid late is not punished for it");
+  });
+});
+
+test("cheap dust cannot bury a real payment", async () => {
+  // Transactions to a public address are not ours to control. Reading only the
+  // newest page meant a handful of dust transfers pushed a buyer's payment out
+  // of view — permanently, since every later scan issued the same query.
+  const { app, db } = await buildTestApp(CHAIN_ENV);
+  const chain = { rates: { ETH: "3000" }, latestBlock: 1000, txlist: [] };
+
+  await withChain(chain, async () => {
+    const { client, order } = await openOrder(app, db, CHAIN_ENV, "buried");
+
+    const dust = Array.from({ length: 120 }, (_, i) =>
+      ethTx(`0x${(i + 16).toString(16).padStart(2, "0").repeat(32)}`, 1n, { block: 900 + i + 1 }));
+    chain.txlist = [ethTx(TX_A, order.expected_units, { block: 900 }), ...dust];
+    await elapseScanWindow(db);
+    await client.get(`/pay/${order.order_id}/status`);
+
+    assert.equal((await db.get("SELECT tier FROM users WHERE username = 'buried'")).tier, "paid",
+      "the payment is found underneath 120 later transactions");
+  });
+});
+
+test("outsiders cannot inflate a Solana scan by creating token accounts we own", async () => {
+  // Anyone can create an SPL token account naming someone else as its owner for
+  // the price of the rent, so the length of that list is attacker-controlled.
+  const { app, db } = await buildTestApp(CHAIN_ENV);
+  const real = "RealTokenAccount1111111111111111111111111";
+  const chain = {
+    rates: { USDT: "1" },
+    tokenAccounts: [real, ...Array.from({ length: 200 }, (_, i) => `Spam${String(i).padStart(38, "0")}`)],
+    signatures: [],
+  };
+
+  await withChain(chain, async ({ calls }) => {
+    const { client, order } = await openOrder(app, db, CHAIN_ENV, "spl_target", "usdt-spl");
+    chain.balances = { [real]: order.expected_units };
+    chain.signatures = [{
+      signature: SOL_SIG, slot: 700,
+      tx: {
+        slot: 700, blockTime: nowSeconds(),
+        transaction: { message: { accountKeys: [{ pubkey: real }] } },
+        meta: {
+          err: null, preBalances: [0], postBalances: [0],
+          preTokenBalances: [{ mint: USDT_SPL_MINT, owner: SOL_ADDRESS, uiTokenAmount: { amount: "0" } }],
+          postTokenBalances: [{ mint: USDT_SPL_MINT, owner: SOL_ADDRESS, uiTokenAmount: { amount: order.expected_units } }],
+        },
+      },
+    }];
+    const before = calls.length;
+    await elapseScanWindow(db);
+    await client.get(`/pay/${order.order_id}/status`);
+
+    const rpcCalls = calls.length - before;
+    assert.ok(rpcCalls < 20, `a scan stays bounded regardless of the spam (made ${rpcCalls} calls)`);
+    assert.equal((await db.get("SELECT tier FROM users WHERE username = 'spl_target'")).tier, "paid",
+      "and the real payment, in the account that holds the balance, still lands");
   });
 });
 

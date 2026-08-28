@@ -252,16 +252,21 @@ function register(app) {
     if (!cfg.configured) return c.json({ ok: false, error: 'unconfigured' }, 503);
     if (!cfg.scanSecret) return c.json({ ok: false, error: 'scan_secret_not_set' }, 503);
 
-    const url = new URL(c.req.url);
-    const provided = String(c.req.header('x-crypto-scan-secret') || url.searchParams.get('key') || '');
-    if (!provided || !safeEqual(provided, cfg.scanSecret)) {
-      return c.json({ ok: false, error: 'unauthorized' }, 401);
-    }
-
+    // Throttle BEFORE checking the secret, so an unauthenticated flood is capped
+    // too — otherwise the rate limit only ever applies to the legitimate cron.
     const verdict = await limits.check(c.get('db'), 'cryptoscan', clientIp(c), c.get('cfg'));
     if (!verdict.ok) {
       c.header('Retry-After', String(verdict.retryAfterSec));
       return c.json({ ok: false, error: 'rate_limited' }, 429);
+    }
+
+    // The header form is preferred and documented first: a secret in the query
+    // string is written into request logs, the scheduler's run history, and any
+    // workflow file that holds the URL.
+    const url = new URL(c.req.url);
+    const provided = String(c.req.header('x-crypto-scan-secret') || url.searchParams.get('key') || '');
+    if (!provided || !safeEqual(provided, cfg.scanSecret)) {
+      return c.json({ ok: false, error: 'unauthorized' }, 401);
     }
 
     const result = await maybeScan(c, cfg, { force: true, source: 'cron' });

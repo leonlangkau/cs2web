@@ -33,6 +33,14 @@ import { fromUnits } from "./units.js";
 /** Ceiling on any call to an explorer or RPC host, so a stalled node can't hang a request. */
 const FETCH_TIMEOUT_MS = 12_000;
 
+/**
+ * Explorer paging. Rows are read forward from the cursor rather than newest
+ * first, so unrelated traffic to the address can never hide a payment behind
+ * it; these bound how much of a backlog one scan works through.
+ */
+const ETH_PAGE_SIZE = 100;
+const ETH_MAX_PAGES_PER_SCAN = 5;
+
 /** Public, keyless defaults. Both are overridable per deployment. */
 const DEFAULT_ETH_EXPLORER = 'https://eth.blockscout.com/api';
 const ETHERSCAN_V2 = 'https://api.etherscan.io/v2/api';
@@ -41,6 +49,13 @@ const DEFAULT_SOLANA_RPC = 'https://api.mainnet-beta.solana.com';
 /** Mainnet contract/mint for Tether. Overridable in case a deployment needs a different token. */
 const DEFAULT_USDT_ERC20 = '0xdAC17F958D2ee523a2206206994597C13D831ec7';
 const DEFAULT_USDT_SPL_MINT = 'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB';
+
+/**
+ * How many of an owner's SPL token accounts one scan will watch. Creating a
+ * token account that names somebody else as its owner costs only rent, so
+ * without a cap an outsider decides how much work every scan does.
+ */
+const MAX_TOKEN_ACCOUNTS_WATCHED = 4;
 
 /** ERC-20 `Transfer(address,address,uint256)` — derived, not pasted, so it cannot be mistyped. */
 const TRANSFER_TOPIC = `0x${keccak256Hex('Transfer(address,address,uint256)')}`;
@@ -352,11 +367,11 @@ function sumByTx(rows, address, valueOf, keep = () => true) {
  */
 async function ethIncoming(cfg, asset, { sinceBlock = 0 } = {}) {
   const address = asset.address;
-  const depth = cfg.scanDepth;
   const latest = await ethLatestBlock(cfg);
   const startBlock = Math.max(0, sinceBlock);
 
   const totals = new Map();
+  let highestBlock = startBlock;
   const merge = (map) => {
     for (const [hash, entry] of map) {
       const prev = totals.get(hash);
@@ -364,32 +379,54 @@ async function ethIncoming(cfg, asset, { sinceBlock = 0 } = {}) {
     }
   };
 
+  /**
+   * Reads every row from `startBlock` forward, oldest first, in pages.
+   *
+   * The direction matters. Reading the NEWEST page and stopping meant anyone
+   * could bury a real payment: transactions to a public address are not ours to
+   * control, and a handful of cheap dust transfers would push a buyer's payment
+   * off the only page we ever looked at — permanently, since every later scan
+   * issued the same query and got the same dust. Reading forward from the
+   * cursor cannot skip anything: the oldest unprocessed rows come first, and
+   * the cursor only advances past what we have actually seen.
+   */
+  const readAll = async (action, extra, keep) => {
+    let page = 1;
+    let rows = [];
+    for (; page <= ETH_MAX_PAGES_PER_SCAN; page += 1) {
+      const batch = ethResult(await getJson(ethUrl(cfg, {
+        module: 'account', action, address, ...extra,
+        startblock: startBlock, endblock: 99999999,
+        page, offset: ETH_PAGE_SIZE, sort: 'asc',
+      })));
+      rows = rows.concat(batch);
+      // Track the cursor against EVERY row, not just the ones that paid us —
+      // otherwise a window full of unrelated traffic never advances it.
+      for (const row of batch) {
+        const block = Number(row && row.blockNumber);
+        if (Number.isFinite(block) && block > highestBlock) highestBlock = block;
+      }
+      if (batch.length < ETH_PAGE_SIZE) break;
+    }
+    merge(sumByTx(rows, address, null, keep));
+  };
+
   if (asset.kind === 'native') {
-    const common = {
-      module: 'account', address, startblock: startBlock, endblock: 99999999,
-      page: 1, offset: depth, sort: 'desc',
-    };
-    const external = ethResult(await getJson(ethUrl(cfg, { ...common, action: 'txlist' })));
     // A reverted transaction moved no money, whatever its value field says.
-    merge(sumByTx(external, address, null, (r) => String(r.isError ?? '0') === '0'
-      && String(r.txreceipt_status ?? '1') !== '0'));
+    await readAll('txlist', {}, (r) => String(r.isError ?? '0') === '0'
+      && String(r.txreceipt_status ?? '1') !== '0');
 
     // Internal transfers are best-effort: not every explorer exposes them, and a
     // provider that doesn't must not fail the whole scan.
     try {
-      const internal = ethResult(await getJson(ethUrl(cfg, { ...common, action: 'txlistinternal' })));
-      merge(sumByTx(internal, address, null, (r) => String(r.isError ?? '0') === '0'));
+      await readAll('txlistinternal', {}, (r) => String(r.isError ?? '0') === '0');
     } catch { /* external transfers alone are still a valid scan */ }
   } else {
-    const rows = ethResult(await getJson(ethUrl(cfg, {
-      module: 'account', action: 'tokentx', address,
-      contractaddress: cfg.eth.usdtContract,
-      startblock: startBlock, endblock: 99999999, page: 1, offset: depth, sort: 'desc',
-    })));
-    merge(sumByTx(rows, address, null, (r) => sameAddress(r.contractAddress, cfg.eth.usdtContract)));
+    await readAll('tokentx', { contractaddress: cfg.eth.usdtContract },
+      (r) => sameAddress(r.contractAddress, cfg.eth.usdtContract));
   }
 
-  return [...totals].map(([txHash, entry]) => ({
+  const transfers = [...totals].map(([txHash, entry]) => ({
     asset: asset.key,
     txHash,
     address,
@@ -398,6 +435,8 @@ async function ethIncoming(cfg, asset, { sinceBlock = 0 } = {}) {
     blockTime: entry.blockTime,
     confirmations: entry.block > 0 ? Math.max(0, latest - entry.block + 1) : 0,
   })).sort((a, b) => b.block - a.block);
+
+  return { transfers, highestBlock };
 }
 
 const HEX64 = /^0x[0-9a-fA-F]{64}$/;
@@ -490,7 +529,24 @@ async function solTokenAccounts(cfg, owner, mint) {
     owner, { mint }, { encoding: 'jsonParsed', commitment: 'finalized' },
   ]);
   const list = (result && Array.isArray(result.value)) ? result.value : [];
-  return list.map((entry) => String(entry && entry.pubkey)).filter(Boolean);
+
+  // Anyone can create a token account naming someone else as its owner, for the
+  // price of the rent — so the length of this list is attacker-controlled, and
+  // scanning all of it would let a stranger turn every scan into an arbitrarily
+  // long chain of RPC calls. Watch the few that actually hold the money: real
+  // payments land in the account with a balance, and a brand-new empty one is
+  // covered on the next scan once it has one.
+  const scored = list.map((entry) => {
+    const info = entry && entry.account && entry.account.data
+      && entry.account.data.parsed && entry.account.data.parsed.info;
+    const amount = info && info.tokenAmount && info.tokenAmount.amount;
+    let balance = 0n;
+    try { balance = BigInt(String(amount ?? '0')); } catch { /* unreadable — treat as empty */ }
+    return { pubkey: String(entry && entry.pubkey), balance };
+  }).filter((a) => a.pubkey);
+
+  scored.sort((a, b) => (b.balance > a.balance ? 1 : b.balance < a.balance ? -1 : 0));
+  return scored.slice(0, MAX_TOKEN_ACCOUNTS_WATCHED).map((a) => a.pubkey);
 }
 
 /** How much of `asset` a parsed transaction moved INTO our address. */
@@ -587,7 +643,7 @@ async function solIncoming(cfg, asset, { known = new Set(), limit = 12 } = {}) {
     }
     if (lookups >= limit) break;
   }
-  return out.sort((a, b) => b.block - a.block);
+  return { transfers: out.sort((a, b) => b.block - a.block), highestBlock: 0 };
 }
 
 /** One specific Solana transaction, for the paste-your-signature fallback. */
@@ -613,7 +669,13 @@ async function solTransaction(cfg, asset, signature) {
  * Chain-agnostic entry points
  * ------------------------------------------------------------------ */
 
-/** Recent incoming transfers for one asset. Throws if the provider is unreachable. */
+/**
+ * Recent incoming transfers for one asset, as { transfers, highestBlock }.
+ * `highestBlock` is where the caller's cursor should move to — tracked over
+ * every row the provider returned, not only the ones that paid us, so a window
+ * full of unrelated traffic still advances it. Throws if the provider is
+ * unreachable: a failed lookup must never read as "nothing was paid".
+ */
 function fetchIncoming(cfg, asset, cursor = {}) {
   return asset.chain === 'solana' ? solIncoming(cfg, asset, cursor) : ethIncoming(cfg, asset, cursor);
 }
@@ -660,5 +722,5 @@ export {
   isValidAddress, isValidEthAddress, isValidSolAddress, base58Decode,
   fetchIncoming, fetchTransaction, isTransactionRef, explorerLink, paymentUri,
   ethIncoming, ethTransaction, solIncoming, solTransaction, solCredit, solTokenAccounts,
-  TRANSFER_TOPIC, DEFAULT_USDT_ERC20, DEFAULT_USDT_SPL_MINT,
+  TRANSFER_TOPIC, DEFAULT_USDT_ERC20, DEFAULT_USDT_SPL_MINT, MAX_TOKEN_ACCOUNTS_WATCHED,
 };

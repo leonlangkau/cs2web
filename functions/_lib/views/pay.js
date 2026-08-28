@@ -154,9 +154,10 @@ function payPage(ctx, { order }) {
         ${qr ? `<figure class="pay-qr">${qr}<figcaption class="fineprint">Scan with a wallet app</figcaption></figure>` : ''}
       </div>
       <p class="fineprint">The amount is unique to this order — it is how we know the payment is
-        yours, so please send it exactly. Overpaying is fine; underpaying by more than a rounding
-        error needs a human to sort out. Network fees are paid by your wallet on top of this amount,
-        not deducted from it.</p>
+        yours, so please send it exactly. A little over or under is fine; anything further out is
+        held for a person to check rather than applied to the wrong account, so it may take a
+        little longer. Network fees are paid by your wallet on top of this amount, not deducted
+        from it.</p>
     </div>
 
     ${submitTx}

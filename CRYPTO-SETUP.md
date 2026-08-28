@@ -175,6 +175,7 @@ Add to `wrangler.toml` under `[vars]`:
 | `CRYPTO_ETH_CONFIRMATIONS` | `12` | Blocks before ETH/USDT-ERC20 money counts (~2.5 min). Lower is faster and less safe |
 | `CRYPTO_SOL_CONFIRMATIONS` | `1` | Solana is read at `finalized`, which is already irreversible |
 | `CRYPTO_UNDERPAY_TOLERANCE_PCT` | `1` | How far under the quote still counts as paid — covers exchange withdrawal rounding. Capped at 20% |
+| `CRYPTO_OVERPAY_TOLERANCE_PCT` | `100` | How far over still reads as this order's payment. Beyond it (a misplaced decimal point, say) a person decides, rather than fifty times the price silently buying one month |
 | `CRYPTO_PAY_WINDOW_MINUTES` | `60` | How long a quote is honoured |
 | `CRYPTO_MATCH_HOURS` | `48` | How long a **late** payment is still matched back to its order |
 | `CRYPTO_SCAN_INTERVAL_SECONDS` | `20` | Floor on how often the chains are polled, site-wide |
@@ -239,6 +240,19 @@ Each row shows the coin, amount, transaction and a dropdown of the live orders
 it could belong to. Pick one and click **Credit to**. That grants the membership
 and closes the order, and is written to the audit log as a manual action.
 
+Three other things land here rather than crediting automatically, all
+deliberately:
+
+- **A second payment for an order that is already paid.** Almost always someone
+  who paid twice — and quite possibly owed a refund.
+- **A large overpayment**, past `CRYPTO_OVERPAY_TOLERANCE_PCT`. A misplaced
+  decimal point should not quietly become one month's membership.
+- **A payment made after its quote expired, once the coin has fallen far
+  enough that the amount no longer covers the price.** Without this an expired
+  quote is a free option: open an order, wait, and pay only if the market moved
+  your way. Paying late when the price has *not* moved against us still credits
+  normally — nobody is punished for being slow.
+
 Money that arrives is **never** discarded — an unattributed transfer stays on
 record with the transaction hash, whether or not you act on it.
 
@@ -262,6 +276,19 @@ Worth knowing before you trust it with money:
   claimed atomically, and `chain_transfers` is unique per (coin, transaction).
   Two scans running at once, a replayed scan, a buyer refreshing forty times —
   all grant exactly once.
+- **A quoted amount belongs to the person quoted it, for 30 days.** Not just
+  while their order is open: if they cancel, or their order expires, or they pay
+  twice, the amount still identifies *them*. This is the guard that stops one
+  person's payment landing on another person's account, and it is why an amount
+  is never reissued to a second buyer while the first one's money might still be
+  in flight.
+- **A near-miss is only attributed when nothing else could explain it.** The
+  underpayment tolerance is far wider than the spacing between quotes, so two
+  orders for the same plan always sit inside each other's range. Anything that
+  is not an exact amount is therefore checked against every recent order, not
+  just the open ones, and goes to a human the moment there is more than one
+  candidate. The practical cost: on a busy day, a payment that is not exact may
+  wait for an admin. That is the intended trade.
 - **A provider outage is never read as "nobody paid".** A failed lookup throws
   and is reported; it never returns an empty result that could expire a paid
   order. When the provider comes back, the payment that was there all along is

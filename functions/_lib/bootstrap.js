@@ -171,6 +171,21 @@ async function ensureVanityUids(db) {
   }
 }
 
+/**
+ * And for tickets.key_hash_prev / key_rotated_at — the grace window that stops
+ * a re-issued guest link instantly breaking the one the owner had saved.
+ */
+async function ensureTicketKeyColumns(db) {
+  const columns = await db.all('PRAGMA table_info(tickets)');
+  if (columns.length === 0) return; // table not created yet; schema.sql covers it
+  if (!columns.some((c) => c.name === 'key_hash_prev')) {
+    await db.run('ALTER TABLE tickets ADD COLUMN key_hash_prev TEXT');
+  }
+  if (!columns.some((c) => c.name === 'key_rotated_at')) {
+    await db.run('ALTER TABLE tickets ADD COLUMN key_rotated_at INTEGER');
+  }
+}
+
 /** And for payments.plan_id / plan_name (the catalogue shipped after checkout did). */
 async function ensurePaymentPlanColumns(db) {
   const columns = await db.all('PRAGMA table_info(payments)');
@@ -223,6 +238,7 @@ function ensureSchema(db) {
       await ensureEmailVerifiedColumn(db);
       await ensurePaidUntilColumn(db);
       await ensurePaymentPlanColumns(db);
+      await ensureTicketKeyColumns(db);
 
       // Written last: a crash part-way through leaves no marker, so the next
       // cold start does the whole thing again rather than trusting a

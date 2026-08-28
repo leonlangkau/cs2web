@@ -367,6 +367,12 @@ CREATE TABLE IF NOT EXISTS tickets (
   guest_email       TEXT,
   guest_name        TEXT,
   key_hash          TEXT,
+  -- The previous key, kept alive for a short grace window after a re-issue.
+  -- Anyone who knows a reference and an address can ask for a fresh link, and
+  -- without this that request would instantly break the link the real owner
+  -- had saved. Added to existing databases by the guarded ALTER in bootstrap.js.
+  key_hash_prev     TEXT,
+  key_rotated_at    INTEGER,
   subject           TEXT NOT NULL,
   category          TEXT NOT NULL DEFAULT 'other',
   status            TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open','pending','answered','solved','closed')),

@@ -1010,9 +1010,20 @@ function register(app) {
         + 'bury it — reopen the survivor first, or merge the other way round.');
       return c.redirect(`/admin/support/${ticket.id}`, 302);
     }
+    // Only an ACCOUNT proves two tickets are the same person. Anything else —
+    // most importantly two guest tickets showing the same self-asserted email
+    // — is associated for staff WITHOUT moving a single message, because the
+    // requesters hold different keys and moving content between them would
+    // hand one of them the other's conversation.
     if (!sameRequester(ticket, target)) {
-      setFlash(c, 'error', 'Those tickets are from different people. Merging would either strand one of '
-        + 'them at a dead link or hand them the other\'s conversation — link them with a note instead.');
+      await addEvent(db, ticket.id, user.username, 'linked',
+        `related to ${target.ref} ("${target.subject}") — content not moved, requesters are not the same account`);
+      await addEvent(db, target.id, user.username, 'linked',
+        `related to ${ticket.ref} ("${ticket.subject}") — content not moved`);
+      await adminAudit(c, `linked ticket ${ticket.ref} to ${target.ref} (no content moved)`);
+      setFlash(c, 'success', `Linked to ${target.ref} for the queue. Nothing was moved: only a signed-in `
+        + 'account proves two tickets are the same person, and a guest ticket is identified by an email '
+        + 'address nobody has verified. Both threads stay where their requesters can reach them.');
       return c.redirect(`/admin/support/${ticket.id}`, 302);
     }
 

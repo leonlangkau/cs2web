@@ -373,10 +373,13 @@ function detail(ctx, {
   </form>`;
 
   const mergeWarning = ticket.user_id
-    ? ''
-    : `<p class="fineprint">This ticket has no account behind it, so a merge is matched on the email
-        address the sender typed — which nobody has verified. Check the conversation reads like the same
-        person before merging, because the messages move permanently.</p>`;
+    ? `<p class="fineprint">Merging moves this conversation onto the other ticket. It only does that
+        between tickets on the <strong>same account</strong>; anything else is recorded as a link for the
+        queue and nothing moves.</p>`
+    : `<p class="fineprint">This ticket has no account behind it. A guest is identified only by an email
+        address they typed, which nobody has verified, so merging here <strong>records a link</strong> for
+        the queue rather than moving anything — the two requesters hold different keys, and moving
+        messages between them would hand one of them the other's conversation.</p>`;
 
   const dangerRow = `<div class="panel-form ticket-danger">
     <h3>Housekeeping</h3>
@@ -385,9 +388,10 @@ function detail(ctx, {
       ${actionForm('tags', `<input type="text" name="tags" maxlength="200" value="${esc(ticket.tags)}"
         placeholder="tags, comma separated" aria-label="Tags">
         <button class="btn btn-ghost btn-xs" type="submit">Save tags</button>`)}
-      ${actionForm('merge', `<input type="text" name="into" maxlength="20" placeholder="Merge into GH-…"
-        aria-label="Merge into ticket reference">
-        <button class="btn btn-warn btn-xs" type="submit">Merge</button>`, 'merge-form')}
+      ${actionForm('merge', `<input type="text" name="into" maxlength="20"
+        placeholder="${ticket.user_id ? 'Merge into GH-…' : 'Link to GH-…'}"
+        aria-label="${ticket.user_id ? 'Merge into ticket reference' : 'Link to ticket reference'}">
+        <button class="btn btn-warn btn-xs" type="submit">${ticket.user_id ? 'Merge' : 'Link'}</button>`, 'merge-form')}
       ${actionForm('spam', `<button class="btn btn-warn btn-xs" type="submit">
         ${ticket.spam ? 'Not spam' : 'Flag as spam'}</button>`)}
     </div>

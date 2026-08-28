@@ -70,6 +70,14 @@ const MAX_TAGS = 8;
 const MAX_GUEST_NAME = 40;
 const MAX_RATING_COMMENT = 500;
 
+/**
+ * How long a replaced ticket key keeps working. Asking for a fresh link needs
+ * only a reference and an email address, neither of which is a secret — so
+ * without a window, anyone who knows both could break the link the real owner
+ * had saved, any time they liked.
+ */
+const KEY_GRACE_MS = 7 * 86_400_000;
+
 const TICKET_COOKIE = 'ghtickets';
 const TICKET_COOKIE_MAX = 8;
 const TICKET_COOKIE_DAYS = 120;
@@ -246,6 +254,12 @@ async function checkAccess(c, ticket, submittedKey = null) {
   if (safeEqual(hash, String(ticket.key_hash || ''))) {
     return { ok: true, role: 'owner', via: 'key', key: sync.candidate, source: sync.source };
   }
+  // The previous key, while its grace window is open.
+  if (ticket.key_hash_prev
+    && Number(ticket.key_rotated_at || 0) + KEY_GRACE_MS > Date.now()
+    && safeEqual(hash, String(ticket.key_hash_prev))) {
+    return { ok: true, role: 'owner', via: 'key', key: sync.candidate, source: sync.source, stale: true };
+  }
   return { ok: false, role: null, via: null };
 }
 
@@ -292,19 +306,23 @@ function ticketUrl(ticket, cfg, key = null) {
 }
 
 /**
- * True when two tickets belong to the same person. Merging is only safe within
- * one requester: access is per-ticket (a guest key hashes against exactly one
- * key_hash), so folding someone else's conversation into yours would either
- * strand them at a dead link or hand you their thread.
+ * True when two tickets provably belong to the same person — which means the
+ * same signed-in ACCOUNT, and nothing else.
+ *
+ * A guest ticket's identity is an email address typed into a public form.
+ * Nothing verifies it: no confirmation click, no token. Everything else about
+ * a guest ticket is protected by a 256-bit key hashed like a session, so
+ * treating that self-asserted string as equivalent to holding the key is the
+ * one place the whole model would come apart — anyone who knows an address
+ * could open a ticket claiming it and have a staff member move the real
+ * owner's conversation, and every file on it, under a key the attacker holds.
+ *
+ * So two guest tickets are never "the same requester", however identical
+ * they look. Staff who need them associated get a staff-side link instead,
+ * which moves nothing (see the merge route).
  */
 function sameRequester(a, b) {
-  if (a.user_id && b.user_id) return Number(a.user_id) === Number(b.user_id);
-  if (!a.user_id && !b.user_id) {
-    const left = String(a.guest_email || '').toLowerCase();
-    const right = String(b.guest_email || '').toLowerCase();
-    return Boolean(left) && left === right;
-  }
-  return false;
+  return a.user_id != null && b.user_id != null && Number(a.user_id) === Number(b.user_id);
 }
 
 /* ------------------------------------------------------------------ *
@@ -581,7 +599,7 @@ export {
   PRIORITIES, PRIORITY_LABELS, PRIORITY_RANK,
   CATEGORIES, CATEGORY_LABELS, CATEGORY_IDS,
   MAX_SUBJECT, MAX_BODY, MAX_NOTE, MAX_TAGS, MAX_GUEST_NAME, MAX_RATING_COMMENT,
-  TICKET_COOKIE,
+  TICKET_COOKIE, KEY_GRACE_MS,
   normalizeStatus, normalizePriority, normalizeCategory, normalizeTags, tagList,
   cleanBody, cleanLine, validEmail,
   supportConfig, slaDueAt,

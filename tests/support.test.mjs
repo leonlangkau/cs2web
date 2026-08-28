@@ -534,10 +534,24 @@ test("a canned reply sends the message and moves the ticket in one click", async
   assert.equal(Number(used.uses), 1);
 });
 
-test("merging moves the conversation and leaves the old link working", async () => {
+/** Opens a ticket as a signed-in member and returns its ref. */
+async function openMemberTicket(client, subject) {
+  await client.get("/support/new");
+  const res = await client.post("/support/new", {
+    subject, category: "other",
+    body: `Details for "${subject}" — long enough to clear the minimum length check.`,
+  });
+  assert.equal(res.status, 302);
+  return res.headers.get("location").split("/").pop();
+}
+
+test("merging moves the conversation between one member's own tickets", async () => {
   const { app, db } = await buildTestApp(ENV);
-  const a = await openGuestTicket(app, ENV, { subject: "Cannot log in" });
-  const b = await openGuestTicket(app, ENV, { subject: "Cannot log in (again)" });
+  const { client } = await signUp(app, ENV, "duplicator");
+  const aRef = await openMemberTicket(client, "Cannot log in");
+  const bRef = await openMemberTicket(client, "Cannot log in (again)");
+  const a = { ref: aRef };
+  const b = { ref: bRef };
   const source = await db.get("SELECT id FROM tickets WHERE ref = ?", b.ref);
   const target = await db.get("SELECT id FROM tickets WHERE ref = ?", a.ref);
 
@@ -558,30 +572,51 @@ test("merging moves the conversation and leaves the old link working", async () 
   assert.equal(Number(merged.merged_into), Number(target.id));
   assert.equal(merged.status, "closed");
 
-  // A guest key only ever opens the ticket it was issued for, so the source's
-  // owner is not bounced into a 404 — they land on a page that tells them
-  // where the conversation went.
-  const follower = makeClient(app, ENV);
-  const followed = await follower.get(`/support/t/${b.ref}?k=${b.key}`);
-  assert.equal(followed.status, 200);
-  const followedHtml = await followed.text();
-  assert.match(followedHtml, new RegExp(`merged into[\\s\\S]{0,80}${a.ref}`),
-    "the surviving reference is named");
-  assert.ok(!followedHtml.includes("chat-composer"), "and the dead thread cannot be replied to");
+  // The member holds both tickets through one session, so following the merge
+  // lands them on the survivor rather than a dead end.
+  const followed = await client.get(`/support/t/${b.ref}`);
+  assert.equal(followed.status, 302);
+  assert.equal(followed.headers.get("location"), `/support/t/${a.ref}`);
 });
 
-test("tickets from two different people are never merged", async () => {
+test("two guest tickets are LINKED, never merged, however identical they look", async () => {
+  // A guest is identified by an email address they typed and nobody verified.
+  // Moving content on the strength of it would let anyone open a ticket
+  // claiming a stranger's address and have staff hand them that stranger's
+  // conversation and every file on it.
   const { app, db } = await buildTestApp(ENV);
-  const a = await openGuestTicket(app, ENV, { email: "alice@example.com" });
-  const b = await openGuestTicket(app, ENV, { email: "bob@example.com" });
-  const source = await db.get("SELECT id FROM tickets WHERE ref = ?", b.ref);
+  const victim = await openGuestTicket(app, ENV, {
+    email: "victim@example.com", subject: "My card was charged twice",
+  });
+  const attacker = await openGuestTicket(app, ENV, {
+    email: "victim@example.com", subject: "My card was charged twice (again)",
+  });
+  const victimTicket = await db.get("SELECT id FROM tickets WHERE ref = ?", victim.ref);
+  const attackerTicket = await db.get("SELECT id FROM tickets WHERE ref = ?", attacker.ref);
 
   const staff = await adminClient(app);
-  await staff.get(`/admin/support/${source.id}`);
-  await staff.post(`/admin/support/${source.id}/merge`, { into: a.ref });
+  await staff.get(`/admin/support/${victimTicket.id}`);
+  const res = await staff.post(`/admin/support/${victimTicket.id}/merge`, { into: attacker.ref });
+  assert.equal(res.status, 302);
 
-  const untouched = await db.get("SELECT merged_into FROM tickets WHERE id = ?", source.id);
-  assert.equal(untouched.merged_into, null, "refused — it would strand one of them");
+  const after = await db.get("SELECT * FROM tickets WHERE id = ?", victimTicket.id);
+  assert.equal(after.merged_into, null, "nothing was merged");
+  assert.equal(after.status, "open", "and the victim's ticket is still theirs to use");
+
+  const victimMessages = await db.all("SELECT * FROM ticket_messages WHERE ticket_id = ?", victimTicket.id);
+  const attackerMessages = await db.all("SELECT * FROM ticket_messages WHERE ticket_id = ?", attackerTicket.id);
+  assert.equal(victimMessages.length, 1, "the victim's message stayed put");
+  assert.equal(attackerMessages.length, 1, "and did not appear under the other key");
+
+  // The decisive check: the second key must not read the first ticket.
+  const impostor = makeClient(app, ENV);
+  const stolen = await impostor.get(`/support/t/${victim.ref}?k=${attacker.key}`);
+  assert.equal(stolen.status, 404, "one guest key never opens another guest's ticket");
+
+  // Staff still get the association they actually wanted.
+  const events = await db.all("SELECT * FROM ticket_events WHERE ticket_id = ? AND kind = 'linked'", victimTicket.id);
+  assert.equal(events.length, 1);
+  assert.match(events[0].detail, new RegExp(attacker.ref));
 });
 
 test("the queue filters, and spam is hidden without being destroyed", async () => {
@@ -1295,8 +1330,9 @@ test("relaxing a priority lifts a breach the new deadline no longer justifies", 
 
 test("merging rebuilds the survivor's lifecycle and refuses a closed survivor", async () => {
   const { app, db } = await buildTestApp(ENV);
-  const a = await openGuestTicket(app, ENV, { subject: "First report" });
-  const b = await openGuestTicket(app, ENV, { subject: "Same thing again" });
+  const { client } = await signUp(app, ENV, "rebuilder");
+  const a = { ref: await openMemberTicket(client, "First report") };
+  const b = { ref: await openMemberTicket(client, "Same thing again") };
   const target = await db.get("SELECT id FROM tickets WHERE ref = ?", a.ref);
   const source = await db.get("SELECT id FROM tickets WHERE ref = ?", b.ref);
 
@@ -1325,12 +1361,46 @@ test("merging rebuilds the survivor's lifecycle and refuses a closed survivor", 
   assert.ok(Number(merged.last_user_at) > 0);
 
   // A customer message that lands after the reply flips it back to open.
-  const c = await openGuestTicket(app, ENV, { subject: "Still broken" });
-  const third = await db.get("SELECT id FROM tickets WHERE ref = ?", c.ref);
+  const cRef = await openMemberTicket(client, "Still broken");
+  const third = await db.get("SELECT id FROM tickets WHERE ref = ?", cRef);
   await staff.get(`/admin/support/${third.id}`);
   await staff.post(`/admin/support/${third.id}/merge`, { into: a.ref });
   assert.equal((await db.get("SELECT status FROM tickets WHERE id = ?", target.id)).status, "open",
     "the newest message is now the customer's, so it needs an answer");
+});
+
+test("asking for a fresh link does not instantly break the one already saved", async () => {
+  // Getting here needs a reference and an email address. Neither is a secret,
+  // so a re-issue must not be a way for a stranger to lock the owner out.
+  const env = { ...ENV, EMAIL_PROVIDER: "test", EMAIL_FROM: "s@goyhub.test", SITE_URL: "https://goyhub.test" };
+  const { app, db } = await buildTestApp(env);
+  globalThis.__testEmails = [];
+  const { ref, key } = await openGuestTicket(app, env);
+
+  const stranger = makeClient(app, env);
+  await stranger.get("/support/lookup");
+  await stranger.post("/support/lookup", { ref, email: "guest@example.com" });
+
+  const rotated = await db.get("SELECT key_hash, key_hash_prev, key_rotated_at FROM tickets WHERE ref = ?", ref);
+  assert.ok(rotated.key_hash_prev, "the old key is kept");
+  assert.ok(Number(rotated.key_rotated_at) > 0);
+
+  // The owner's saved link still works…
+  const owner = makeClient(app, env);
+  assert.equal((await owner.get(`/support/t/${ref}?k=${key}`)).status, 200);
+
+  // …and the new one, which only ever went to the address on the ticket.
+  const mail = globalThis.__testEmails.find((m) => m.subject.includes("Your ticket link"));
+  assert.ok(mail, "the replacement went out by email, not to whoever asked");
+  const fresh = mail.text.match(/\?k=([a-f0-9]{64})/)[1];
+  assert.notEqual(fresh, key);
+  assert.equal((await makeClient(app, env).get(`/support/t/${ref}?k=${fresh}`)).status, 200);
+
+  // Once the window closes, the old key stops.
+  await db.run("UPDATE tickets SET key_rotated_at = ? WHERE ref = ?", Date.now() - 30 * 86400000, ref);
+  assert.equal((await makeClient(app, env).get(`/support/t/${ref}?k=${key}`)).status, 404);
+  assert.equal((await makeClient(app, env).get(`/support/t/${ref}?k=${fresh}`)).status, 200);
+  globalThis.__testEmails = [];
 });
 
 test("the ticket-link lookup answers identically however the site is configured", async () => {

@@ -169,6 +169,26 @@ test("an already-deployed database gains every new table without losing anything
     "and the fingerprint is recorded so the next cold start can skip the DDL");
 });
 
+test("a column added to an existing table arrives through the guarded ALTER", async () => {
+  // CREATE TABLE IF NOT EXISTS cannot add a column, so any column added to a
+  // table that already ships needs an ensureXColumn() in bootstrap.js. This
+  // pins that the ticket-key grace columns actually take that path.
+  const { raw, adapter } = existingDeployment();
+  await seed(adapter, ENV);
+
+  // Simulate a deployment that predates the columns.
+  raw.exec("ALTER TABLE tickets DROP COLUMN key_hash_prev");
+  raw.exec("ALTER TABLE tickets DROP COLUMN key_rotated_at");
+  raw.prepare("DELETE FROM settings WHERE key = 'schema_fingerprint'").run();
+  assert.ok(!raw.prepare("PRAGMA table_info(tickets)").all().some((c) => c.name === "key_hash_prev"));
+
+  await seed({ ...adapter }, ENV);
+
+  const columns = raw.prepare("PRAGMA table_info(tickets)").all().map((c) => c.name);
+  assert.ok(columns.includes("key_hash_prev"), "the guarded ALTER put it back");
+  assert.ok(columns.includes("key_rotated_at"));
+});
+
 test("every page serves on a freshly upgraded database", async () => {
   const { adapter } = existingDeployment();
   await seed(adapter, ENV);

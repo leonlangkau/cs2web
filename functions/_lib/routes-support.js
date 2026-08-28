@@ -587,13 +587,17 @@ function register(app) {
 
     if (matches) {
       // The key itself is not recoverable (only its hash is stored), so issue
-      // a fresh one and retire the old link — the same trade the password
-      // reset flow makes. Anyone who knows both the reference AND the address
-      // can therefore invalidate a saved link; they cannot READ anything,
-      // because the replacement only ever goes to the address on the ticket,
-      // and the 6/hour per-IP bucket keeps it from being worth doing.
+      // a fresh one — the same trade the password reset flow makes. The old
+      // one keeps working for a week, because getting here needs a reference
+      // and an email address and neither is a secret: without the window,
+      // anyone who knew both could break the link the real owner had saved.
+      // Nothing is disclosed either way — the replacement only ever goes to
+      // the address already on the ticket.
       const rotated = await issueTicketKey();
-      await db.run('UPDATE tickets SET key_hash = ? WHERE id = ?', rotated.hash, ticket.id);
+      await db.run(
+        'UPDATE tickets SET key_hash = ?, key_hash_prev = ?, key_rotated_at = ? WHERE id = ?',
+        rotated.hash, ticket.key_hash, Date.now(), ticket.id
+      );
       await emailRequester(env, cfg, ticket, {
         subject: `[${ticket.ref}] Your ticket link`,
         text: `Here is a fresh link to your GoyHub support ticket ${ticket.ref}:\n\n`

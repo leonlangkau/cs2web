@@ -21,6 +21,7 @@ function head(ctx, heading) {
     ${tab('/admin/crypto', 'On-chain', p.startsWith('/admin/crypto'))}
     ${tab('/admin/logs', 'IP logs', p.startsWith('/admin/logs'))}
     ${tab('/admin/fingerprints', 'Fingerprints', p.startsWith('/admin/fingerprints'))}
+    ${tab('/admin/support', 'Support', p.startsWith('/admin/support'))}
     ${tab('/admin/reports', 'Reports', p.startsWith('/admin/reports'))}
     ${tab('/admin/forum', 'Forum', p.startsWith('/admin/forum'))}
   </nav>`;
@@ -64,6 +65,8 @@ function dashboard(ctx, { stats, recentLogs, recentUsers }) {
       ${card(stats.banned, 'Banned users', stats.banned > 0)}
       ${card(stats.ipBans, 'IP bans', stats.ipBans > 0)}
       ${card(stats.openReports, 'Open reports', stats.openReports > 0)}
+      ${card(stats.openTickets, 'Open tickets', stats.openTickets > 0)}
+      ${card(stats.breachedTickets, 'SLA breached', stats.breachedTickets > 0)}
       ${card(stats.fingerprints, 'Fingerprints')}
     </div>
     <div class="admin-columns">
@@ -752,4 +755,5 @@ function forumAdmin(ctx, { categories, threads }) {
 }
 
 export { dashboard, users, shop, payments, logs, fingerprints, fingerprintDetail, reports, forumAdmin, chain,
+  head, tierTag,
 };

@@ -19,10 +19,25 @@ import { register as registerApi } from "./routes-api.js";
 import { register as registerPayments } from "./routes-payments.js";
 import { register as registerOnchain } from "./routes-onchain.js";
 import { register as registerForum } from "./routes-forum.js";
+import { register as registerSupport } from "./routes-support.js";
 import { register as registerAdmin } from "./routes-admin.js";
+import { register as registerAdminSupport } from "./routes-admin-support.js";
 
-const APP_VERSION = "1.0.0";
+const APP_VERSION = "1.1.0";
 const MAX_BODY_BYTES = 256 * 1024;
+/**
+ * Support tickets are the only place a visitor uploads a file (screenshots
+ * and app logs), so they get a bigger ceiling than the rest of the site
+ * rather than raising the limit everywhere. The per-file and per-request
+ * caps that actually protect the database live in routes-support.js —
+ * this is only the outer "don't even buffer it" guard.
+ */
+const UPLOAD_BODY_BYTES = 3 * 1024 * 1024;
+const UPLOAD_PATHS = ["/support/", "/admin/support/"];
+
+function bodyLimitFor(path) {
+  return UPLOAD_PATHS.some((prefix) => path.startsWith(prefix)) ? UPLOAD_BODY_BYTES : MAX_BODY_BYTES;
+}
 
 function fallbackView() {
   return {
@@ -69,12 +84,30 @@ class Context {
         if (ct.includes("application/x-www-form-urlencoded") || ct.includes("multipart/form-data")) {
           const form = await request.formData();
           const out = {};
-          for (const [k, v] of form.entries()) out[k] = typeof v === "string" ? v : v.name;
+          this._files = [];
+          for (const [k, v] of form.entries()) {
+            if (typeof v === "string") { out[k] = v; continue; }
+            // The body stream can only be read once, so uploaded files are
+            // kept here for c.req.files(); the text map keeps the filename so
+            // routes that only care about field names are unaffected.
+            out[k] = v.name;
+            this._files.push({ field: k, file: v });
+          }
           this._body = out;
         } else {
           this._body = {};
+          this._files = [];
         }
         return this._body;
+      },
+
+      /**
+       * Uploaded files from a multipart body, as [{ field, file }]. Empty
+       * unless parseBody() has run (csrfProtection runs it on every write).
+       */
+      files: (field = null) => {
+        const all = this._files || [];
+        return field === null ? all : all.filter((f) => f.field === field);
       },
     };
   }
@@ -179,7 +212,7 @@ function createApp({ resolveDb, env = {} }) {
   // Reject oversized bodies before the route runs, mirroring Hono's bodyLimit.
   app.use("*", async (c, next) => {
     const len = Number(c.req.header("content-length") || 0);
-    if (len > MAX_BODY_BYTES) {
+    if (len > bodyLimitFor(c._url.pathname)) {
       return c.html(errorPage(c.get("view") || fallbackView(), {
         code: 413, title: "Request failed", message: "Request too large. Trim it down and try again.",
       }), 413);
@@ -189,6 +222,10 @@ function createApp({ resolveDb, env = {} }) {
 
   app.use("*", async (c, next) => {
     c.set("appVersion", APP_VERSION);
+    // Present on Cloudflare, absent in the Node harness — routes use it to run
+    // notifications and AI triage after the response, and simply await them
+    // when it is missing.
+    c.set("waitUntil", c.__waitUntil);
     const cfg = typeof env === "function" ? env(c) : env;
     c.set("cfg", cfg);
     c.set("company", createCompany(cfg));
@@ -212,7 +249,9 @@ function createApp({ resolveDb, env = {} }) {
   registerPayments(app);
   registerOnchain(app);
   registerForum(app);
+  registerSupport(app);
   registerAdmin(app);
+  registerAdminSupport(app);
 
   app.notFound((c) => c.html(errorPage(c.get("view") || fallbackView(), {
     code: 404, title: "Not found", message: "This page does not exist.",
@@ -240,8 +279,11 @@ function createApp({ resolveDb, env = {} }) {
   });
 
   return {
-    async fetch(request, requestEnv) {
+    async fetch(request, requestEnv, pagesContext = null) {
       const c = new Context(request, requestEnv);
+      if (pagesContext && typeof pagesContext.waitUntil === "function") {
+        c.__waitUntil = pagesContext.waitUntil.bind(pagesContext);
+      }
       let res;
       try {
         res = await app.dispatch(c);

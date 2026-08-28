@@ -450,8 +450,16 @@ function privacy(ctx) {
       <p>Where you sign in to the GoyHub desktop application, we may collect information the application needs
       to function — such as your linked game profile identifier, match statistics it retrieves on your behalf,
       saved configuration profiles, application version, and diagnostic and crash information.</p>
-      <h3>3.4 Correspondence</h3>
-      <p>If you contact us by email or through a support channel, we keep the message, your contact details and
+      <h3>3.4 Support tickets</h3>
+      <p>When you open a support ticket — with an account or without one — we collect and store:</p>
+      <ul>
+        <li><strong>What you write</strong> — the subject, every message in the conversation, and any file you attach.</li>
+        <li><strong>How to reach you</strong> — your account's email address, or, if you have no account, the address you give us. A ticket opened without an account is protected by a private link; only a hash of that link's key is stored, so we cannot reconstruct it and neither could anyone who obtained a copy of our database.</li>
+        <li><strong>Technical context</strong> — the IP address and browser user-agent the ticket was opened from, so we can investigate abuse of the support system itself.</li>
+        <li><strong>Handling data</strong> — the status, priority, topic and tags of the ticket, which staff member handled it, response times, any rating you leave, and internal notes our staff write about the ticket or about your account. Internal notes are never shown to you and are not part of your conversation.</li>
+      </ul>
+      <h3>3.5 Other correspondence</h3>
+      <p>If you contact us by email or through another channel, we keep the message, your contact details and
       our reply.</p>` },
 
     { id: 'p4', title: 'Cookies', html: `
@@ -461,6 +469,7 @@ function privacy(ctx) {
         <li><span class="mono">ghcsrf</span> — a cross-site request forgery token that protects forms from being submitted by third-party sites.</li>
         <li><span class="mono">ghflash</span> — a short-lived cookie (about 60 seconds) that carries a one-off status message between pages.</li>
         <li><span class="mono">ghterms</span> — records that you accepted the Terms, and which version, so the notice is not shown again.</li>
+        <li><span class="mono">ghtickets</span> — set only if you open a support ticket without an account. It remembers the private keys to your own tickets on this browser so you do not have to keep the emailed link to hand. <span class="mono">HttpOnly</span>, expires after about four months, and holds nothing but those keys. Deleting it does not delete your tickets — you will simply need the link we emailed you.</li>
       </ul>
       <p>These cookies are required for the Service to work; blocking them will prevent you from signing in or
       submitting forms. You can delete cookies through your browser settings at any time.</p>` },
@@ -488,10 +497,40 @@ function privacy(ctx) {
       <p>Do not post personal information — yours or anyone else's — that you do not want to be public and
       permanent. We are not responsible for information you choose to disclose publicly.</p>` },
 
+    { id: 'p7', title: 'Support tickets & AI assistance', html: `
+      <h3>7.1 Who can see your ticket</h3>
+      <p>A support ticket is private between you and our staff. It is not public, it is not indexed, and it is
+      not shown on your profile. Staff can see it; other members cannot.</p>
+      <p>If you opened the ticket without an account, anyone holding the private link can read and reply to it.
+      Treat that link like a password: do not post it publicly or share it with anyone you would not want
+      reading the conversation. You can have a fresh link emailed to you at any time, which retires the old one.</p>
+      <h3>7.2 AI assistance</h3>
+      <p>Where the operator of this site has configured it, we use Google's Gemini API to help us handle
+      tickets. Specifically, the text of your ticket may be sent to Google in order to:</p>
+      <ul>
+        <li>suggest help-centre articles that might solve your problem before you even send the ticket;</li>
+        <li>sort the ticket into a topic and priority, and flag obvious spam;</li>
+        <li>write a summary and draft replies <em>for a member of staff to read, edit and decide on</em>.</li>
+      </ul>
+      <p><strong>A reply is never sent to you by an AI.</strong> Every message you receive on a ticket was
+      written or approved and sent by a person.</p>
+      <p>Before any text leaves this site it is passed through an automatic filter that masks things that look
+      like credentials — long tokens, API keys, wallet addresses, anything written after "password:". That
+      filter is a safety net, not a guarantee: please do not put passwords, licence keys, recovery phrases or
+      private keys in a support ticket in the first place. We will never ask you for them.</p>
+      <p>Attachments are never sent to the AI provider — only the text of the conversation is.</p>
+      <p>If you would rather your ticket were not processed this way, say so in your first message and we will
+      handle it manually.</p>
+      <h3>7.3 Staff alerts</h3>
+      <p>Where configured, a short notification may be sent to our staff's internal chat when a ticket is
+      opened or escalated. It contains the ticket reference, subject, topic, priority and who opened it — not
+      the contents of your messages.</p>` },
+
     { id: 'p8', title: 'Sharing & disclosure', html: `
       <p>We do not sell your personal data. We may share it in the following circumstances:</p>
       <ul>
         <li><strong>Service providers.</strong> Hosting, storage, content delivery, email delivery, error monitoring, analytics and security providers who process data on our instructions in order to run the Service.</li>
+        <li><strong>AI processing.</strong> Where the operator has enabled it, support ticket text is sent to Google (Gemini API) for the purposes described in section 7.2. Attachments are not.</li>
         <li><strong>Legal and safety.</strong> Where we believe in good faith that disclosure is required by applicable law, regulation, legal process or governmental request, or is reasonably necessary to enforce our Terms, investigate suspected fraud or abuse, or protect the rights, property or safety of us, our users or the public.</li>
         <li><strong>Business transfers.</strong> In connection with a merger, acquisition, reorganisation, financing, or sale of all or part of our business or assets, in which case your data may be transferred to the counterparty subject to this policy.</li>
         <li><strong>Affiliates.</strong> With companies under common ownership or control with us, for the purposes described in this policy.</li>
@@ -505,6 +544,8 @@ function privacy(ctx) {
         <li><strong>Account data</strong> — for as long as your account is open, and afterwards where we need it for security, legal or dispute-resolution purposes.</li>
         <li><strong>Session records</strong> — deleted automatically when they expire, and immediately when you sign out or are banned.</li>
         <li><strong>Forum content</strong> — retained indefinitely as part of the public record of the forum, including after an account is closed.</li>
+        <li><strong>Support tickets</strong> — kept while the ticket is open and afterwards for as long as we may need it to handle a related dispute, payment query or abuse investigation. If you delete your account, the ticket survives, but the account link, your email address and the IP address on it are removed and every message is re-attributed to <span class="mono">[deleted]</span>.</li>
+        <li><strong>Ticket attachments</strong> — the file contents are deleted on a schedule after the ticket is closed (six months by default); the record that a file was attached, and when, remains on the conversation.</li>
         <li><strong>Correspondence</strong> — for as long as needed to handle your request and keep a record of it.</li>
       </ul>
       <p>Where we no longer need data in identifiable form, we may anonymise it and keep it as aggregate

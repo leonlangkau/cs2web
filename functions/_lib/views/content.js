@@ -22,6 +22,11 @@ const FAQ_ITEMS = [
   ['I forgot my password.',
     `If you're still signed in somewhere, change it from your profile page. Otherwise contact support from
      the email address on your account and we'll verify it's you.`],
+  ['I need help with something — where do I go?',
+    `The help centre at /help has step-by-step fixes for the things that break most often, and every
+     page ends with a way to reach a human. Support tickets are open to everyone: free accounts, paid
+     members, and visitors with no account at all. Each ticket is a live chat thread, so you can
+     keep talking to the same person in the same place.`],
   ['How do I report a rule-breaking post?',
     `Every forum post has a Report control underneath it. Reports go straight to the moderation queue,
      and you won't be named to the person you reported.`],
@@ -32,6 +37,13 @@ const FAQ_ITEMS = [
 ];
 
 const CHANGELOG = [
+  ['1.1.0', '2026-08-28', 'Help centre and support desk', [
+    'New help centre at /help: browsable, searchable runbooks that solve the common problems before you have to ask.',
+    'Support tickets for everyone — free accounts, paid members, and visitors with no account at all.',
+    'Every ticket is a live chat thread with a real person, with screenshots and log files attached.',
+    'Rate a ticket when it is done, and tell us whether a help article actually helped.',
+    'Staff side: a full ticket queue with priorities, SLA timers, assignment, tags, canned replies, internal notes and optional AI summaries and reply drafts.',
+  ]],
   ['1.0.0', '2026-08-24', 'Initial public release', [
     'Match stats and heatmaps, crosshair & config manager, FPS presets, skin tracker.',
     'Community forum with categories, search, member profiles and a live shoutbox.',
@@ -52,8 +64,11 @@ function faq(ctx) {
         <p>${esc(a).replace(/\s+/g, ' ')}</p>
       </details>`)}
     </div>
-    <p class="muted">Still stuck? Ask in the <a href="/forum/c/support">Support forum</a> or email
-      ${emailLink(ctx.company.contactEmail)}.</p>
+    <p class="muted">This page covers the basics. The <a href="/help">help centre</a> has the full
+      runbooks, and if none of them fix it, <a href="/support/new">open a support ticket</a> — every
+      account can, free ones included, and you can even do it without an account at all.</p>
+    <p class="fineprint">Prefer email? ${emailLink(ctx.company.contactEmail)} — though a ticket gets
+      you a live thread and a tracked reference.</p>
   </div>
 </div>`;
   return page(ctx, { title: 'FAQ', body });

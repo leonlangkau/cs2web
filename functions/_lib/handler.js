@@ -55,5 +55,5 @@ export async function handle(context) {
     appInstance = createApp({ env, resolveDb: (c) => createD1Adapter(c.env.DB) });
   }
 
-  return appInstance.fetch(request, env);
+  return appInstance.fetch(request, env, context);
 }

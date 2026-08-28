@@ -304,4 +304,216 @@ CREATE TABLE IF NOT EXISTS chain_transfers (
 );
 CREATE INDEX IF NOT EXISTS idx_chain_transfers_status ON chain_transfers(status);
 CREATE INDEX IF NOT EXISTS idx_chain_transfers_order ON chain_transfers(order_id);
+
+-- ============================================================================
+-- Support: help centre, tickets, live chat, staff notes, macros, attachments.
+--
+-- The help centre is the "try this first" layer: every route into support
+-- funnels through it, so the ticket queue only receives what self-service
+-- could not answer. Sections hold articles; articles count their own views
+-- and yes/no helpfulness so the queue can be steered by what actually
+-- deflects. Both are admin-editable — no redeploy to fix a help page.
+-- ============================================================================
+
+CREATE TABLE IF NOT EXISTS help_sections (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  slug        TEXT NOT NULL UNIQUE,
+  name        TEXT NOT NULL,
+  description TEXT NOT NULL DEFAULT '',
+  icon        TEXT NOT NULL DEFAULT '',
+  position    INTEGER NOT NULL DEFAULT 0,
+  created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- \`body\` is stored as the site's small, safe markup dialect (blank-line
+-- paragraphs, "## " headings, "- " bullets, "1. " steps, \`code\`, \`\`\` fences,
+-- [text](/path) links) and rendered by renderArticle() in kb.js — never as
+-- raw HTML, so an article can't smuggle script into a page.
+CREATE TABLE IF NOT EXISTS help_articles (
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  section_id   INTEGER NOT NULL REFERENCES help_sections(id) ON DELETE CASCADE,
+  slug         TEXT NOT NULL UNIQUE,
+  title        TEXT NOT NULL,
+  summary      TEXT NOT NULL DEFAULT '',
+  body         TEXT NOT NULL,
+  keywords     TEXT NOT NULL DEFAULT '',
+  position     INTEGER NOT NULL DEFAULT 0,
+  pinned       INTEGER NOT NULL DEFAULT 0,
+  published    INTEGER NOT NULL DEFAULT 1,
+  views        INTEGER NOT NULL DEFAULT 0,
+  helpful_yes  INTEGER NOT NULL DEFAULT 0,
+  helpful_no   INTEGER NOT NULL DEFAULT 0,
+  created_at   TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at   TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_help_articles_section ON help_articles(section_id, position);
+CREATE INDEX IF NOT EXISTS idx_help_articles_published ON help_articles(published, pinned, views);
+
+-- One support conversation. Openable by ANY tier including Free, and by
+-- logged-out guests: a guest ticket carries no user_id, only guest_email plus
+-- \`key_hash\` — the SHA-256 of a single-use-secret access key handed out once
+-- at creation. Only the hash is stored, exactly like sessions and auth
+-- tokens, so a database leak cannot be replayed into someone's ticket.
+--
+-- SLA columns are milliseconds since epoch (the same convention as
+-- users.paid_until and payments.credited_at) because they are compared
+-- against Date.now() on every queue render; the human-readable timestamps
+-- stay in created_at/updated_at.
+CREATE TABLE IF NOT EXISTS tickets (
+  id                INTEGER PRIMARY KEY AUTOINCREMENT,
+  ref               TEXT NOT NULL UNIQUE,
+  user_id           INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  guest_email       TEXT,
+  guest_name        TEXT,
+  key_hash          TEXT,
+  subject           TEXT NOT NULL,
+  category          TEXT NOT NULL DEFAULT 'other',
+  status            TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open','pending','answered','solved','closed')),
+  priority          TEXT NOT NULL DEFAULT 'normal' CHECK (priority IN ('low','normal','high','urgent')),
+  assignee_id       INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  assignee_name     TEXT,
+  tags              TEXT NOT NULL DEFAULT '',
+  source            TEXT NOT NULL DEFAULT 'web',
+  article_slug      TEXT,
+  app_version       TEXT,
+  locale            TEXT,
+  spam              INTEGER NOT NULL DEFAULT 0,
+  ai_summary        TEXT,
+  ai_summary_at     INTEGER,
+  ai_classified_at  INTEGER,
+  merged_into       INTEGER REFERENCES tickets(id) ON DELETE SET NULL,
+  first_response_at INTEGER,
+  sla_due_at        INTEGER,
+  sla_breached      INTEGER NOT NULL DEFAULT 0,
+  last_user_at      INTEGER,
+  last_staff_at     INTEGER,
+  user_unread       INTEGER NOT NULL DEFAULT 0,
+  staff_unread      INTEGER NOT NULL DEFAULT 0,
+  closed_at         INTEGER,
+  closed_by         TEXT,
+  rating            INTEGER,
+  rating_comment    TEXT,
+  rating_at         INTEGER,
+  ip                TEXT,
+  user_agent        TEXT,
+  created_at        TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at        TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_tickets_user ON tickets(user_id, id);
+CREATE INDEX IF NOT EXISTS idx_tickets_status ON tickets(status, priority, id);
+CREATE INDEX IF NOT EXISTS idx_tickets_assignee ON tickets(assignee_id, status);
+CREATE INDEX IF NOT EXISTS idx_tickets_sla ON tickets(sla_breached, sla_due_at);
+CREATE INDEX IF NOT EXISTS idx_tickets_updated ON tickets(updated_at);
+
+-- The conversation itself — this is what the live chat polls. It holds ONLY
+-- what the requester is allowed to read: staff-private text lives in
+-- ticket_notes and staff-private history in ticket_events, so no query bug in
+-- this table can leak an internal note to a customer.
+CREATE TABLE IF NOT EXISTS ticket_messages (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  ticket_id   INTEGER NOT NULL REFERENCES tickets(id) ON DELETE CASCADE,
+  author_id   INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  author_name TEXT NOT NULL,
+  author_role TEXT NOT NULL CHECK (author_role IN ('user','staff','system')),
+  body        TEXT NOT NULL,
+  via         TEXT NOT NULL DEFAULT 'web',
+  ai_assisted INTEGER NOT NULL DEFAULT 0,
+  created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_ticket_messages_ticket ON ticket_messages(ticket_id, id);
+
+-- Internal notes on a ticket. Never joined into any user-facing query.
+CREATE TABLE IF NOT EXISTS ticket_notes (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  ticket_id   INTEGER NOT NULL REFERENCES tickets(id) ON DELETE CASCADE,
+  author_id   INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  author_name TEXT NOT NULL,
+  body        TEXT NOT NULL,
+  created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_ticket_notes_ticket ON ticket_notes(ticket_id, id);
+
+-- Staff notes that follow the MEMBER rather than one ticket: previous
+-- refunds, warnings, "verified owner of the Steam account", and so on.
+-- Surfaced in the ticket sidebar and on the admin Users tab.
+CREATE TABLE IF NOT EXISTS user_notes (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  author_id   INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  author_name TEXT NOT NULL,
+  body        TEXT NOT NULL,
+  pinned      INTEGER NOT NULL DEFAULT 0,
+  created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_user_notes_user ON user_notes(user_id, pinned, id);
+
+-- Structured, staff-only ticket history: status/priority/assignment changes,
+-- merges, SLA breaches, AI actions. Kept apart from ticket_messages so the
+-- customer's transcript stays a conversation, not an audit log.
+CREATE TABLE IF NOT EXISTS ticket_events (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  ticket_id   INTEGER NOT NULL REFERENCES tickets(id) ON DELETE CASCADE,
+  actor_name  TEXT NOT NULL,
+  kind        TEXT NOT NULL,
+  detail      TEXT NOT NULL DEFAULT '',
+  created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_ticket_events_ticket ON ticket_events(ticket_id, id);
+
+-- Screenshots and logs. Stored base64 in D1 (no R2 binding is required to
+-- deploy this site) and therefore hard-capped well under D1's 1 MB per-value
+-- ceiling. Served back only through /support/attachments/:id, which re-checks
+-- ticket access, forces a content-type from a short allowlist and sends
+-- everything that is not a verified image as a download.
+CREATE TABLE IF NOT EXISTS ticket_attachments (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  ticket_id     INTEGER NOT NULL REFERENCES tickets(id) ON DELETE CASCADE,
+  message_id    INTEGER REFERENCES ticket_messages(id) ON DELETE CASCADE,
+  uploader_id   INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  uploader_name TEXT NOT NULL,
+  uploader_role TEXT NOT NULL DEFAULT 'user',
+  filename      TEXT NOT NULL,
+  mime          TEXT NOT NULL,
+  bytes         INTEGER NOT NULL,
+  data          TEXT NOT NULL,
+  -- Set when the bytes are dropped by the retention sweep. The row survives so
+  -- the conversation still records that a screenshot existed and when, which is
+  -- what a later dispute actually needs.
+  purged_at     INTEGER,
+  created_at    TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_ticket_attachments_ticket ON ticket_attachments(ticket_id, id);
+CREATE INDEX IF NOT EXISTS idx_ticket_attachments_message ON ticket_attachments(message_id);
+CREATE INDEX IF NOT EXISTS idx_ticket_attachments_purge ON ticket_attachments(purged_at, created_at);
+
+-- Canned replies. \`set_status\` / \`set_priority\` / \`set_tags\` let one click
+-- both write the reply and move the ticket, which is what makes a macro worth
+-- more than copy-paste.
+CREATE TABLE IF NOT EXISTS support_macros (
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  title        TEXT NOT NULL,
+  body         TEXT NOT NULL,
+  category     TEXT NOT NULL DEFAULT '',
+  set_status   TEXT,
+  set_priority TEXT,
+  set_tags     TEXT,
+  position     INTEGER NOT NULL DEFAULT 0,
+  active       INTEGER NOT NULL DEFAULT 1,
+  uses         INTEGER NOT NULL DEFAULT 0,
+  created_at   TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at   TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_support_macros_active ON support_macros(active, position);
+
+-- Saved queue filters. owner_id NULL = shared with the whole staff.
+CREATE TABLE IF NOT EXISTS support_views (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  name       TEXT NOT NULL,
+  query      TEXT NOT NULL,
+  owner_id   INTEGER REFERENCES users(id) ON DELETE CASCADE,
+  position   INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_support_views_owner ON support_views(owner_id, position);
 `;

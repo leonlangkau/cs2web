@@ -13,7 +13,7 @@ import { tooMany } from "./routes-main.js";
 import { btcpayConfig } from "./btcpay.js";
 import { onchainConfig, reconcileForUser as reconcileChainForUser } from "./onchain.js";
 import { reconcileForUser } from "./fulfil.js";
-import { DELETED_USERNAME, deletedUserId } from "./bootstrap.js";
+import { DELETED_USERNAME, deletedUserId, scrubSupportIdentity } from "./bootstrap.js";
 
 function register(app) {
   app.get('/profile', async (c) => {
@@ -174,6 +174,7 @@ function register(app) {
     await db.run('UPDATE threads SET user_id = ? WHERE user_id = ?', placeholder, user.id);
     await db.run('UPDATE posts SET user_id = ? WHERE user_id = ?', placeholder, user.id);
     await db.run('DELETE FROM shouts WHERE user_id = ?', user.id);
+    await scrubSupportIdentity(db, user.id, DELETED_USERNAME);
     await destroyUserSessions(db, user.id);
     await db.run('DELETE FROM users WHERE id = ?', user.id);
     await destroySession(c); // clears the cookie; the session row is already gone

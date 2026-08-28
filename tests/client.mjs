@@ -34,10 +34,35 @@ export function makeClient(app, env) {
     store(res);
     return res;
   };
+  /**
+   * Multipart POST, for the routes that accept file uploads. req() above
+   * hardcodes urlencoded, so this builds the Request itself — FormData sets
+   * its own content-type boundary and must not be overridden.
+   */
+  const postForm = async (path, fields = {}, files = [], extraHeaders = {}) => {
+    const form = new FormData();
+    form.append("_csrf", jar.get("ghcsrf") || "");
+    for (const [k, v] of Object.entries(fields)) form.append(k, v);
+    for (const { field, name, bytes, type } of files) {
+      form.append(field || "files", new File([bytes], name, { type: type || "application/octet-stream" }));
+    }
+    const res = await app.fetch(
+      new Request("http://local" + path, {
+        method: "POST",
+        headers: { cookie: cookieHeader(), ...extraHeaders },
+        body: form,
+      }),
+      env
+    );
+    store(res);
+    return res;
+  };
+
   return {
     jar,
     get: (p, extraHeaders) => req("GET", p, undefined, extraHeaders),
     post: (p, b = {}, extraHeaders) => req("POST", p, { _csrf: jar.get("ghcsrf") || "", ...b }, extraHeaders),
+    postForm,
     raw: (m, p, b, extraHeaders) => req(m, p, b, extraHeaders),
   };
 }

@@ -1,8 +1,9 @@
 # GoyHub — CS2 Companion Website
 
 Full website for the GoyHub CS2 companion app: animated landing page with gated
-download, community forum, account system with IP audit logging, a self-hosted
-proof-of-work CAPTCHA, and a secured admin backend.
+download, community forum, a help centre and support desk with live chat,
+account system with IP audit logging, a self-hosted proof-of-work CAPTCHA, and a
+secured admin backend.
 
 A **Cloudflare Pages project** — static `public/` plus one catch-all Pages
 Function backed by **D1**. Deploys with default settings, no build step. See
@@ -20,7 +21,7 @@ functions/
 └─ _lib/                 router, middleware, routes, views, D1 adapter, crypto
 schema.sql               D1 schema
 scripts/                 build-schema.cjs, build-installer.cjs
-tests/                   node --test smoke suite (drives the same app code)
+tests/                   node --test suites (drive the same app code)
 wrangler.toml            Pages + D1 config
 ```
 
@@ -89,6 +90,51 @@ Copy `.dev.vars.example` to `.dev.vars` and set `CAPTCHA_SECRET` and
 - Loader API: `POST /api/loader/auth` (username+password → tier + signed
   license) and `POST /api/loader/verify` (server-side check, live tier)
 
+### Help centre & support desk
+- **`/help` — the "try this first" layer.** Admin-editable sections and articles,
+  written as runbooks (the fix first, the explanation after), with search over
+  titles, curated keywords and bodies. Every article ends in *"Did this solve
+  it?"*, and a **No** goes straight into a ticket pre-filled with which article
+  failed — so the queue tells you which pages to rewrite
+- **Tickets are open to everyone.** Any tier including Free, *and* visitors with
+  no account at all. Guests pass the same proof-of-work CAPTCHA and honeypot as
+  sign-up and get back a private ticket link; only a hash of its key is stored,
+  like sessions and password-reset tokens. The link is remembered in an HttpOnly
+  cookie so a returning guest never needs it again, and can be re-issued by email
+- **Every ticket is a live chat.** 3-second polling while the tab is visible,
+  paused when hidden, catch-up on focus — the same pattern as the shoutbox, no
+  extra infrastructure. With JavaScript off it is an ordinary form and the whole
+  flow still works
+- **Attachments** — screenshots and log files, size-capped and stored in D1 (no R2
+  binding needed). The stored content type is decided from the file's magic bytes,
+  never the browser's header; the allowlist contains nothing a browser executes
+  (no SVG, no HTML), and anything that is not a verified raster image is served
+  as a download with `Content-Disposition: attachment` and its own locked-down CSP
+- **Admin → Support** — the queue with filters, search and saved views; a ticket
+  workspace holding the live chat, **internal notes** (a separate table, so no
+  query bug can leak one to a customer), **staff notes on the member** that follow
+  the account across tickets, assignment, tags, priority, status, merge, and
+  spam quarantine that hides without deleting
+- **Canned replies** that send the message *and* move the ticket — status,
+  priority and tags in one click
+- **SLA timers** per priority with a breach view. There is no cron on Pages, so
+  the clock is reconciled by a bounded, idempotent sweep whenever staff open the
+  queue (or via `GET /api/support/sweep?key=…` for an external cron)
+- **CSAT** — a 1–5 rating after a ticket is solved, settable once, by the
+  requester only
+- **Gemini Flash assist (optional)** — a one-click thread summary, 2–3 reply
+  drafts a human edits and sends, "try this first" re-ranking on the contact
+  form, and automatic topic/priority/language/spam triage. Ticket text is fenced
+  as untrusted data and passed through a credential redactor before it leaves
+  the site; every value the model returns is re-validated against our own
+  allowlists. **The AI never sends anything to a customer** — a human presses
+  send. Unset `GEMINI_API_KEY` and everything above simply isn't there; nothing
+  else changes
+- **Notifications** — the requester is emailed when a ticket opens and when staff
+  reply (reusing the existing provider, silently off without one), and a
+  Discord-compatible webhook can ping your staff channel on new tickets,
+  escalations and SLA breaches
+
 ### Forum
 - Categories → threads → replies, with views, pinning, locking and pagination
 - Search, member profiles (`/u/name`), live shoutbox, post editing (30-minute
@@ -114,6 +160,28 @@ server-clock minimum time, and DB-backed per-IP rate limits.
 
 > Raises the cost of mass automated sign-ups and filters commodity bots. **Not**
 > an identity proof — an attacker driving a real browser can pass it.
+
+### Support ticketing internals
+
+Three things carry the security of the support desk, and they are worth knowing
+before changing anything in `functions/_lib/support.js`:
+
+1. **One access decision.** `checkAccess(c, ticket, key)` is the only
+   authorisation answer in the feature. Staff pass by session; a member owner
+   passes only on a `user_id` match; the guest-key path is consulted *only* when
+   the ticket has a `key_hash`. A member ticket is therefore unreachable with a
+   key and a guest ticket unreachable by merely being signed in — the two paths
+   never cross.
+2. **Staff-private text lives in different tables.** `ticket_messages` holds only
+   what the requester may read. Internal notes are in `ticket_notes` and staff
+   history in `ticket_events`, and neither name appears anywhere in
+   `routes-support.js`. "Don't leak the note" is a property of the schema, not a
+   rule someone has to remember in a `WHERE` clause.
+3. **The AI is a suggestion layer with hard edges.** It writes nothing a human
+   cannot undo in one click, triage runs once per ticket (`WHERE
+   ai_classified_at IS NULL`), deflection can only reorder a shortlist the
+   database produced — so it cannot invent an article — and drafts are never
+   stored or sent.
 
 ### Terms acceptance gate
 A blocking dialog on first visit. Accepting sets a versioned cookie and writes a
@@ -149,6 +217,16 @@ Set as `[vars]`/secrets in `wrangler.toml` / the Pages dashboard (see DEPLOY.md)
 | `ETHERSCAN_API_KEY`* / `SOLANA_RPC_URL`* / `COINGECKO_API_KEY`* | unset (keyless defaults) | Optional higher-limit chain and price providers. All read-only |
 | `CRYPTO_PAY_URL` / `CRYPTO_PAY_ADDRESSES` / `PAID_PRICE` | unset | Fallback checkout when BTCPay isn't configured (hosted link / manual addresses / price string) |
 | `EMAIL_PROVIDER` + `EMAIL_API_KEY` + `EMAIL_FROM` | unset (disabled) | Outbound email: `cloudflare` (Email Service SMTPS relay) / `resend` / `sendgrid` / `mailchannels` |
+| `SITE_URL` | unset | Absolute base URL. Needed for clickable links in support emails and Discord alerts — without it they fall back to bare paths |
+| `GEMINI_API_KEY`* / `GEMINI_MODEL` | unset / `gemini-2.5-flash` | Google AI Studio key for the support desk's AI assist (the free tier is enough). Unset = no AI anywhere, and every AI-backed feature degrades to its non-AI path. A rejected model name automatically retries once on `gemini-2.0-flash` |
+| `SUPPORT_AI_ASSIST` / `SUPPORT_AI_DEFLECT` / `SUPPORT_AI_CLASSIFY` | `1` | Turn the three AI uses on/off individually: staff summary + drafts, "try this first" re-ranking, automatic triage |
+| `SUPPORT_WEBHOOK_URL`* | unset | Discord-compatible webhook for new tickets, escalations and SLA breaches. Must be `https` |
+| `SUPPORT_SWEEP_SECRET`* | unset | Lets an external cron call `GET /api/support/sweep?key=…` so SLA breaches are stamped and stale tickets closed while nobody is in the panel. Unset closes the endpoint |
+| `SUPPORT_GUEST_TICKETS` | `1` | `0` requires an account (any tier, Free included) to open a ticket |
+| `SUPPORT_SLA_*_HOURS` | `72`/`24`/`8`/`2` | First-response target per priority (low/normal/high/urgent) |
+| `SUPPORT_ATTACH_MAX_KB` / `SUPPORT_ATTACH_MAX_COUNT` | `512` / `4` | Per file (max 600 — D1 caps a value at 1 MB and base64 inflates by a third) and per message; count `0` disables attachments |
+| `SUPPORT_ATTACH_RETAIN_DAYS` / `SUPPORT_AUTOCLOSE_DAYS` | `180` / `7` | When a closed ticket's attachment bytes are dropped (the record that a file existed stays), and when a solved ticket nobody returned to is closed. `0` disables either |
+| `SUPPORT_EMAIL_NOTIFY` | `1` | Email the requester when a ticket opens and when staff reply (needs `EMAIL_*`) |
 | `TURNSTILE_SITE_KEY` / `TURNSTILE_SECRET_KEY` | unset | Optional Cloudflare Turnstile on signup |
 | `LICENSE_SECRET` | falls back to `CAPTCHA_SECRET` | Signs loader license tokens |
 | `COMPANY_*` | placeholders | Registered entity on the legal pages |

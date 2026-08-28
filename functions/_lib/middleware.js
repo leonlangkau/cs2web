@@ -14,7 +14,7 @@ const TERMS_COOKIE = 'ghterms';
 const SESSION_DAYS = 7;
 
 /** Bump when the Terms change materially — everyone is asked to accept again. */
-const TERMS_VERSION = '2026-08-24';
+const TERMS_VERSION = '2026-08-28';
 const TERMS_GATE_EXEMPT = new Set(['/terms', '/privacy', '/legal/accept']);
 
 /** btoa()/atob() only accept Latin1, but flash messages carry arbitrary text
@@ -384,6 +384,21 @@ function acceptTerms(c) {
   }));
 }
 
+/**
+ * Runs a side-effect (an email, a webhook, an AI call) without making the
+ * visitor wait for it. On Cloudflare that is the Pages `waitUntil`; the Node
+ * test harness has none, so it is simply awaited — which also keeps the tests
+ * deterministic. Never rejects: a failed notification must not fail the
+ * request that triggered it.
+ */
+async function defer(c, promise) {
+  const waitUntil = c.get('waitUntil');
+  const guarded = Promise.resolve(promise)
+    .catch((err) => console.warn('deferred task failed:', err && err.message));
+  if (typeof waitUntil === 'function') { waitUntil(guarded); return; }
+  await guarded;
+}
+
 /** Retrieves the parsed form body (csrfProtection already parsed it on writes). */
 async function formBody(c) {
   const cached = c.get('body');
@@ -458,6 +473,6 @@ export {
   SESSION_COOKIE, CSRF_COOKIE, FLASH_COOKIE, TERMS_COOKIE, TERMS_VERSION,
   wwwRedirect, securityHeaders, loadContext, csrfProtection, termsGate, ipBanGate, floodProtection,
   createSession, destroySession, destroyUserSessions,
-  acceptTerms, setFlash, formBody, requireAuth, requireAdmin, requireStaff, requireTier,
+  acceptTerms, setFlash, formBody, defer, requireAuth, requireAdmin, requireStaff, requireTier,
   requireVerifiedEmail, clientIp, userAgent, audit, cookieOptions,
 };

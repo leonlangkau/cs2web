@@ -1,6 +1,6 @@
 import * as views from "./views/admin.js";
 import * as site from "./views/site.js";
-import { DELETED_USERNAME, deletedUserId, relocateUserId, RESERVED_UID_MAX } from "./bootstrap.js";
+import { DELETED_USERNAME, deletedUserId, relocateUserId, scrubSupportIdentity, RESERVED_UID_MAX } from "./bootstrap.js";
 import { requireAdmin, requireStaff, destroyUserSessions, audit, formBody, setFlash, clientIp } from "./middleware.js";
 import { TIERS, TIER_LABELS, STAFF_TIERS, isFullAdmin } from "./tiers.js";
 import { hashPassword } from "./crypto.js";
@@ -24,7 +24,8 @@ const LOG_EVENTS = ['signup', 'login', 'login_failed', 'login_blocked', 'logout'
   'admin_action', 'captcha_failed', 'terms_accepted', 'password_changed', 'loader_auth', 'loader_auth_failed',
   'ip_autoban', 'signup_surge_blocked', 'post_reported', 'email_changed', 'account_deleted',
   'password_reset_requested', 'password_reset', 'email_verified', 'shout_deleted',
-  'chain_order_created', 'chain_order_failed', 'chain_tx_submitted', 'chain_payment_rejected'];
+  'chain_order_created', 'chain_order_failed', 'chain_tx_submitted', 'chain_payment_rejected',
+  'ticket_opened', 'ticket_key_reissued'];
 
 // High-volume, low-signal events — routine traffic rather than something an
 // admin needs to review. Excluded by the "Important only" log filter so a
@@ -32,7 +33,7 @@ const LOG_EVENTS = ['signup', 'login', 'login_failed', 'login_blocked', 'logout'
 // moderation/security events. An allowlist would rot silently as new event
 // types are added; this blacklist fails safe — anything new stays visible.
 const NOISY_EVENTS = new Set(['login', 'logout', 'download', 'captcha_failed', 'terms_accepted',
-  'loader_auth', 'shout_deleted']);
+  'loader_auth', 'shout_deleted', 'ticket_opened']);
 
 const IP_HIDDEN = '(hidden)';
 
@@ -131,6 +132,8 @@ function register(app) {
       ipBans: await one('SELECT COUNT(*) AS n FROM ip_bans'),
       openReports: await one("SELECT COUNT(*) AS n FROM reports WHERE status = 'open'"),
       fingerprints: await one('SELECT COUNT(DISTINCT fp_hash) AS n FROM fingerprints'),
+      openTickets: await one("SELECT COUNT(*) AS n FROM tickets WHERE status IN ('open','pending') AND spam = 0 AND merged_into IS NULL"),
+      breachedTickets: await one('SELECT COUNT(*) AS n FROM tickets WHERE sla_breached = 1 AND first_response_at IS NULL'),
     };
     const { maskUser, maskLog } = await adminIpMask(c);
     const recentLogs = (await db.all('SELECT * FROM ip_logs ORDER BY id DESC LIMIT 12')).map(maskLog);
@@ -811,6 +814,7 @@ function register(app) {
     const placeholder = await deletedUserId(db);
     const threads = await db.run('UPDATE threads SET user_id = ? WHERE user_id = ?', placeholder, user.id);
     const posts = await db.run('UPDATE posts SET user_id = ? WHERE user_id = ?', placeholder, user.id);
+    await scrubSupportIdentity(db, user.id, DELETED_USERNAME);
     await db.run('DELETE FROM users WHERE id = ?', user.id);
     await adminAudit(c, `deleted user #${user.id} (${user.username}); reassigned ${threads.changes} threads and ${posts.changes} posts to ${DELETED_USERNAME}`);
     setFlash(c, 'success', `${user.username} has been deleted. Their posts remain, attributed to ${DELETED_USERNAME}.`);
@@ -1115,4 +1119,4 @@ function register(app) {
   });
 }
 
-export { register, LOG_EVENTS };
+export { register, LOG_EVENTS, adminIpMask };

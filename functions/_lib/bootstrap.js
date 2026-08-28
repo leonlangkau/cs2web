@@ -1,4 +1,5 @@
-import { hashPassword, verifyPassword, newToken } from "./crypto.js";
+import { hashPassword, verifyPassword, newToken, sha256hex } from "./crypto.js";
+import { seedHelpCentre, seedMacros } from "./kb.js";
 
 /**
  * Reserved account that inherits the threads and posts of a deleted user, so
@@ -75,6 +76,13 @@ const USER_REF_COLUMNS = [
   ['threads', 'user_id'], ['posts', 'user_id'], ['shouts', 'user_id'],
   ['sessions', 'user_id'], ['auth_tokens', 'user_id'],
   ['ip_logs', 'user_id'], ['reports', 'reporter_id'],
+  // Support. user_notes.user_id cascades on delete, so a UID move that did not
+  // repoint it would silently destroy a member's staff notes.
+  ['tickets', 'user_id'], ['tickets', 'assignee_id'],
+  ['ticket_messages', 'author_id'], ['ticket_notes', 'author_id'],
+  ['ticket_attachments', 'uploader_id'],
+  ['user_notes', 'user_id'], ['user_notes', 'author_id'],
+  ['support_views', 'owner_id'],
 ];
 
 /**
@@ -174,12 +182,39 @@ async function ensurePaymentPlanColumns(db) {
   }
 }
 
-/** Runs the DDL once per process/isolate. */
+/**
+ * Marker holding a hash of the DDL that was last applied successfully.
+ *
+ * D1 has no multi-statement exec, so the adapter replays schema.sql one
+ * statement at a time — every CREATE TABLE IF NOT EXISTS and CREATE INDEX IF
+ * NOT EXISTS is its own round-trip. On a schema this size that is ~70 calls on
+ * every isolate cold start, all of them no-ops against a database that already
+ * has the tables. Recording a fingerprint of the DDL turns that into a single
+ * SELECT, while still re-running everything (including the guarded ALTERs) the
+ * moment schema.sql actually changes — so it cannot become the "CREATE TABLE
+ * IF NOT EXISTS silently did nothing" trap in a new costume.
+ */
+const SCHEMA_MARKER = 'schema_fingerprint';
+
+async function schemaFingerprint(db) {
+  try {
+    const row = await db.get('SELECT value FROM settings WHERE key = ?', SCHEMA_MARKER);
+    return row ? row.value : null;
+  } catch {
+    // `settings` itself does not exist yet — a brand-new database.
+    return null;
+  }
+}
+
+/** Runs the DDL once per process/isolate, and only when it has changed. */
 const schemaReady = new WeakMap();
 
 function ensureSchema(db) {
   if (!schemaReady.has(db)) {
     schemaReady.set(db, (async () => {
+      const fingerprint = await sha256hex(SCHEMA);
+      if (await schemaFingerprint(db) === fingerprint) return;
+
       await db.exec(SCHEMA);
       await ensureTierColumn(db);
       await ensureIpBanExpiryColumn(db);
@@ -187,6 +222,15 @@ function ensureSchema(db) {
       await ensureEmailVerifiedColumn(db);
       await ensurePaidUntilColumn(db);
       await ensurePaymentPlanColumns(db);
+
+      // Written last: a crash part-way through leaves no marker, so the next
+      // cold start does the whole thing again rather than trusting a
+      // half-applied schema.
+      await db.run(
+        `INSERT INTO settings (key, value, updated_at) VALUES (?, ?, datetime('now'))
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`,
+        SCHEMA_MARKER, fingerprint
+      );
     })());
   }
   return schemaReady.get(db);
@@ -301,7 +345,35 @@ async function seed(db, env = {}) {
     }
   }
 
+  // Help centre + canned replies. Both are one-shot: once a section (or a
+  // macro) exists the seed never runs again, so an operator who rewrites or
+  // deletes an article does not find it reinstated on the next cold start.
+  await seedHelpCentre(db);
+  await seedMacros(db);
+
   return { generatedPassword };
+}
+
+/**
+ * Removes the identifying copies a support ticket keeps outside the users
+ * table. `tickets.user_id` is ON DELETE SET NULL so the conversation itself
+ * survives the account (a payment dispute has to outlive a rage-quit), but
+ * `ticket_messages.author_name`, the guest address and the staff notes about
+ * the person are denormalised copies that a foreign key will not touch.
+ */
+async function scrubSupportIdentity(db, userId, placeholderName) {
+  await db.run(
+    'UPDATE ticket_messages SET author_name = ? WHERE author_id = ?', placeholderName, userId
+  );
+  await db.run(
+    'UPDATE ticket_attachments SET uploader_name = ? WHERE uploader_id = ?', placeholderName, userId
+  );
+  await db.run(
+    'UPDATE tickets SET guest_email = NULL, guest_name = NULL, key_hash = NULL, ip = NULL, user_agent = NULL WHERE user_id = ?',
+    userId
+  );
+  await db.run('DELETE FROM user_notes WHERE user_id = ?', userId);
+  await db.run('DELETE FROM support_views WHERE owner_id = ?', userId);
 }
 
 /** Housekeeping: expired sessions, rate-limit windows, CAPTCHA nonces and auto IP bans. */
@@ -331,6 +403,6 @@ async function cleanup(db) {
 }
 
 export {
-  ensureSchema, seed, cleanup, deletedUserId, relocateUserId,
+  ensureSchema, seed, cleanup, deletedUserId, relocateUserId, scrubSupportIdentity,
   DELETED_USERNAME, RESERVED_UID_MAX,
 };

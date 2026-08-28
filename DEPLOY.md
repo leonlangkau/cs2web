@@ -58,6 +58,9 @@ No build command is needed — the Functions are committed ready to run.
 | `ADMIN_PASSWORD` | password for the seeded admin account |
 | `ADMIN_USERNAME` | optional, defaults to `admin` |
 | `DOWNLOAD_URL` | required for the download to work (no fallback) — where the real installer lives (see "Shipping a real installer" below) |
+| `GEMINI_API_KEY` | optional — turns on the support desk's AI assist (see "The support desk" below) |
+| `SUPPORT_WEBHOOK_URL` | optional — a Discord-compatible webhook for new tickets, escalations and SLA breaches |
+| `SUPPORT_SWEEP_SECRET` | optional — lets an external cron reconcile SLA timers while nobody is in the panel |
 
 Generate a CAPTCHA secret:
 
@@ -276,6 +279,79 @@ work: [CRYPTO-SETUP.md](CRYPTO-SETUP.md).
 
 ---
 
+## The support desk
+
+`/help` and `/support` work the moment you deploy — the help centre seeds itself
+with a starter library of articles, and tickets are open to every tier including
+Free, plus visitors with no account at all. Nothing below is required; each item
+adds a capability and degrades to a sensible default when unset.
+
+### Make the links in emails and alerts clickable
+
+Set `SITE_URL` in `wrangler.toml` `[vars]`:
+
+```toml
+SITE_URL = "https://goyhub.st"
+```
+
+Without it, the ticket link in a confirmation email and the "open in admin" link
+in a Discord alert fall back to bare paths — which means a guest who loses their
+cookie cannot get back into their ticket. Set this before you announce support.
+
+### Turn on the AI assist (optional, free tier)
+
+1. Get a key at <https://aistudio.google.com/apikey> — the Gemini free tier is
+   enough for a small desk.
+2. Add it as a **Secret** named `GEMINI_API_KEY`.
+
+Staff then get a one-click thread summary and reply drafts on every ticket, the
+contact form matches what someone is typing against the help centre, and new
+tickets are triaged into a topic and priority automatically.
+
+Three switches turn the uses on and off individually — `SUPPORT_AI_ASSIST`,
+`SUPPORT_AI_DEFLECT`, `SUPPORT_AI_CLASSIFY` — and `GEMINI_MODEL` overrides the
+model (default `gemini-2.5-flash`; a rejected name retries once on
+`gemini-2.0-flash`).
+
+**What leaves your site:** the text of a ticket, with credential-shaped strings
+masked first. Attachments never do. The AI never sends anything to a customer —
+a person reads the draft, edits it and presses send. This is described in the
+Privacy Policy, section 7; if you disable AI, that section still reads correctly
+because it is written as "where the operator has configured it".
+
+### Alert your staff channel (optional)
+
+Create a Discord webhook (Server Settings → Integrations → Webhooks) and add the
+URL as the **Secret** `SUPPORT_WEBHOOK_URL`. It must be `https`. You get a
+message on a new ticket, an escalation to urgent and an SLA breach — reference,
+subject, topic, priority and who opened it, never the message contents.
+
+### Keep the SLA clock honest between visits
+
+Pages has no cron, so SLA breaches and stale-ticket closures are reconciled
+whenever staff open **Admin → Support**. If your team checks the queue rarely,
+point an external cron (cron-job.org, a GitHub Action, any uptime monitor) at:
+
+```
+https://your-site/api/support/sweep?key=YOUR_SUPPORT_SWEEP_SECRET
+```
+
+Set `SUPPORT_SWEEP_SECRET` as a Secret first; while it is unset the endpoint
+returns 404 to everyone. Hourly is plenty. The same call also expires old
+attachment bytes.
+
+### Tuning
+
+All optional, all in `wrangler.toml` `[vars]` — the comments there list every
+one with its default: `SUPPORT_GUEST_TICKETS`, `SUPPORT_SLA_*_HOURS`,
+`SUPPORT_ATTACH_MAX_KB`, `SUPPORT_ATTACH_MAX_COUNT`,
+`SUPPORT_ATTACH_RETAIN_DAYS`, `SUPPORT_AUTOCLOSE_DAYS`, `SUPPORT_EMAIL_NOTIFY`.
+
+> Attachments live in D1 as base64, so no R2 bucket is needed to deploy — but
+> the bytes do count against your database. `SUPPORT_ATTACH_RETAIN_DAYS`
+> (default 180) drops the contents of files on long-closed tickets while
+> keeping the record that they existed.
+
 ## How it's laid out
 
 ```
@@ -327,3 +403,5 @@ Other issues:
 | Query the database | `npx wrangler d1 execute goyhub --remote --command "SELECT COUNT(*) FROM users"` |
 | Re-apply schema | `npm run db:remote` |
 | Rollback | Dashboard → Deployments → **Rollback** |
+| Reconcile support SLAs | `curl "https://your-site/api/support/sweep?key=$SUPPORT_SWEEP_SECRET"` |
+| Open ticket count | `npx wrangler d1 execute goyhub --remote --command "SELECT status, COUNT(*) FROM tickets GROUP BY status"` |

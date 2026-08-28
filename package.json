@@ -1,6 +1,6 @@
 {
   "name": "goyhub-web",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "GoyHub — CS2 companion app site, community forum and secured admin backend. A Cloudflare Pages project (static public/ + one catch-all Pages Function backed by D1).",
   "type": "module",
   "private": true,

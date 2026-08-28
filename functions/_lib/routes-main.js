@@ -157,9 +157,25 @@ function register(app) {
     return c.text(`User-agent: *\nAllow: /\nDisallow: /admin\nDisallow: /api/\n\nSitemap: ${origin}/sitemap.xml\n`);
   });
 
-  app.get('/sitemap.xml', (c) => {
+  app.get('/sitemap.xml', async (c) => {
     const origin = new URL(c.req.url).origin;
-    const urls = ['/', '/download', '/upgrade', '/faq', '/changelog', '/terms', '/privacy', '/auth/signup', '/auth/login'];
+    const urls = ['/', '/download', '/upgrade', '/faq', '/changelog', '/help', '/support/new',
+      '/terms', '/privacy', '/auth/signup', '/auth/login'];
+
+    // Published help articles are the pages people actually search for, so
+    // they belong in the sitemap. Bounded, and a failure here (a database
+    // hiccup) must not take the sitemap down with it.
+    try {
+      const sections = await c.get('db').all(
+        'SELECT slug FROM help_sections ORDER BY position, id LIMIT 30'
+      );
+      urls.push(...sections.map((s) => `/help/s/${encodeURIComponent(s.slug)}`));
+      const articles = await c.get('db').all(
+        'SELECT slug FROM help_articles WHERE published = 1 ORDER BY pinned DESC, views DESC LIMIT 200'
+      );
+      urls.push(...articles.map((a) => `/help/a/${encodeURIComponent(a.slug)}`));
+    } catch { /* fall back to the static list */ }
+
     const xml = `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n`
       + urls.map((u) => `  <url><loc>${origin}${u}</loc></url>`).join('\n')
       + `\n</urlset>\n`;

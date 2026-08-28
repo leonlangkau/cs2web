@@ -49,6 +49,7 @@ function nav(ctx) {
       ${link('/', 'Home', ctx.path === '/')}
       ${link('/forum', 'Forum', ctx.path.startsWith('/forum'))}
       ${link('/download', 'Download', ctx.path.startsWith('/download'))}
+      ${link('/help', 'Support', ctx.path.startsWith('/help') || ctx.path.startsWith('/support'))}
       ${meetsTier(ctx.user, 'paid') ? '' : link('/buy', 'Upgrade', ctx.path === '/buy' || ctx.path === '/upgrade')}
       ${isStaff(ctx.user) ? link('/admin', 'Admin', ctx.path.startsWith('/admin')) : ''}
     </nav>
@@ -60,7 +61,7 @@ function nav(ctx) {
 function footer(ctx) {
   const c = ctx.company;
   const accountLinks = ctx.user
-    ? '<a href="/profile">Profile</a><a href="/upgrade">Upgrade</a><a href="/forum/new">New thread</a>'
+    ? '<a href="/profile">Profile</a><a href="/upgrade">Upgrade</a><a href="/support">Support tickets</a>'
     : '<a href="/auth/signup">Sign up</a><a href="/auth/login">Log in</a><a href="/upgrade">Upgrade</a>';
   // Fall back to the trading name so an unfilled placeholder never ships site-wide.
   const operator = c.isPlaceholder ? c.tradingName : c.legalName;
@@ -73,6 +74,8 @@ function footer(ctx) {
     </div>
     <nav aria-label="Product"><h3>Product</h3>
       <a href="/download">Download</a><a href="/#features">Features</a><a href="/changelog">Changelog</a><a href="/faq">FAQ</a></nav>
+    <nav aria-label="Support"><h3>Support</h3>
+      <a href="/help">Help centre</a><a href="/support/new">Contact support</a><a href="/support">My tickets</a></nav>
     <nav aria-label="Community"><h3>Community</h3>
       <a href="/forum">Forum</a><a href="/forum/c/support">Support</a><a href="/forum/c/configs">Configs &amp; Setups</a></nav>
     <nav aria-label="Account"><h3>Account</h3>${accountLinks}</nav>

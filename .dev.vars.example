@@ -60,3 +60,37 @@ ADMIN_PASSWORD=choose-a-strong-password
 # ETHERSCAN_API_KEY=
 # SOLANA_RPC_URL=
 # COINGECKO_API_KEY=
+
+# --- Support desk -----------------------------------------------------------
+# The help centre, ticketing and the live chat need NOTHING here. These switch
+# on the parts that reach outside the site.
+
+# Absolute base URL, used for the links inside support emails and Discord
+# alerts. Without it they fall back to bare paths.
+# SITE_URL=http://localhost:8788
+
+# Gemini Flash assist: staff-side thread summaries and reply drafts, the
+# "try this first" re-ranking on the ticket form, and automatic ticket
+# triage. Get a free key at https://aistudio.google.com/apikey.
+# Unset and every one of those degrades quietly — nothing breaks.
+# GEMINI_API_KEY=your_google_ai_studio_key
+# GEMINI_MODEL=gemini-2.5-flash
+# SUPPORT_AI_ASSIST=1
+# SUPPORT_AI_DEFLECT=1
+# SUPPORT_AI_CLASSIFY=1
+
+# Discord-compatible webhook for new tickets, escalations and SLA breaches.
+# Must be https.
+# SUPPORT_WEBHOOK_URL=https://discord.com/api/webhooks/…
+
+# Lets an external cron call GET /api/support/sweep?key=... so SLA breaches
+# get stamped and stale tickets auto-closed while nobody is in the panel.
+# SUPPORT_SWEEP_SECRET=a_long_random_string
+
+# Behaviour knobs (defaults shown).
+# SUPPORT_GUEST_TICKETS=1
+# SUPPORT_SLA_NORMAL_HOURS=24
+# SUPPORT_ATTACH_MAX_KB=512
+# SUPPORT_ATTACH_MAX_COUNT=4
+# SUPPORT_AUTOCLOSE_DAYS=7
+# SUPPORT_EMAIL_NOTIFY=1

@@ -1,13 +1,14 @@
 // GENERATED FROM public/{css,js,fonts} by scripts/build-assets.cjs — do not edit by hand.
 
 const MANIFEST = {
-  "/css/style.css": "89715bc5",
+  "/css/style.css": "427d18b1",
   "/js/boot.js": "e295cf6b",
-  "/js/captcha.js": "4253bc85",
+  "/js/captcha.js": "cb02d481",
   "/js/crypto-pay.js": "c03e40a0",
   "/js/fingerprint.js": "7c3dc35d",
   "/js/fx.js": "36af4062",
   "/js/main.js": "a04d3099",
+  "/js/support.js": "35d933e2",
   "/fonts/jetbrains-mono-var.woff2": "18be4527",
   "/fonts/space-grotesk-var.woff2": "06408904",
 };

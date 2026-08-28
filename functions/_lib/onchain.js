@@ -45,6 +45,16 @@ import { storeCurrency } from "./plans.js";
 /** How many distinct amounts a single price band is split into. */
 const TAG_SLOTS = 1000;
 
+/** Statuses that mean a human, not another scan, decides what a transfer paid for. */
+const RESOLVED_TRANSFER_STATUSES = new Set(['unmatched', 'ambiguous', 'ignored']);
+
+/**
+ * How far the chain's clock may run ahead of ours before we stop believing an
+ * order could have been paid by a given transfer. Block timestamps are miner-
+ * and validator-reported and drift by seconds, not minutes.
+ */
+const ORDER_CLOCK_GRACE_SECONDS = 600;
+
 /** Solana scans cost one RPC round trip per unseen signature — keep it bounded. */
 const MAX_TX_LOOKUPS_PER_SCAN = 12;
 
@@ -273,10 +283,27 @@ async function matchTransfer(c, cfg, transfer, { now = Date.now(), source = 'sca
   if (!asset) return { reason: 'unknown_asset' };
   if (transfer.status === 'credited') return { reason: 'already' };
 
+  // A transfer that has already been ruled unattributable stays that way. Order
+  // amounts are assigned randomly, so a later order "matching" an older stray
+  // deposit is coincidence, never truth — and auto-crediting on that coincidence
+  // would hand one person's money to whoever happened to check out next. Those
+  // rows belong to the admin queue until a human says otherwise.
+  if (RESOLVED_TRANSFER_STATUSES.has(transfer.status)) return { reason: transfer.status };
+
   const units = parseUnits(transfer.units);
   if (units === null || units <= 0n) return { reason: 'empty' };
 
-  const candidates = await db.all(`${LIVE_ORDERS_SQL} ORDER BY id ASC LIMIT 500`, asset.key, now);
+  // An order cannot have been paid by money that arrived before it existed: the
+  // buyer gets the amount FROM the order. The grace window absorbs clock skew
+  // between us and the chain, nothing more.
+  const paidAt = Number(transfer.block_time) || 0;
+  const bornBefore = paidAt > 0 ? paidAt + ORDER_CLOCK_GRACE_SECONDS : null;
+  const candidates = bornBefore === null
+    ? await db.all(`${LIVE_ORDERS_SQL} ORDER BY id ASC LIMIT 500`, asset.key, now)
+    : await db.all(
+      `${LIVE_ORDERS_SQL} AND CAST(strftime('%s', created_at) AS INTEGER) <= ?
+       ORDER BY id ASC LIMIT 500`, asset.key, now, bornBefore
+    );
 
   const exact = candidates.filter((o) => parseUnits(o.expected_units) === units);
   const covered = candidates.filter((o) => {
@@ -448,7 +475,7 @@ async function assetsWithLiveOrders(db, cfg, now) {
  * Only assets somebody is actually waiting on are polled, so a quiet site makes
  * no upstream calls at all.
  */
-async function maybeScan(c, cfg, { force = false, now = Date.now(), only = null, source = 'scan' } = {}) {
+async function maybeScan(c, cfg, { force = false, now = Date.now(), only = null, includeIdle = false, source = 'scan' } = {}) {
   if (!cfg.configured) return { skipped: 'unconfigured', results: [] };
   const db = c.get('db');
 
@@ -456,7 +483,10 @@ async function maybeScan(c, cfg, { force = false, now = Date.now(), only = null,
     const last = Number(await getSetting(db, SCAN_AT_KEY).catch(() => 0)) || 0;
     if (now - last < cfg.scanIntervalSeconds * 1000) return { skipped: 'throttled', results: [] };
   }
-  let assets = await assetsWithLiveOrders(db, cfg, now);
+  // Normally only coins somebody is actually waiting on are polled, so a quiet
+  // site makes no upstream calls at all. `includeIdle` is the admin's override,
+  // for looking at money that no open order explains.
+  let assets = includeIdle ? cfg.assets : await assetsWithLiveOrders(db, cfg, now);
   if (only) assets = assets.filter((a) => a.key === only);
   // Nothing to poll for costs nothing and must not burn the window: an order
   // opened a second later would otherwise wait a whole interval for its turn.
@@ -607,7 +637,7 @@ async function quoteAll(db, env, cfg, plan) {
 }
 
 export {
-  onchainConfig, createOrder, quoteAsset, quoteAll, uniqueExpected, minimumFor,
+  onchainConfig, createOrder, RESOLVED_TRANSFER_STATUSES, quoteAsset, quoteAll, uniqueExpected, minimumFor,
   matchTransfer, creditOrder, scanAsset, maybeScan, reconcileOrder, reconcileForUser,
   submitTransactionRef, recordTransfer, orderView, LIVE_ORDERS_SQL, TAG_SLOTS,
 };

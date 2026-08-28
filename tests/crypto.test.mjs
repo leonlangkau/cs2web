@@ -104,7 +104,9 @@ async function withChain(chain, fn) {
         const tx = (chain.txs || {})[String(q.get("txhash")).toLowerCase()];
         return json({ result: tx || null });
       }
-      if (action === "eth_getBlockByNumber") return json({ result: { timestamp: "0x6600" } });
+      if (action === "eth_getBlockByNumber") {
+        return json({ result: { timestamp: `0x${(chain.blockTime || nowSeconds()).toString(16)}` } });
+      }
       const rows = action === "txlist" ? (chain.txlist || [])
         : action === "txlistinternal" ? (chain.internal || [])
           : action === "tokentx" ? (chain.tokentx || []) : null;
@@ -145,18 +147,23 @@ async function withChain(chain, fn) {
   }
 }
 
+/** Block timestamps default to now: money is only ever matched to an order that
+    already existed when it arrived, so a fixture stamped in the past is a
+    different scenario entirely (and has its own test below). */
+const nowSeconds = () => Math.floor(Date.now() / 1000);
+
 /** An Ethereum transfer of `units` wei to our address, `confs` blocks deep. */
-const ethTx = (hash, units, { latest = 1000, confs = 20, to = ETH_ADDRESS } = {}) => ({
+const ethTx = (hash, units, { latest = 1000, confs = 20, to = ETH_ADDRESS, at = nowSeconds() } = {}) => ({
   hash, to, from: "0x1111111111111111111111111111111111111111",
   value: String(units), blockNumber: String(latest - confs + 1),
-  timeStamp: "1700000000", isError: "0", txreceipt_status: "1",
+  timeStamp: String(at), isError: "0", txreceipt_status: "1",
 });
 
 /** A Solana transfer of `units` lamports into our address. */
-const solTx = (signature, units, { address = SOL_ADDRESS } = {}) => ({
+const solTx = (signature, units, { address = SOL_ADDRESS, at = nowSeconds() } = {}) => ({
   signature, slot: 500,
   tx: {
-    slot: 500, blockTime: 1700000000,
+    slot: 500, blockTime: at,
     transaction: { message: { accountKeys: [{ pubkey: "SenderPubkey1111111111111111111111111111111" }, { pubkey: address }] } },
     meta: { err: null, preBalances: [9999999999, 0], postBalances: [9999999999 - Number(units), Number(units)] },
   },
@@ -392,7 +399,7 @@ test("USDT on Ethereum credits from a token transfer, priced at the stablecoin's
     chain.tokentx = [{
       hash: TX_A, to: ETH_ADDRESS, from: "0x2222222222222222222222222222222222222222",
       contractAddress: USDT_CONTRACT, value: order.expected_units,
-      blockNumber: "981", timeStamp: "1700000000", tokenSymbol: "USDT", tokenDecimal: "6",
+      blockNumber: "981", timeStamp: String(nowSeconds()), tokenSymbol: "USDT", tokenDecimal: "6",
     }];
     await elapseScanWindow(db);
 
@@ -430,7 +437,7 @@ test("SPL USDT is watched at the owner's token account, not the wallet address",
     chain.signatures = [{
       signature: SOL_SIG, slot: 700,
       tx: {
-        slot: 700, blockTime: 1700000000,
+        slot: 700, blockTime: nowSeconds(),
         transaction: { message: { accountKeys: [{ pubkey: ata }] } },
         meta: {
           err: null, preBalances: [0], postBalances: [0],
@@ -504,6 +511,39 @@ test("an underpayment inside tolerance credits; well under it does not", async (
 
     assert.equal((await db.get("SELECT tier FROM users WHERE username = 'short_buyer'")).tier, "paid",
       "0.5% short is within tolerance and credits");
+  });
+});
+
+test("money that arrived BEFORE an order existed is never credited to it", async () => {
+  // The scenario: somebody sends to the address with no checkout open (a manual
+  // transfer, a mistake, a donation). It is recorded as unattributed. Later a
+  // completely unrelated buyer opens an order — and because that stray payment
+  // is larger than their quote, a naive matcher would hand it to them.
+  const { app, db } = await buildTestApp(CHAIN_ENV);
+  const chain = { rates: { ETH: "3000" }, latestBlock: 1000, txlist: [] };
+
+  await withChain(chain, async () => {
+    const early = await openOrder(app, db, CHAIN_ENV, "early_bird");
+    // A big deposit stamped two hours ago, well before anyone else checked out.
+    chain.txlist = [ethTx(TX_A, 5000000000000000000n, {
+      confs: 30, at: nowSeconds() - 7200,
+    })];
+    await elapseScanWindow(db);
+    await early.client.get(`/pay/${early.order.order_id}/status`);
+
+    const stray = await db.get("SELECT * FROM chain_transfers ORDER BY id DESC LIMIT 1");
+    assert.equal(stray.status, "unmatched", "the stray deposit is parked, not applied");
+    assert.equal((await db.get("SELECT tier FROM users WHERE username = 'early_bird'")).tier, "user");
+
+    // Now a new buyer opens an order the stray deposit would comfortably cover.
+    const later = await openOrder(app, db, CHAIN_ENV, "late_buyer");
+    await elapseScanWindow(db);
+    await later.client.get(`/pay/${later.order.order_id}/status`);
+
+    assert.equal((await db.get("SELECT tier FROM users WHERE username = 'late_buyer'")).tier, "user",
+      "somebody else's money does not upgrade whoever checks out next");
+    assert.equal((await db.get("SELECT status FROM chain_transfers WHERE id = ?", stray.id)).status,
+      "unmatched", "it stays in the admin queue, for a human to attribute");
   });
 });
 

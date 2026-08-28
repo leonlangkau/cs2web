@@ -312,6 +312,22 @@ async function cleanup(db) {
   await db.run('DELETE FROM captcha_used WHERE expires_at <= ?', now);
   await db.run('DELETE FROM ip_bans WHERE expires_at IS NOT NULL AND expires_at <= ?', now);
   await db.run('DELETE FROM auth_tokens WHERE expires_at <= ? OR used = 1', now);
+
+  // On-chain orders nobody ever paid, past the window in which a late payment
+  // could still be matched to them. Deliberately only 'new' rows: a 'seen'
+  // order has money against it and is never quietly written off. Nothing is
+  // deleted — the row stays for the admin queue and the audit trail.
+  await db.run(
+    `UPDATE chain_orders SET status = 'expired', updated_at = datetime('now')
+      WHERE status = 'new' AND credited_at IS NULL AND match_until < ?`, now
+  ).catch(() => {});
+  // Transactions that touched our wallet but paid us nothing (someone else's
+  // activity on the same address). Kept a month so a scan doesn't re-fetch
+  // them, then dropped. Rows carrying real money are never pruned.
+  await db.run(
+    `DELETE FROM chain_transfers
+      WHERE status = 'ignored' AND created_at < datetime('now', '-30 days')`
+  ).catch(() => {});
 }
 
 export {

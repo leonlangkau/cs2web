@@ -498,7 +498,9 @@ function register(app) {
       setFlash(c, 'error', 'No receiving addresses are configured, so there is nothing to scan.');
       return c.redirect('/admin/crypto', 302);
     }
-    const result = await maybeScan(c, cfg, { force: true, source: `admin ${c.get('user').username}` });
+    const result = await maybeScan(c, cfg, {
+      force: true, includeIdle: true, source: `admin ${c.get('user').username}`,
+    });
     const summary = (result.results || [])
       .map((r) => `${r.asset}: ${r.error ? `error — ${r.error}` : `${r.seen} seen, ${r.credited} credited`}`)
       .join(' · ');

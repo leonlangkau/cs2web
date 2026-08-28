@@ -11,6 +11,7 @@ function head(ctx, heading) {
   const p = ctx.path;
   return `<div class="page-head">
     <div><h1 class="section-title">${esc(heading)}</h1></div>
+    <button type="button" class="btn btn-outline btn-sm ip-hide-toggle" id="ip-hide-toggle" aria-pressed="false">Hide all IPs</button>
   </div>
   <nav class="admin-tabs" aria-label="Admin sections">
     ${tab('/admin', 'Dashboard', p === '/admin')}
@@ -28,7 +29,7 @@ function head(ctx, heading) {
 const logRow = (l) => `<tr>
   <td><span class="tag tag-event tag-${esc(l.event)}">${esc(l.event)}</span></td>
   <td>${esc(l.username || '-')}</td>
-  <td class="mono">${esc(l.ip)}</td>
+  <td class="mono ip-addr">${esc(l.ip)}</td>
   <td class="muted">${esc(timeAgo(l.created_at))}</td></tr>`;
 
 function dashboard(ctx, { stats, recentLogs, recentUsers }) {
@@ -79,7 +80,7 @@ function dashboard(ctx, { stats, recentLogs, recentUsers }) {
           <tbody>${map(recentUsers, (u) => `<tr>
             <td>${esc(u.username)}${tierTag(u.tier)}
               ${u.banned ? '<span class="tag tag-banned">BANNED</span>' : ''}</td>
-            <td class="mono">${esc(u.signup_ip || '-')}</td>
+            <td class="mono ip-addr">${esc(u.signup_ip || '-')}</td>
             <td class="muted">${esc(timeAgo(u.created_at))}</td></tr>`)}
           </tbody></table></div>
       </div>
@@ -184,8 +185,8 @@ function users(ctx, { users: rows, q, page: current, pages, total, tiers, tierLa
           <div class="muted"><span class="uid-badge${u.id <= 1001 ? ' uid-reserved' : ''}">UID ${esc(u.id)}</span>
             · joined ${esc(timeAgo(u.created_at))}</div>
           <div class="muted">${esc(u.email)} ${u.email_verified_at ? '✓' : '<span title="email unverified">✗</span>'}</div></td>
-        <td><div class="mono">${esc(u.signup_ip || '-')}</div>
-          <div class="mono muted">${esc(u.last_login_ip || '-')}</div>
+        <td><div class="mono ip-addr">${esc(u.signup_ip || '-')}</div>
+          <div class="mono muted ip-addr">${esc(u.last_login_ip || '-')}</div>
           <div class="muted">${esc(timeAgo(u.last_login_at))}</div></td>
         <td class="sub-cell">${subCell(u)}</td>
         <td class="actions-cell">${actions(u)}</td></tr>`)}
@@ -514,7 +515,7 @@ function logs(ctx, { logs: rows, q, event, events, important, page: current, pag
             <td class="muted">${esc(l.id)}</td>
             <td><span class="tag tag-event tag-${esc(l.event)}">${esc(l.event)}</span></td>
             <td>${esc(l.username || '-')}</td>
-            <td class="mono">${l.ipHidden
+            <td class="mono ip-addr">${l.ipHidden
               ? `<span class="muted" title="Admin accounts' IPs are hidden from other staff">${esc(l.ip)}</span>`
               : `<a href="/admin/logs?q=${encodeURIComponent(l.ip)}">${esc(l.ip)}</a>`}</td>
             <td class="muted detail-cell">${esc(l.detail || '-')}</td>
@@ -534,7 +535,7 @@ function logs(ctx, { logs: rows, q, event, events, important, page: current, pag
         <tbody>${ipBans.length === 0
           ? '<tr><td colspan="6" class="muted center">No IPs currently banned.</td></tr>'
           : map(ipBans, (b) => `<tr>
-              <td class="mono">${esc(b.ip)}</td>
+              <td class="mono ip-addr">${esc(b.ip)}</td>
               <td class="muted detail-cell">${esc(b.reason || '-')}</td>
               <td class="muted">${esc(b.banned_by || '-')}</td>
               <td class="muted nowrap">${b.expires_at
@@ -569,7 +570,7 @@ function fingerprintRow(f) {
     <td class="muted">${esc(f.language || '-')} · ${esc(f.timezone || '-')}</td>
     <td>${f.username ? esc(f.username) : '<span class="muted">anonymous</span>'}
       ${f.email ? `<div class="muted">${esc(f.email)}</div>` : ''}</td>
-    <td class="mono">${f.ipHidden
+    <td class="mono ip-addr">${f.ipHidden
       ? `<span class="muted" title="Admin accounts' IPs are hidden from other staff">${esc(f.ip)}</span>`
       : `<a href="/admin/fingerprints?q=${encodeURIComponent(f.ip)}">${esc(f.ip)}</a>`}</td>
     <td class="muted nowrap">${esc(timeAgo(f.last_seen))}</td>
@@ -610,7 +611,7 @@ function fingerprintDetail(ctx, { hash, sightings }) {
 
   const row = (s) => `<tr>
     <td class="muted nowrap">${esc(s.created_at)} UTC</td>
-    <td class="mono">${s.ipHidden
+    <td class="mono ip-addr">${s.ipHidden
       ? `<span class="muted" title="Admin accounts' IPs are hidden from other staff">${esc(s.ip)}</span>`
       : esc(s.ip)}</td>
     <td>${s.username ? esc(s.username) : '<span class="muted">anonymous</span>'}</td>

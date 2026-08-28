@@ -13,6 +13,27 @@
     });
   }
 
+  /* ---------- Admin: hide all IPs toggle ---------- */
+  var ipToggle = document.getElementById('ip-hide-toggle');
+  if (ipToggle) {
+    var syncIpToggle = function () {
+      var hidden = document.documentElement.getAttribute('data-hide-ips') === '1';
+      ipToggle.setAttribute('aria-pressed', hidden ? 'true' : 'false');
+      ipToggle.textContent = hidden ? 'Show all IPs' : 'Hide all IPs';
+    };
+    syncIpToggle();
+    ipToggle.addEventListener('click', function () {
+      var next = document.documentElement.getAttribute('data-hide-ips') === '1' ? '0' : '1';
+      if (next === '1') {
+        document.documentElement.setAttribute('data-hide-ips', '1');
+      } else {
+        document.documentElement.removeAttribute('data-hide-ips');
+      }
+      try { localStorage.setItem('gh-hide-ips', next); } catch (e) { /* private mode — toggle just won't persist */ }
+      syncIpToggle();
+    });
+  }
+
   /* ---------- Scraper-resistant contact emails ---------- */
   document.querySelectorAll('.email-protect').forEach(function (a) {
     var u = a.getAttribute('data-u');

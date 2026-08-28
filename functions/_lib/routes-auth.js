@@ -87,7 +87,7 @@ function register(app) {
     // Site-wide surge breaker against DISTRIBUTED mass-account attacks that
     // stay under the per-IP limit: if signups across all IPs spike far above
     // organic volume, pause registration briefly instead of eating the flood.
-    const surgeLimit = Number(c.get('cfg').SIGNUP_SURGE_LIMIT ?? 30);
+    const surgeLimit = Number(c.get('cfg').SIGNUP_SURGE_LIMIT ?? 100);
     if (surgeLimit > 0) {
       const recent = await db.get(
         "SELECT COUNT(*) AS n FROM ip_logs WHERE event = 'signup' AND created_at > datetime('now', '-10 minutes')"

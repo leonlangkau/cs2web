@@ -11,20 +11,23 @@
  */
 
 const DEFAULTS = {
-  login: { limit: 10, windowMs: 10 * 60 * 1000 },     // per IP
-  signup: { limit: 5, windowMs: 60 * 60 * 1000 },     // per IP
-  post: { limit: 6, windowMs: 60 * 1000 },            // per user
-  download: { limit: 20, windowMs: 3 * 60 * 60 * 1000 }, // per IP (20 per 3 hours; staff exempt)
-  shout: { limit: 3, windowMs: 60 * 1000 },           // per user
-  burst: { limit: 240, windowMs: 60 * 1000 },         // per IP, ALL dynamic routes (flood control)
-  flood: { limit: 5, windowMs: 10 * 60 * 1000 },      // per IP, burst BREACHES before auto-ban
-  report: { limit: 5, windowMs: 60 * 60 * 1000 },     // per user
-  reset: { limit: 3, windowMs: 60 * 60 * 1000 },      // per IP (password-reset emails)
-  verify: { limit: 3, windowMs: 60 * 60 * 1000 },     // per user (verification emails)
-  fingerprint: { limit: 20, windowMs: 10 * 60 * 1000 }, // per IP (client fingerprint beacon)
-  checkout: { limit: 8, windowMs: 60 * 60 * 1000 },   // per user (BTCPay invoice creation)
-  cryptoorder: { limit: 12, windowMs: 60 * 60 * 1000 },  // per user (on-chain order + its rate lookup)
-  cryptotx: { limit: 10, windowMs: 60 * 60 * 1000 },     // per user (buyer-submitted transaction hashes)
+  login: { limit: 20, windowMs: 10 * 60 * 1000 },     // per IP
+  signup: { limit: 10, windowMs: 60 * 60 * 1000 },    // per IP
+  post: { limit: 15, windowMs: 60 * 1000 },           // per user
+  download: { limit: 60, windowMs: 3 * 60 * 60 * 1000 }, // per IP (60 per 3 hours; staff exempt)
+  shout: { limit: 10, windowMs: 60 * 1000 },          // per user
+  burst: { limit: 600, windowMs: 60 * 1000 },         // per IP, ALL dynamic routes (flood control)
+  flood: { limit: 10, windowMs: 10 * 60 * 1000 },     // per IP, burst BREACHES before auto-ban
+  report: { limit: 15, windowMs: 60 * 60 * 1000 },    // per user
+  reset: { limit: 6, windowMs: 60 * 60 * 1000 },      // per IP (password-reset emails)
+  verify: { limit: 6, windowMs: 60 * 60 * 1000 },     // per user (verification emails)
+  fingerprint: { limit: 60, windowMs: 10 * 60 * 1000 }, // per IP (client fingerprint beacon)
+  checkout: { limit: 20, windowMs: 60 * 60 * 1000 },  // per user (BTCPay invoice creation)
+  // Sized in the same spirit as the loosening above — backstops against abuse,
+  // not friction. Someone comparing all four coins before choosing opens an
+  // order per coin, so a tight cap here would bite an ordinary buyer.
+  cryptoorder: { limit: 30, windowMs: 60 * 60 * 1000 },  // per user (on-chain order + its rate lookup)
+  cryptotx: { limit: 25, windowMs: 60 * 60 * 1000 },     // per user (buyer-submitted transaction hashes)
   cryptoscan: { limit: 240, windowMs: 60 * 60 * 1000 },  // per IP (external cron hitting /api/crypto/scan)
 };
 

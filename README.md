@@ -139,7 +139,7 @@ Set as `[vars]`/secrets in `wrangler.toml` / the Pages dashboard (see DEPLOY.md)
 | `PBKDF2_ITERATIONS` | `100000` | Hash cost; watch the free 10ms CPU limit |
 | `RATE_LIMIT_*` | see wrangler.toml | login / signup / post / download / shout / report / burst / flood |
 | `AUTO_IP_BAN_MINUTES` | `60` | How long automatic flood bans last |
-| `SIGNUP_SURGE_LIMIT` | `30` | Site-wide signups per 10 min before registration pauses |
+| `SIGNUP_SURGE_LIMIT` | `100` | Site-wide signups per 10 min before registration pauses |
 | `BTCPAY_URL` / `BTCPAY_STORE_ID` / `BTCPAY_API_KEY`* / `BTCPAY_WEBHOOK_SECRET`* | unset | Self-hosted BTCPay Server checkout. All set → `/upgrade` shows a one-click crypto pay button and grants Paid automatically on a confirmed, signature-verified webhook. `*` = secret. See [BTCPAY-SETUP.md](BTCPAY-SETUP.md) |
 | `PAID_PRICE_AMOUNT` / `PAID_PRICE_CURRENCY` / `PAID_PERIOD_DAYS` | unset / `USD` / lifetime | Membership price, currency and length (days; empty = lifetime) for BTCPay invoices |
 | `STORE_PLANS` | unset | Fallback catalogue used only while **Admin → Shop** has no products — `"id:Name:amount:days,…"`, days `0` = lifetime. Prices are always read server-side; the form only names a slug |

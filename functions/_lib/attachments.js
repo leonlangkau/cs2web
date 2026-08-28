@@ -97,9 +97,16 @@ function fromBase64(value) {
  */
 async function readUploads(c, cfg, field = 'files') {
   const maxBytes = cfg.attachMaxKb * 1024;
-  const uploads = typeof c.req.files === 'function' ? c.req.files(field) : [];
+  // The outer Content-Length guard in app.js is an early-out that a chunked
+  // body can skip, so the real ceiling is enforced here on what was actually
+  // parsed — and only a bounded number of parts is even looked at, so a body
+  // of ten thousand rejected parts cannot become ten thousand error strings.
+  const requestMaxBytes = maxBytes * Math.max(1, cfg.attachMaxCount);
+  const uploads = (typeof c.req.files === 'function' ? c.req.files(field) : [])
+    .slice(0, cfg.attachMaxCount + 4);
   const files = [];
   const errors = [];
+  let totalBytes = 0;
 
   for (const { file } of uploads) {
     if (!file || typeof file.arrayBuffer !== 'function') continue;
@@ -120,6 +127,12 @@ async function readUploads(c, cfg, field = 'files') {
     if (!mime) {
       errors.push(`"${filename}" is not an accepted file type. Send a screenshot (${EXT_LIST.slice(0, 5).join(', ')}) or a log/text file.`);
       continue;
+    }
+
+    totalBytes += file.size;
+    if (totalBytes > requestMaxBytes) {
+      errors.push(`That is more than ${Math.round(requestMaxBytes / 1024)} KB of files in one go. Send the important one first.`);
+      break;
     }
 
     const bytes = new Uint8Array(await file.arrayBuffer());
@@ -147,7 +160,26 @@ async function readUploads(c, cfg, field = 'files') {
     files.push({ filename, mime, bytes: bytes.length, data: toBase64(bytes) });
   }
 
-  return { files, errors };
+  return { files, errors: errors.slice(0, 6) };
+}
+
+/**
+ * Whether a ticket has room for `files`. A conversation is capped as a whole,
+ * not just per message — see supportConfig().attachTicketMaxKb.
+ */
+async function ticketHasRoom(db, ticketId, files, cfg) {
+  if (!files.length) return { ok: true };
+  const row = await db.get(
+    'SELECT COALESCE(SUM(bytes), 0) AS total FROM ticket_attachments WHERE ticket_id = ? AND purged_at IS NULL',
+    ticketId
+  );
+  const incoming = files.reduce((sum, f) => sum + f.bytes, 0);
+  if (Number(row.total) + incoming <= cfg.attachTicketMaxKb * 1024) return { ok: true };
+  return {
+    ok: false,
+    error: `This ticket has reached its ${Math.round(cfg.attachTicketMaxKb / 1024)} MB of attachments. `
+      + 'Open a new ticket for anything else, or paste the text instead.',
+  };
 }
 
 /** Persists validated uploads against a ticket/message. */
@@ -192,5 +224,5 @@ function attachmentResponse(row) {
 export {
   ALLOWED, IMAGE_TYPES, EXT_LIST, ACCEPT_ATTR,
   safeFilename, sniff, toBase64, fromBase64,
-  readUploads, saveUploads, attachmentResponse,
+  readUploads, saveUploads, attachmentResponse, ticketHasRoom,
 };

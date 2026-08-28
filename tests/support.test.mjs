@@ -778,6 +778,64 @@ test("an oversized attachment is refused without losing the message", async () =
   assert.equal(Number((await db.get("SELECT COUNT(*) AS n FROM tickets")).n), 0);
 });
 
+test("attachment storage is budgeted per address and per ticket", async () => {
+  // Without a budget the reply bucket is keyed per TICKET, so one address can
+  // open ticket after ticket and fill the database from each.
+  const env = { ...ENV, SUPPORT_ATTACH_MAX_KB: "16", RATE_LIMIT_ATTACH: "2" };
+  const { app, db } = await buildTestApp(env);
+  const { client } = await signUp(app, env, "hoarder");
+  const png = { name: "shot.png", bytes: PNG_1x1, type: "image/png" };
+
+  await client.get("/support/new");
+  const created = await client.postForm("/support/new", {
+    subject: "Screenshot one", category: "app",
+    body: "Here is the first screenshot of the problem I am seeing.",
+  }, [png]);
+  assert.equal(created.status, 302);
+  const ref = created.headers.get("location").split("/").pop();
+
+  // Second file is within budget, third is not — and the MESSAGE still lands.
+  await client.postForm(`/support/t/${ref}/reply`, { body: "And another." }, [png]);
+  const overBudget = await client.postForm(`/support/t/${ref}/reply`, { body: "And one more." }, [png]);
+  assert.equal(overBudget.status, 302, "the reply is never lost over its attachment");
+
+  const ticket = await db.get("SELECT id FROM tickets WHERE ref = ?", ref);
+  const files = await db.all("SELECT * FROM ticket_attachments WHERE ticket_id = ?", ticket.id);
+  assert.equal(files.length, 2, "the third file was refused by the per-address budget");
+  const messages = await db.all("SELECT * FROM ticket_messages WHERE ticket_id = ?", ticket.id);
+  assert.equal(messages.length, 3, "all three messages went through");
+});
+
+test("a ticket has a total attachment ceiling, not just a per-message one", async () => {
+  const env = { ...ENV, SUPPORT_ATTACH_MAX_KB: "16", SUPPORT_ATTACH_TICKET_MAX_KB: "512" };
+  const { app, db } = await buildTestApp(env);
+  const { client } = await signUp(app, env, "ceiling");
+  await client.get("/support/new");
+  const created = await client.postForm("/support/new", {
+    subject: "Lots of screenshots", category: "app",
+    body: "I will be sending quite a few screenshots of this problem over time.",
+  }, [{ name: "a.png", bytes: PNG_1x1, type: "image/png" }]);
+  const ref = created.headers.get("location").split("/").pop();
+  const ticket = await db.get("SELECT id FROM tickets WHERE ref = ?", ref);
+
+  // Pretend the thread is already at its ceiling.
+  await db.run("UPDATE ticket_attachments SET bytes = ? WHERE ticket_id = ?", 512 * 1024, ticket.id);
+  const refused = await client.postForm(`/support/t/${ref}/reply`, { body: "One more." },
+    [{ name: "b.png", bytes: PNG_1x1, type: "image/png" }]);
+  assert.equal(refused.status, 302);
+  const files = await db.all("SELECT * FROM ticket_attachments WHERE ticket_id = ?", ticket.id);
+  assert.equal(files.length, 1, "the ticket is full, so the file is refused");
+});
+
+test("an article read is counted once per address per hour", async () => {
+  const { app, db } = await buildTestApp(ENV);
+  const client = makeClient(app, ENV);
+  for (let i = 0; i < 5; i += 1) await (await client.get("/help/a/app-wont-start")).text();
+  const row = await db.get("SELECT views FROM help_articles WHERE slug = 'app-wont-start'");
+  assert.equal(Number(row.views), 1,
+    "a refresh loop must not decide which articles staff invest in");
+});
+
 /* ================================================================== *
  * Integrations: email, webhook, AI
  * ================================================================== */

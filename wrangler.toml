@@ -181,6 +181,11 @@ STORE_PLANS = "7d:1 Week:3.00:7,14d:2 Weeks:5.00:14,30d:1 Month:10.00:30,90d:3 M
 # SUPPORT_ATTACH_MAX_KB = "512" # per file (max 700 — D1 caps a value at 1 MB
 #                               # and base64 inflates by a third)
 # SUPPORT_ATTACH_MAX_COUNT = "4"   # per message; "0" disables attachments
+# SUPPORT_ATTACH_TICKET_MAX_KB = "8192"  # total per conversation (8 MB). The
+#                               # per-message cap alone is not a ceiling: the
+#                               # reply limit is keyed per ticket.
+# SUPPORT_ATTACH_RETAIN_DAYS = "180"     # when a closed ticket's file contents
+#                               # are dropped (the record they existed stays)
 # SUPPORT_EMAIL_NOTIFY = "1"    # email the requester when support replies
 #                               # (needs EMAIL_* above; silently off without it)
 # SITE_URL = "https://goyhub.st"   # REQUIRED for absolute links in support

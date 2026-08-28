@@ -9,7 +9,7 @@ const MANIFEST = {
   "/js/fx.js": "36af4062",
   "/js/main.js": "a04d3099",
   "/js/status.js": "fcc1a3b7",
-  "/js/support.js": "35d933e2",
+  "/js/support.js": "3e60bcfa",
   "/fonts/jetbrains-mono-var.woff2": "18be4527",
   "/fonts/space-grotesk-var.woff2": "06408904",
 };

@@ -1068,8 +1068,11 @@ function register(app) {
     }
 
     const verdict = await limits.check(db, 'aiassist', String(c.get('user').id), env);
-    if (!verdict.ok) {
-      setFlash(c, 'error', 'You have used the AI assist a lot in the last hour — give it a moment.');
+    const budget = verdict.ok ? await limits.check(db, 'aiglobal', 'site', env) : { ok: false };
+    if (!verdict.ok || !budget.ok) {
+      setFlash(c, 'error', verdict.ok
+        ? 'The site has hit its daily AI budget. Everything else on this page still works.'
+        : 'You have used the AI assist a lot in the last hour — give it a moment.');
       return c.redirect(`/admin/support/${ticket.id}`, 302);
     }
 
@@ -1097,8 +1100,11 @@ function register(app) {
     }
 
     const verdict = await limits.check(db, 'aiassist', String(c.get('user').id), env);
-    if (!verdict.ok) {
-      setFlash(c, 'error', 'You have used the AI assist a lot in the last hour — give it a moment.');
+    const budget = verdict.ok ? await limits.check(db, 'aiglobal', 'site', env) : { ok: false };
+    if (!verdict.ok || !budget.ok) {
+      setFlash(c, 'error', verdict.ok
+        ? 'The site has hit its daily AI budget. Everything else on this page still works.'
+        : 'You have used the AI assist a lot in the last hour — give it a moment.');
       return c.redirect(`/admin/support/${ticket.id}`, 302);
     }
 

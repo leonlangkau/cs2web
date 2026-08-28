@@ -17,7 +17,7 @@ import { searchArticles, terms, categoryForSection } from "./kb.js";
 import { cleanup } from "./bootstrap.js";
 import { statusHeadsUp } from "./status.js";
 import {
-  readUploads, saveUploads, attachmentResponse,
+  readUploads, saveUploads, attachmentResponse, ticketHasRoom,
 } from "./attachments.js";
 import {
   audit, clientIp, userAgent, formBody, setFlash, cookieOptions, requireAuth, defer,
@@ -148,7 +148,10 @@ function register(app) {
     // Unpublished drafts stay visible to staff so they can be reviewed in place.
     if (!article || (!article.published && !isStaff(c.get('user')))) return notFound(c);
 
-    await db.run('UPDATE help_articles SET views = views + 1 WHERE id = ?', article.id);
+    // One counted read per address per hour: it throttles an unauthenticated
+    // write, and it stops a refresh loop deciding which articles staff invest in.
+    const counted = await limits.check(db, 'helpview', `${clientIp(c)}:${article.id}`, c.get('cfg'));
+    if (counted.ok) await db.run('UPDATE help_articles SET views = views + 1 WHERE id = ?', article.id);
 
     const related = await db.all(
       `SELECT a.slug, a.title, s.name AS section_name
@@ -252,8 +255,11 @@ function register(app) {
       return shortlist.slice(0, SUGGEST_LIMIT).map((article) => ({ article, why: article.summary }));
     }
 
-    const verdict = await limits.check(db, 'aideflect', clientIp(c), c.get('cfg'));
-    if (!verdict.ok) {
+    // A site-wide daily ceiling on top of the per-IP one: the free Gemini tier
+    // has a daily quota, and a busy afternoon of anonymous deflection must not
+    // spend it before the staff assist needs it.
+    const budget = await limits.check(db, 'aiglobal', 'site', c.get('cfg'));
+    if (!budget.ok) {
       return shortlist.slice(0, SUGGEST_LIMIT).map((article) => ({ article, why: article.summary }));
     }
 
@@ -377,6 +383,14 @@ function register(app) {
     }
 
     const { files, errors: fileErrors } = await readUploads(c, cfg);
+    if (files.length) {
+      const budget = await limits.check(db, 'attach', clientIp(c), env);
+      if (!budget.ok) {
+        files.length = 0;
+        fileErrors.push('You have attached a lot of files in the last hour. Send this without the '
+          + 'attachment and add it to the ticket shortly.');
+      }
+    }
     // On a NEW ticket the form is still in front of them, so a rejected file
     // sends them back to fix it with everything they typed intact — losing an
     // essential screenshot silently is worse than one more click. On a REPLY
@@ -701,7 +715,19 @@ function register(app) {
 
     const text = cleanBody(body.body, MAX_BODY);
     const { files, errors: fileErrors } = await readUploads(c, cfg);
-    if (text.length < 1 && !files.length) return fail('Write a message (or attach a file) before sending.');
+
+    if (files.length) {
+      const budget = await limits.check(db, 'attach', clientIp(c), env);
+      const room = budget.ok ? await ticketHasRoom(db, ticket.id, files, cfg) : { ok: false };
+      if (!budget.ok || !room.ok) {
+        files.length = 0;
+        fileErrors.push(room.error
+          || 'You have attached a lot of files in the last hour — send this and add the file shortly.');
+      }
+    }
+    if (text.length < 1 && !files.length) {
+      return fail(fileErrors[0] || 'Write a message (or attach a file) before sending.');
+    }
 
     // Staff replying from the customer-facing page still counts as staff —
     // the role is taken from the access decision, never from the form.
@@ -807,8 +833,15 @@ function register(app) {
     const id = intParam(c.req.param('id'), 0);
     if (id < 1) return notFound(c);
 
+    const verdict = await limits.check(db, 'attachread', clientIp(c), c.get('cfg'));
+    if (!verdict.ok) return tooMany(c, verdict.retryAfterSec);
+
+    // Metadata first, deliberately WITHOUT `data`: the payload is up to ~800 KB
+    // of base64, and reading it before knowing who is asking would make an
+    // unauthenticated id guess as expensive as a real download.
     const row = await db.get(
-      `SELECT a.*, t.ref FROM ticket_attachments a JOIN tickets t ON t.id = a.ticket_id WHERE a.id = ?`,
+      `SELECT a.id, a.ticket_id, a.message_id, a.filename, a.mime, a.bytes, a.purged_at, t.ref
+         FROM ticket_attachments a JOIN tickets t ON t.id = a.ticket_id WHERE a.id = ?`,
       id
     );
     if (!row) return notFound(c);
@@ -824,7 +857,8 @@ function register(app) {
           + 'that it was sent. Re-attach it on the ticket if it is still needed.',
       }), 410);
     }
-    return attachmentResponse(row);
+    const payload = await db.get('SELECT data FROM ticket_attachments WHERE id = ?', row.id);
+    return attachmentResponse({ ...row, data: payload ? payload.data : '' });
   });
 
   /* ================================================================ *

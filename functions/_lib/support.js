@@ -111,6 +111,10 @@ function supportConfig(env = {}) {
     // 1 MB per-value ceiling; four of them still fit the router's upload cap.
     attachMaxKb: intVar(env, 'SUPPORT_ATTACH_MAX_KB', 512, { min: 16, max: 600 }),
     attachMaxCount: intVar(env, 'SUPPORT_ATTACH_MAX_COUNT', 4, { min: 0, max: 10 }),
+    // Total bytes one conversation may ever hold. Without it, the per-message
+    // cap is no cap at all: the reply bucket is keyed per ticket, so sixty
+    // messages of four files each is 120 MB in a single thread.
+    attachTicketMaxKb: intVar(env, 'SUPPORT_ATTACH_TICKET_MAX_KB', 8192, { min: 512, max: 262144 }),
     autoCloseDays: intVar(env, 'SUPPORT_AUTOCLOSE_DAYS', 7, { min: 0, max: 365 }),
     attachRetainDays: intVar(env, 'SUPPORT_ATTACH_RETAIN_DAYS', 180, { min: 0, max: 3650 }),
     emailNotify: boolVar(env, 'SUPPORT_EMAIL_NOTIFY', true) && isEmailConfigured(env),

@@ -41,6 +41,17 @@ const DEFAULTS = {
   aiassist: { limit: 60, windowMs: 60 * 60 * 1000 },      // per staff user (Gemini summary/drafts)
   aideflect: { limit: 30, windowMs: 60 * 60 * 1000 },     // per IP (AI "try this first" matching)
   supportsweep: { limit: 240, windowMs: 60 * 60 * 1000 }, // per IP (external cron hitting /api/support/sweep)
+  // Uploads are the one support action that costs STORAGE rather than time, so
+  // this is a per-IP budget on files, not on requests: the reply bucket is
+  // keyed per ticket and would otherwise let one address open ticket after
+  // ticket and fill the database from each.
+  attach: { limit: 30, windowMs: 60 * 60 * 1000 },        // per IP (files accepted)
+  attachread: { limit: 300, windowMs: 60 * 60 * 1000 },   // per IP (attachment downloads)
+  helpview: { limit: 1, windowMs: 60 * 60 * 1000 },       // per IP+article (the read counter)
+  // A site-wide ceiling on AI calls, on top of the per-IP and per-agent ones.
+  // The free Gemini tier has a daily quota; this keeps one busy afternoon from
+  // spending it before the staff assist needs it.
+  aiglobal: { limit: 800, windowMs: 24 * 60 * 60 * 1000 },
 };
 
 const ENV_KEYS = {
@@ -67,6 +78,10 @@ const ENV_KEYS = {
   aiassist: 'RATE_LIMIT_AI_ASSIST',
   aideflect: 'RATE_LIMIT_AI_DEFLECT',
   supportsweep: 'RATE_LIMIT_SUPPORT_SWEEP',
+  attach: 'RATE_LIMIT_ATTACH',
+  attachread: 'RATE_LIMIT_ATTACH_READ',
+  helpview: 'RATE_LIMIT_HELP_VIEW',
+  aiglobal: 'RATE_LIMIT_AI_GLOBAL',
 };
 
 function limitFor(name, env = {}) {

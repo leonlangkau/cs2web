@@ -180,8 +180,10 @@ const loadContext = async (c, next) => {
   c.set('view', view);
 
   // Site-wide announcement banner (admin-set). Only fetched for page GETs —
-  // API calls and form posts never render it.
-  if (c.req.method === 'GET' && !url.pathname.startsWith('/api/')) {
+  // API calls, form posts and the JSON polls behind the live chat and the
+  // status page never render it, and those are the requests that repeat.
+  const isPoll = c.req.header('x-requested-with') === 'fetch' || url.pathname.endsWith('.json');
+  if (c.req.method === 'GET' && !url.pathname.startsWith('/api/') && !isPoll) {
     view.announcement = await getSetting(db, ANNOUNCEMENT_KEY);
   }
 
@@ -307,7 +309,10 @@ const floodProtection = async (c, next) => {
 
 /** Sets a one-shot flash message for the next request. */
 function setFlash(c, type, message) {
-  const encoded = toBase64Url(JSON.stringify({ type, message }));
+  // Capped on the way IN as well as on the way out: a caller that concatenates
+  // one error per rejected upload would otherwise write a Set-Cookie header
+  // measured in megabytes.
+  const encoded = toBase64Url(JSON.stringify({ type, message: String(message ?? '').slice(0, 500) }));
   setCookie(c, FLASH_COOKIE, encoded, cookieOptions(c, { maxAge: 60 }));
 }
 

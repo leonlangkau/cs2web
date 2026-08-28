@@ -88,8 +88,13 @@ class Context {
           const out = {};
           this._files = [];
           this._multi = new Map();
+          // Text fields are bounded here rather than by Content-Length, which a
+          // chunked body simply omits. Files are bounded in readUploads().
+          let textBytes = 0;
           for (const [k, v] of form.entries()) {
             if (typeof v === "string") {
+              textBytes += k.length + v.length;
+              if (textBytes > MAX_BODY_BYTES) break;
               out[k] = v;
               // A checkbox group posts the same name repeatedly; the flat map
               // keeps last-wins (which every existing form relies on) and the
@@ -225,6 +230,11 @@ function createApp({ resolveDb, env = {} }) {
   app.use("*", securityHeaders);
 
   // Reject oversized bodies before the route runs, mirroring Hono's bodyLimit.
+  //
+  // This is an EARLY-OUT, not the guarantee: a chunked request carries no
+  // Content-Length, so the real ceilings are enforced after parsing — on the
+  // field total in parseBody() below, and on the file total in
+  // attachments.readUploads(). Cloudflare caps the request size above us too.
   app.use("*", async (c, next) => {
     const len = Number(c.req.header("content-length") || 0);
     if (len > bodyLimitFor(c._url.pathname)) {

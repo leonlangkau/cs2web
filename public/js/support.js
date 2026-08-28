@@ -40,6 +40,7 @@
     var lastId = parseInt(chat.getAttribute('data-last-id'), 10) || 0;
     var polling = false;
     var failures = 0;
+    var quiet = 0;
 
     var scrollToEnd = function () { log.scrollTop = log.scrollHeight; };
     scrollToEnd();
@@ -82,7 +83,8 @@
           if (!data || !data.ok) { failures += 1; return; }
           failures = 0;
           if (liveBadge) liveBadge.hidden = false;
-          if (!data.messages || !data.messages.length) return;
+          if (!data.messages || !data.messages.length) { quiet += 1; return; }
+          quiet = 0;
           var empty = log.querySelector('.chat-empty');
           if (empty) empty.remove();
           var atBottom = log.scrollHeight - log.scrollTop - log.clientHeight < 80;
@@ -108,15 +110,23 @@
     }
 
     poll();
-    /* 3s while visible; back off to 15s after repeated failures so a broken
-       connection (or a rate limit) does not turn into a retry storm. */
+    /* 5s while the conversation is moving, easing to 30s once it has been
+       quiet for a couple of minutes, and much slower again after repeated
+       failures. A ticket left open all day would otherwise be 20 requests a
+       minute, forever — enough for one office behind one NAT to walk into the
+       site-wide flood auto-ban. Any new message resets it to fast. */
+    var elapsed = 0;
     setInterval(function () {
       if (document.hidden) return;
-      if (failures > 3 && (Date.now() / 1000 | 0) % 5 !== 0) return;
+      elapsed += 1;
+      var every = failures > 3 ? 12 : (quiet > 24 ? 6 : 1);
+      if (elapsed % every !== 0) return;
       poll();
-    }, 3000);
+    }, 5000);
     document.addEventListener('visibilitychange', function () {
-      if (!document.hidden) poll();
+      // Coming back to the tab is the one moment a stale thread is obvious,
+      // so catch up immediately and go back to the fast cadence.
+      if (!document.hidden) { quiet = 0; poll(); }
     });
 
     var fileInput = composer ? composer.querySelector('input[type="file"]') : null;

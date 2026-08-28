@@ -232,7 +232,7 @@ Set as `[vars]`/secrets in `wrangler.toml` / the Pages dashboard (see DEPLOY.md)
 | `CAPTCHA_SECRET` | insecure dev value | **Required** — signs CAPTCHA challenges |
 | `CAPTCHA_DIFFICULTY` | `16` | Proof-of-work leading zero bits (8–24) |
 | `PBKDF2_ITERATIONS` | `100000` | Hash cost; watch the free 10ms CPU limit |
-| `RATE_LIMIT_*` | see wrangler.toml | login / signup / post / download / shout / report / burst / flood |
+| `RATE_LIMIT_*` | see wrangler.toml | login / signup / post / download / shout / report / burst / flood, plus the support desk's own buckets (`TICKET`, `TICKET_REPLY`, `TICKET_POLL`, `ATTACH`, `ATTACH_READ`, `HELP_VOTE`, `HELP_VIEW`, `AI_ASSIST`, `AI_DEFLECT`, `AI_GLOBAL`) |
 | `AUTO_IP_BAN_MINUTES` | `60` | How long automatic flood bans last |
 | `SIGNUP_SURGE_LIMIT` | `100` | Site-wide signups per 10 min before registration pauses |
 | `BTCPAY_URL` / `BTCPAY_STORE_ID` / `BTCPAY_API_KEY`* / `BTCPAY_WEBHOOK_SECRET`* | unset | Self-hosted BTCPay Server checkout. All set → `/upgrade` shows a one-click crypto pay button and grants Paid automatically on a confirmed, signature-verified webhook. `*` = secret. See [BTCPAY-SETUP.md](BTCPAY-SETUP.md) |
@@ -252,6 +252,7 @@ Set as `[vars]`/secrets in `wrangler.toml` / the Pages dashboard (see DEPLOY.md)
 | `SUPPORT_GUEST_TICKETS` | `1` | `0` requires an account (any tier, Free included) to open a ticket |
 | `SUPPORT_SLA_*_HOURS` | `72`/`24`/`8`/`2` | First-response target per priority (low/normal/high/urgent) |
 | `SUPPORT_ATTACH_MAX_KB` / `SUPPORT_ATTACH_MAX_COUNT` | `512` / `4` | Per file (max 600 — D1 caps a value at 1 MB and base64 inflates by a third) and per message; count `0` disables attachments |
+| `SUPPORT_ATTACH_TICKET_MAX_KB` | `8192` | Total attachment bytes one conversation may hold. The per-message cap is not a ceiling on its own — the reply limit is keyed per ticket — so this is what actually bounds storage |
 | `SUPPORT_ATTACH_RETAIN_DAYS` / `SUPPORT_AUTOCLOSE_DAYS` | `180` / `7` | When a closed ticket's attachment bytes are dropped (the record that a file existed stays), and when a solved ticket nobody returned to is closed. `0` disables either |
 | `SUPPORT_EMAIL_NOTIFY` | `1` | Email the requester when a ticket opens and when staff reply (needs `EMAIL_*`) |
 | `TURNSTILE_SITE_KEY` / `TURNSTILE_SECRET_KEY` | unset | Optional Cloudflare Turnstile on signup |

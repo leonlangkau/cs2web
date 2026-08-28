@@ -951,6 +951,90 @@ test("AI triage sets category, priority and tags — and is re-validated, not tr
   assert.ok(row.ai_classified_at, "the ticket is marked as triaged so it is not re-run");
 });
 
+test("the AI opt-out is a promise the server keeps, not one the page makes", async () => {
+  const env = { ...ENV, GEMINI_API_KEY: "test-key" };
+  const { app, db } = await buildTestApp(env);
+
+  const realFetch = globalThis.fetch;
+  let calls = 0;
+  globalThis.fetch = async () => { calls += 1; throw new Error("the AI should not have been called"); };
+  let ref;
+  try {
+    ({ ref } = await openGuestTicket(app, env, { no_ai: "1" }));
+
+    // The lookahead endpoint honours it too, not just the checkbox in the page.
+    const client = makeClient(app, env);
+    await client.get("/support/new");
+    const suggested = await client.post("/support/suggest", {
+      no_ai: "1", subject: "GoyHub crashes on launch",
+      body: "It closes immediately every single time I try to open it.",
+    });
+    assert.deepEqual((await suggested.json()).suggestions, []);
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+
+  assert.equal(calls, 0, "nothing was sent to the model at any point");
+  const ticket = await db.get("SELECT * FROM tickets WHERE ref = ?", ref);
+  assert.match(ticket.tags, /no-ai/, "and the ticket carries the opt-out for the staff side");
+  assert.equal(ticket.ai_classified_at, null);
+
+  // Staff cannot run the assist on it either.
+  const staff = await adminClient(app, env);
+  await staff.get(`/admin/support/${ticket.id}`);
+  const refused = await staff.post(`/admin/support/${ticket.id}/ai/summary`, {});
+  assert.equal(refused.status, 302);
+  assert.equal((await db.get("SELECT ai_summary FROM tickets WHERE id = ?", ticket.id)).ai_summary, null);
+});
+
+test("an AI spam verdict tags the ticket for a human, and never hides it", async () => {
+  const env = { ...ENV, GEMINI_API_KEY: "test-key" };
+  const { app, db } = await buildTestApp(env);
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async () => new Response(JSON.stringify({
+    candidates: [{ content: { parts: [{ text: JSON.stringify({
+      category: "other", priority: "low", tags: ["advert"], language: "en", spam: true,
+      reason: "looks like advertising",
+    }) }] } }],
+  }), { status: 200, headers: { "content-type": "application/json" } });
+
+  let ref;
+  try { ({ ref } = await openGuestTicket(app, env)); } finally { globalThis.fetch = realFetch; }
+
+  const ticket = await db.get("SELECT * FROM tickets WHERE ref = ?", ref);
+  assert.equal(Number(ticket.spam), 0,
+    "a false positive here is a customer who is simply never answered — that call stays with a human");
+  assert.match(ticket.tags, /possible-spam/, "but it is tagged so a human sees it");
+
+  const staff = await adminClient(app, env);
+  const queue = await (await staff.get("/admin/support")).text();
+  assert.match(queue, new RegExp(ref), "and it is still in the default queue");
+  assert.match(queue, /possible-spam/);
+});
+
+test("the confirmation email still goes out when the AI throws", async () => {
+  const env = {
+    ...ENV, GEMINI_API_KEY: "test-key",
+    EMAIL_PROVIDER: "test", EMAIL_FROM: "support@goyhub.test", SITE_URL: "https://goyhub.test",
+  };
+  const { app, db } = await buildTestApp(env);
+  globalThis.__testEmails = [];
+
+  const realFetch = globalThis.fetch;
+  // A response shaped to break the re-validation layer rather than the transport.
+  globalThis.fetch = async () => new Response(JSON.stringify({
+    candidates: [{ content: { parts: [{ text: '{"category":{},"priority":{},"tags":{},"language":{},"spam":{}}' }] } }],
+  }), { status: 200, headers: { "content-type": "application/json" } });
+
+  let ref;
+  try { ({ ref } = await openGuestTicket(app, env)); } finally { globalThis.fetch = realFetch; }
+
+  assert.ok(await db.get("SELECT id FROM tickets WHERE ref = ?", ref), "the ticket exists");
+  assert.ok(globalThis.__testEmails.some((m) => m.subject.includes(ref)),
+    "and the confirmation was not swallowed by the AI step in front of it");
+  globalThis.__testEmails = [];
+});
+
 test("a ticket opens normally when the AI is down", async () => {
   const env = { ...ENV, GEMINI_API_KEY: "test-key" };
   const { app, db } = await buildTestApp(env);

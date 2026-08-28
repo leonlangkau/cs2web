@@ -1066,6 +1066,10 @@ function register(app) {
       setFlash(c, 'error', 'AI assist is not configured (set GEMINI_API_KEY).');
       return c.redirect(`/admin/support/${ticket.id}`, 302);
     }
+    if (tagList(ticket.tags).includes('no-ai')) {
+      setFlash(c, 'error', 'This requester asked us not to run their ticket through the AI.');
+      return c.redirect(`/admin/support/${ticket.id}`, 302);
+    }
 
     const verdict = await limits.check(db, 'aiassist', String(c.get('user').id), env);
     const budget = verdict.ok ? await limits.check(db, 'aiglobal', 'site', env) : { ok: false };
@@ -1096,6 +1100,10 @@ function register(app) {
     if (!ticket) return notFound(c);
     if (!ai.aiConfig(env).assist) {
       setFlash(c, 'error', 'AI assist is not configured (set GEMINI_API_KEY).');
+      return c.redirect(`/admin/support/${ticket.id}`, 302);
+    }
+    if (tagList(ticket.tags).includes('no-ai')) {
+      setFlash(c, 'error', 'This requester asked us not to run their ticket through the AI.');
       return c.redirect(`/admin/support/${ticket.id}`, 302);
     }
 

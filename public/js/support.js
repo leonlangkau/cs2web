@@ -206,11 +206,14 @@
         + suggestions.map(function (s) {
           return '<a class="try-first-item" href="' + escapeHtml(s.url) + '" target="_blank" rel="noopener">'
             + '<span class="try-first-title">' + escapeHtml(s.title) + '</span>'
-            + '<span class="muted">' + escapeHtml(s.why || '') + '</span></a>';
+            + '<span class="muted">' + escapeHtml(s.why || '')
+            + (s.aiWritten ? ' <span class="tag tag-lock">AI SUGGESTION</span>' : '') + '</span></a>';
         }).join('');
     }
 
     function lookahead() {
+      var optOut = document.getElementById('no-ai');
+      if (optOut && optOut.checked) { render([]); return; }
       var text = (subject ? subject.value : '') + '\n' + (problem ? problem.value : '');
       if (text.trim().length < 25 || text === lastQuery) return;
       lastQuery = text;

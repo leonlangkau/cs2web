@@ -27,7 +27,7 @@ import { isStaff } from "./tiers.js";
 import { tooMany } from "./routes-main.js";
 import {
   CATEGORIES, MAX_SUBJECT, MAX_BODY, MAX_RATING_COMMENT,
-  normalizeCategory, normalizePriority, normalizeTags, cleanBody, cleanLine, validEmail,
+  normalizeCategory, normalizePriority, normalizeTags, tagList, cleanBody, cleanLine, validEmail,
   supportConfig, slaDueAt, allocateRef, normalizeRef, issueTicketKey,
   rememberTicketKey, readTicketCookie, checkAccess,
   addMessage, addEvent, sweepSla, sweepAutoClose, sweepAttachments,
@@ -267,7 +267,8 @@ function register(app) {
     if (!ranked.ok || !ranked.matches.length) {
       return shortlist.slice(0, SUGGEST_LIMIT).map((article) => ({ article, why: article.summary }));
     }
-    return ranked.matches;
+    // Flagged so the page can label model-written prose as model-written.
+    return ranked.matches.map((m) => ({ ...m, aiWritten: true }));
   }
 
   app.get('/support/new', async (c) => {
@@ -324,6 +325,10 @@ function register(app) {
     if (!verdict.ok) return c.json({ ok: true, suggestions: [] });
 
     const body = await formBody(c);
+    // The opt-out on the form is honoured here as well as in the browser, so
+    // it is a promise the server keeps rather than one the page makes.
+    if (body.no_ai) return c.json({ ok: true, suggestions: [] });
+
     const text = `${String(body.subject || '')}\n${String(body.body || '')}`.slice(0, 4000);
     if (text.trim().length < 12) return c.json({ ok: true, suggestions: [] });
 
@@ -334,6 +339,7 @@ function register(app) {
         slug: s.article.slug,
         title: s.article.title,
         why: String(s.why || s.article.summary || '').slice(0, 220),
+        aiWritten: Boolean(s.aiWritten),
         url: `/help/a/${encodeURIComponent(s.article.slug)}`,
       })),
     });
@@ -405,7 +411,10 @@ function register(app) {
         : null;
       return c.html(views.newTicket(c.get('view'), {
         errors,
-        values: { subject, body: message, category, email: user ? '' : email, name: guestName || '' },
+        values: {
+          subject, body: message, category, email: user ? '' : email, name: guestName || '',
+          no_ai: Boolean(body.no_ai),
+        },
         suggestions, cfg, needsCaptcha: !user,
         aiDeflect: ai.aiConfig(env).deflect,
         fromArticle,
@@ -428,6 +437,10 @@ function register(app) {
       articleSlug, clientIp(c) || 'unknown', userAgent(c)
     );
     const ticketId = Number(created.lastInsertRowid);
+    // The opt-out the Privacy Policy promises, recorded on the ticket itself so
+    // it survives into the staff workspace rather than living only in this
+    // request.
+    if (body.no_ai) await db.run('UPDATE tickets SET tags = ? WHERE id = ?', 'no-ai', ticketId);
     const ticket = await loadTicket(db, ref);
 
     const messageId = await addMessage(db, ticket, {
@@ -456,10 +469,18 @@ function register(app) {
 
     if (guestKey) rememberTicketKey(c, ref, guestKey.key, cookieOptions(c));
 
-    // Everything below is a side effect the requester should not wait for.
+    // Everything below is a side effect the requester should not wait for —
+    // and each step is independent, because the confirmation email and the
+    // staff alert must still go out when the AI is having a bad day.
     await defer(c, (async () => {
-      const fresh = await loadTicket(db, ref);
-      await triage(db, env, cfg, fresh, message);
+      const optedOut = Boolean(body.no_ai);
+      if (!optedOut) {
+        try {
+          await triage(db, env, cfg, await loadTicket(db, ref), message);
+        } catch (err) {
+          console.warn('support triage failed:', err && err.message);
+        }
+      }
       const after = await loadTicket(db, ref);
       await alertStaff(env, cfg, after.priority === 'urgent' ? 'ticket_urgent' : 'ticket_new', after);
       await emailRequester(env, cfg, after, ticketOpenedMail(after, cfg, guestKey ? guestKey.key : null));
@@ -483,6 +504,7 @@ function register(app) {
   async function triage(db, env, cfg, ticket, message) {
     const aiCfg = ai.aiConfig(env);
     if (!aiCfg.classify || !ticket) return;
+    if (tagList(ticket.tags).includes('no-ai')) return;
 
     const result = await ai.classifyTicket(env, {
       subject: ticket.subject, body: message, categories: CATEGORIES,
@@ -493,17 +515,22 @@ function register(app) {
     const priority = result.priority ? normalizePriority(result.priority) : ticket.priority;
     const tags = normalizeTags(result.tags.join(','));
 
+    // A model's spam verdict TAGS the ticket; it never sets `spam`, which
+    // hides it from every default queue view and counter. A false positive
+    // there is a customer who is simply never answered, so that call stays
+    // with a human — the tag is what puts it in front of them.
+    const merged = result.spam ? normalizeTags(`${tags},possible-spam`) : tags;
     await db.run(
       `UPDATE tickets
-          SET category = ?, priority = ?, tags = ?, locale = ?, spam = ?,
+          SET category = ?, priority = ?, tags = ?, locale = ?,
               sla_due_at = ?, ai_classified_at = ?, updated_at = datetime('now')
         WHERE id = ? AND ai_classified_at IS NULL`,
-      category, priority, tags, result.language, result.spam ? 1 : 0,
+      category, priority, merged, result.language,
       slaDueAt(priority, cfg, new Date(`${String(ticket.created_at).replace(' ', 'T')}Z`).getTime() || Date.now()),
       Date.now(), ticket.id
     );
     await addEvent(db, ticket.id, 'AI triage', 'classified',
-      `category ${category}, priority ${priority}${result.spam ? ', flagged as spam' : ''}${result.reason ? ` — ${result.reason}` : ''}`);
+      `category ${category}, priority ${priority}${result.spam ? ', looks like spam (tagged, not hidden)' : ''}${result.reason ? ` — ${result.reason}` : ''}`);
 
     if (result.spam) await alertStaff(env, cfg, 'ticket_spam', { ...ticket, category, priority });
   }

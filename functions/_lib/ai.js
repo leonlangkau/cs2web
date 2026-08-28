@@ -57,6 +57,19 @@ function aiConfig(env = {}) {
 
 const isAiConfigured = (env = {}) => Boolean(env.GEMINI_API_KEY);
 
+/**
+ * String() with no sharp edge. `String({ toString: null })` throws, and the
+ * re-validation layer below exists precisely to handle values chosen by
+ * someone else — so the one place that must not throw cannot be the place
+ * that does.
+ */
+function str(value) {
+  if (value === null || value === undefined) return '';
+  if (typeof value === 'string') return value;
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+  try { return String(value); } catch { return ''; }
+}
+
 /* ------------------------------------------------------------------ *
  * Input hygiene
  * ------------------------------------------------------------------ */
@@ -68,11 +81,24 @@ const isAiConfigured = (env = {}) => Boolean(env.GEMINI_API_KEY);
  * model to understand "my login is broken".
  */
 function redactSecrets(text) {
-  return String(text || '')
+  // The separator is [ _-]? throughout because people write "api key",
+  // "api_key" and "apikey" interchangeably, and the one that gets missed is
+  // always the one they actually typed.
+  const SECRET_WORD = '(?:pass(?:word|phrase|wd)?|pwd|secret|api[ _-]?key|access[ _-]?key|token|'
+    + 'seed(?:[ _-]?phrase)?|recovery[ _-]?phrase|private[ _-]?key|licen[cs]e[ _-]?key)';
+  return str(text)
+    // A base58 private key (WIF) — the thing that actually loses someone money.
+    .replace(/\b[5KL][1-9A-HJ-NP-Za-km-z]{50,51}\b/g, '[redacted-key]')
+    .replace(/\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g, '[redacted-jwt]')
     .replace(/\b[a-fA-F0-9]{32,}\b/g, '[redacted-token]')
     .replace(/\b(?:0x[a-fA-F0-9]{40}|[13][a-km-zA-HJ-NP-Z1-9]{25,34}|bc1[a-z0-9]{25,62})\b/g, '[redacted-address]')
-    .replace(/\b(pass(?:word|phrase)?|secret|api[_-]?key|token|seed)\b\s*[:=]\s*\S+/gi, '$1: [redacted]')
-    .replace(/\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g, '[redacted-jwt]');
+    // "password: x", "pwd=x" — and the way people actually write it:
+    // "my password is x", 'the password "x" does not work'.
+    .replace(new RegExp(`\\b${SECRET_WORD}\\b\\s*[:=]\\s*\\S+`, 'gi'), (m) => `${m.split(/[:=]/)[0]}: [redacted]`)
+    .replace(new RegExp(`\\b(${SECRET_WORD})\\b(\\s+(?:is|was|=)\\s+|\\s+)["'\`]?([^\\s"'\`]{4,})["'\`]?`, 'gi'),
+      (whole, word) => `${word} [redacted]`)
+    // A twelve-or-more-word run of lowercase words is a wallet seed phrase.
+    .replace(/\b(?:[a-z]{3,8}\s+){11,23}[a-z]{3,8}\b/g, '[redacted-seed-phrase]');
 }
 
 /**
@@ -122,7 +148,7 @@ function parseJson(text) {
  * One Gemini call. Returns { ok, data|text } or { ok:false, error }.
  * `schema` (an OpenAPI-subset object) switches the model into JSON mode.
  */
-async function generate(env, { system, prompt, schema = null, temperature = 0.2, maxTokens = 900 }, fetcher = fetch) {
+async function generate(env, { system, prompt, schema = null, temperature = 0.2, maxTokens = 2400 }, fetcher = fetch) {
   const cfg = aiConfig(env);
   if (!cfg.enabled) return { ok: false, error: 'not_configured' };
 
@@ -198,7 +224,7 @@ function transcript(messages, limit = 24) {
   const recent = messages.slice(-limit);
   return recent.map((m) => {
     const who = m.author_role === 'staff' ? 'SUPPORT AGENT' : (m.author_role === 'system' ? 'SYSTEM' : 'CUSTOMER');
-    return `[${who}] ${redactSecrets(m.body).slice(0, 1500)}`;
+    return `[${who}] ${redactSecrets(str(m.body)).slice(0, 1500)}`;
   }).join('\n\n');
 }
 
@@ -235,17 +261,20 @@ async function summarizeTicket(env, { ticket, messages }, fetcher = fetch) {
       + 'customer has already tried, and list the concrete next steps for the agent.',
     schema: SUMMARY_SCHEMA,
     temperature: 0.1,
-    maxTokens: 700,
+    // Sized for a THINKING model: gemini-2.5-flash spends output tokens on
+    // reasoning before it emits a character, so a budget tuned to the size of
+    // the answer comes back empty rather than short.
+    maxTokens: 2400,
   }, fetcher);
 
   if (!result.ok) return result;
   const d = result.data || {};
   return {
     ok: true,
-    summary: String(d.summary || '').slice(0, 1200),
-    problem: String(d.problem || '').slice(0, 400),
-    tried: (Array.isArray(d.tried) ? d.tried : []).slice(0, 6).map((s) => String(s).slice(0, 200)),
-    nextSteps: (Array.isArray(d.nextSteps) ? d.nextSteps : []).slice(0, 6).map((s) => String(s).slice(0, 200)),
+    summary: str(d.summary).slice(0, 1200),
+    problem: str(d.problem).slice(0, 400),
+    tried: (Array.isArray(d.tried) ? d.tried : []).slice(0, 6).map((s) => str(s).slice(0, 200)),
+    nextSteps: (Array.isArray(d.nextSteps) ? d.nextSteps : []).slice(0, 6).map((s) => str(s).slice(0, 200)),
     sentiment: SENTIMENTS.has(d.sentiment) ? d.sentiment : 'neutral',
     urgency: URGENCIES.has(d.urgency) ? d.urgency : 'normal',
     waitingOn: d.waitingOn === 'customer' ? 'customer' : 'support',
@@ -306,16 +335,16 @@ async function draftReplies(env, { ticket, messages, articles = [], macros = [] 
       + 'that acknowledges and sets expectations. Label each one in two or three words.',
     schema: DRAFTS_SCHEMA,
     temperature: 0.4,
-    maxTokens: 1400,
+    maxTokens: 4000,
   }, fetcher);
 
   if (!result.ok) return result;
   const drafts = (Array.isArray(result.data?.drafts) ? result.data.drafts : [])
     .slice(0, 3)
     .map((d) => ({
-      label: String(d.label || 'Draft').slice(0, 40),
-      body: String(d.body || '').slice(0, 4000),
-      rationale: String(d.rationale || '').slice(0, 200),
+      label: (str(d.label) || 'Draft').slice(0, 40),
+      body: str(d.body).slice(0, 4000),
+      rationale: str(d.rationale).slice(0, 200),
     }))
     .filter((d) => d.body.length > 0);
 
@@ -368,17 +397,17 @@ async function rankArticles(env, { text, articles }, fetcher = fetch) {
       + 'confidence between 0 and 1.',
     schema: RANK_SCHEMA,
     temperature: 0.1,
-    maxTokens: 600,
+    maxTokens: 2000,
   }, fetcher);
 
   if (!result.ok) return result;
   const allowed = new Map(articles.map((a) => [a.slug, a]));
   const matches = (Array.isArray(result.data?.matches) ? result.data.matches : [])
-    .filter((m) => allowed.has(String(m.slug)))
+    .filter((m) => allowed.has(str(m.slug)))
     .slice(0, 3)
     .map((m) => ({
-      article: allowed.get(String(m.slug)),
-      why: String(m.why || '').slice(0, 220),
+      article: allowed.get(str(m.slug)),
+      why: str(m.why).slice(0, 220),
       confidence: Math.max(0, Math.min(1, Number(m.confidence) || 0.5)),
     }));
   return { ok: true, matches };
@@ -422,7 +451,7 @@ async function classifyTicket(env, { subject, body, categories }, fetcher = fetc
       + 'Language: the BCP-47 code the customer wrote in, e.g. en, de, pt-BR.',
     schema: CLASSIFY_SCHEMA,
     temperature: 0,
-    maxTokens: 400,
+    maxTokens: 1600,
   }, fetcher);
 
   if (!result.ok) return result;
@@ -430,17 +459,17 @@ async function classifyTicket(env, { subject, body, categories }, fetcher = fetc
   const ids = new Set(categories.map(([id]) => id));
   return {
     ok: true,
-    category: ids.has(String(d.category)) ? String(d.category) : null,
+    category: ids.has(str(d.category)) ? str(d.category) : null,
     priority: URGENCIES.has(d.priority) ? d.priority : null,
-    tags: (Array.isArray(d.tags) ? d.tags : []).slice(0, 4).map((t) => String(t).slice(0, 24)),
-    language: /^[a-zA-Z]{2,3}(-[A-Za-z0-9]{2,8})?$/.test(String(d.language || '')) ? String(d.language) : null,
+    tags: (Array.isArray(d.tags) ? d.tags : []).slice(0, 4).map((t) => str(t).slice(0, 24)),
+    language: /^[a-zA-Z]{2,3}(-[A-Za-z0-9]{2,8})?$/.test(str(d.language)) ? String(d.language) : null,
     spam: d.spam === true,
-    reason: String(d.reason || '').slice(0, 200),
+    reason: str(d.reason).slice(0, 200),
   };
 }
 
 export {
-  aiConfig, isAiConfigured, generate, redactSecrets,
+  aiConfig, isAiConfigured, generate, redactSecrets, str,
   summarizeTicket, draftReplies, rankArticles, classifyTicket,
   DEFAULT_MODEL, FALLBACK_MODEL,
 };

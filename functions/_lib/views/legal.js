@@ -512,15 +512,19 @@ function privacy(ctx) {
         <li>sort the ticket into a topic and priority, and flag obvious spam;</li>
         <li>write a summary and draft replies <em>for a member of staff to read, edit and decide on</em>.</li>
       </ul>
-      <p><strong>A reply is never sent to you by an AI.</strong> Every message you receive on a ticket was
-      written or approved and sent by a person.</p>
+      <p><strong>A reply is never sent to you by an AI.</strong> Every message in your ticket was written
+      or approved and sent by a person. The one place you may see text a model wrote is the
+      "try this first" suggestions on the contact form, where the one-line reason beside a help article
+      is labelled as an AI suggestion.</p>
       <p>Before any text leaves this site it is passed through an automatic filter that masks things that look
       like credentials — long tokens, API keys, wallet addresses, anything written after "password:". That
       filter is a safety net, not a guarantee: please do not put passwords, licence keys, recovery phrases or
       private keys in a support ticket in the first place. We will never ask you for them.</p>
       <p>Attachments are never sent to the AI provider — only the text of the conversation is.</p>
-      <p>If you would rather your ticket were not processed this way, say so in your first message and we will
-      handle it manually.</p>
+      <p>If you would rather none of this happened, tick <em>"Don't use AI on my ticket at all"</em> on the
+      contact form. That switches off the live matching in your browser, stops your text being sent for it,
+      and marks the ticket so our staff cannot run the AI assist on it either. You can also just say so in
+      your first message and we will do the same by hand.</p>
       <h3>7.3 Staff alerts</h3>
       <p>Where configured, a short notification may be sent to our staff's internal chat when a ticket is
       opened or escalated. It contains the ticket reference, subject, topic, priority and who opened it — not

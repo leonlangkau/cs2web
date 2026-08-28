@@ -284,7 +284,8 @@ function newTicket(ctx, { errors = [], values = {}, suggestions = [], cfg, needs
         <p class="muted">These look like they cover what you described. Opening one does not lose your draft.</p>
         ${map(suggestions, (s) => `<a class="try-first-item" href="/help/a/${encodeURIComponent(s.article.slug)}" target="_blank" rel="noopener">
           <span class="try-first-title">${esc(s.article.title)}</span>
-          <span class="muted">${esc(s.why || s.article.summary || excerpt(s.article.body, 120))}</span>
+          <span class="muted">${esc(s.why || s.article.summary || excerpt(s.article.body, 120))}
+            ${s.why && s.aiWritten ? '<span class="tag tag-lock">AI SUGGESTION</span>' : ''}</span>
         </a>`)}
       </div>`
     : '';
@@ -347,8 +348,14 @@ function newTicket(ctx, { errors = [], values = {}, suggestions = [], cfg, needs
           placeholder="What you did, what happened, what you expected. Paste the exact error text. Include your app version and Windows version if it is about the app."
         >${esc(values.body || '')}</textarea></label>
       ${attachBlock}
-      ${aiDeflect ? `<p class="fineprint" id="deflect-note">As you describe the problem we check the help
-        centre for a matching fix. Nothing is sent to support until you press the button.</p>` : ''}
+      ${aiDeflect ? `<div class="ai-consent" id="deflect-note">
+        <p class="fineprint">As you type, we look for a help article that matches — which means the words
+          you have written here are sent to our AI provider to do the matching. Nothing reaches the
+          support team until you press the button, and no reply you ever get is written by an AI.
+          <a href="/privacy#p7">How we use it</a>.</p>
+        <label class="filter-check"><input type="checkbox" name="no_ai" value="1" id="no-ai"
+          ${values.no_ai ? 'checked' : ''}> Don't use AI on my ticket at all</label>
+      </div>` : `<input type="hidden" name="no_ai" value="${values.no_ai ? '1' : ''}">`}
       ${captchaBlock}
       <button type="submit" class="btn btn-primary btn-block">Send to support</button>
     </form>

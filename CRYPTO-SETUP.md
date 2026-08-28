@@ -61,6 +61,15 @@ Use a wallet **you** control the keys to.
 > rotated, are sometimes shared, and often reject tokens sent on a network the
 > deposit page did not expect. Use a wallet whose seed phrase you hold.
 
+Any Ethereum wallet works, including multi-chain ones — Phantom, for instance,
+derives both a Solana and an Ethereum account from one seed, so a single app can
+hold all four of the coins this sells. Whether a given wallet *displays* an
+incoming token is a question about that wallet's UI, never about whether the
+money arrived: an ERC-20 balance lives in the token contract keyed by your
+address, so it is yours the moment the transfer confirms, and any wallet holding
+that private key can reach it — importing the seed elsewhere recovers a token a
+wallet declines to show.
+
 The site validates both before offering them. An Ethereum address is checked
 against its **EIP-55 checksum** — the mixed-case pattern in a normal `0x…`
 address is a checksum of itself, so a single transposed character is caught. A
@@ -275,10 +284,23 @@ including the cases that must **not** credit.
 
 ## 9. Withdrawing, and tax
 
-Payments land in your wallet, spendable immediately — there is no settlement
-step and no balance held anywhere on your behalf. Which also means there is no
-chargeback, no refund button, and no support desk but you: a crypto payment is
-final once confirmed, in both directions.
+Payments land in your wallet directly — there is no settlement step and no
+balance held anywhere on your behalf. Which also means there is no chargeback,
+no refund button, and no support desk but you: a crypto payment is final once
+confirmed, in both directions.
+
+**Keep a little native coin in each address for gas.** This catches people out
+with tokens: USDT is not a balance your address holds, it is a row in the
+token's contract keyed by your address — and *moving* that row costs a
+transaction, paid in the chain's own coin. So an address holding 500 USDT and
+zero ETH cannot send that USDT anywhere until some ETH arrives. Nothing is lost
+and nothing is at risk; it is simply immovable until you fund the gas. The same
+applies to SPL USDT and SOL, though Solana fees are fractions of a cent. If you
+expect to take mostly USDT, keep roughly one transaction's worth of ETH in the
+receiving address and top it up occasionally.
+
+Receiving, by contrast, never needs gas or any setup at all — the sender pays
+for that, which is why a brand-new empty address can take payments on day one.
 
 Keep records. **Admin → On-chain** holds every order and transaction hash, which
 is the paper trail. Whether that revenue is taxable, and how, is between you and

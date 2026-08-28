@@ -223,12 +223,16 @@ directly to **your** wallet, and the site watches those addresses and grants
 **alongside** BTCPay — the store shows whichever are configured — or instead of
 it.
 
-Two secrets is the whole setup:
+Two secrets is the whole setup. **Settings → Variables and Secrets → + Add**,
+type **Secret**, then **redeploy** (Pages binds variables at deploy time, so an
+existing deployment keeps the old values until you do):
 
-```bash
-npx wrangler pages secret put ETH_ADDRESS   # covers ETH and USDT-ERC20
-npx wrangler pages secret put SOL_ADDRESS   # covers SOL and USDT-SPL
-```
+| Name | Value |
+| --- | --- |
+| `ETH_ADDRESS` | your `0x…` address — covers ETH and USDT-ERC20 |
+| `SOL_ADDRESS` | your base58 address — covers SOL and USDT-SPL |
+
+Or `npx wrangler pages secret put ETH_ADDRESS` if you prefer the CLI.
 
 Use a wallet you hold the keys to, not an exchange deposit address. Both are
 validated before anything is offered — an Ethereum address is checked against
@@ -238,13 +242,8 @@ checkout and is flagged in **Admin → On-chain**.
 
 Because Pages Functions have no cron, the chains are polled during requests that
 were happening anyway — in particular the buyer's own payment page, which polls
-while they watch it. To have the watcher run regardless, set a shared secret:
-
-```bash
-npx wrangler pages secret put CRYPTO_SCAN_SECRET
-```
-
-and point any scheduler (cron-job.org, a GitHub Actions schedule, a Cloudflare
+while they watch it. To have the watcher run regardless, add a `CRYPTO_SCAN_SECRET` secret the same
+way and point any scheduler (cron-job.org, a GitHub Actions schedule, a Cloudflare
 **Worker** cron) at `https://yourdomain.com/api/crypto/scan?key=YOUR_SECRET`
 every few minutes. Unset, that endpoint is closed to everyone.
 

@@ -72,18 +72,45 @@ than silently collecting money to somewhere nobody can spend it.
 
 ## 3. Set the secrets
 
-```bash
-npx wrangler pages secret put ETH_ADDRESS      # paste your 0x… address
-npx wrangler pages secret put SOL_ADDRESS      # paste your base58 address
-```
+In the **Cloudflare dashboard**:
 
-Or in the Pages dashboard: **Settings → Variables and Secrets → Add → type
-Secret**.
+1. **dash.cloudflare.com** → **Workers & Pages** → your Pages project.
+2. **Settings** → **Variables and Secrets**.
+3. **+ Add** — and set the type to **Secret**, not Text. (Text values are
+   readable by anyone with dashboard access and end up in build logs; a Secret
+   is write-only once saved.)
+4. Add these two, then **Save**:
 
-Setting only one is fine — you will simply be offering two coins instead of
-four. Setting neither leaves the store exactly as it was.
+| Name | Value |
+| --- | --- |
+| `ETH_ADDRESS` | your `0x…` address — covers **ETH** and **USDT-ERC20** |
+| `SOL_ADDRESS` | your base58 address — covers **SOL** and **USDT-SPL** |
+
+5. **Redeploy.** This is the step people miss: on Pages, environment variables
+   and secrets are bound at deploy time, so an existing deployment keeps running
+   with the old (empty) values. Push any commit, or **Deployments** → the latest
+   one → **⋯** → **Retry deployment**. Until you do, `/buy` will look exactly as
+   it did before and you will think it didn't work.
+
+> **Production vs Preview.** The dashboard keeps a separate set per environment.
+> Add them under **Production**. If you also want the coins on preview branch
+> deployments, add them to **Preview** as well — the same values are fine, since
+> these are receive-only addresses.
+
+Prefer the CLI? `npx wrangler pages secret put ETH_ADDRESS` does the same thing.
+
+Setting only one of the two is fine — you will simply be offering two coins
+instead of four. Setting neither leaves the store exactly as it was.
 
 That is the minimum. Everything from here is optional.
+
+### Checking it took
+
+Sign in as an admin and open **Admin → On-chain**. The "Receiving addresses"
+panel lists every coin that is live, with the address money will arrive at and
+how many confirmations it waits for. If a coin is missing, its address was
+rejected — the reason is printed right there. If the panel says nothing is
+configured at all, the redeploy in step 5 hasn't happened.
 
 ### Optional: a cron so payments confirm while nobody is browsing
 
@@ -93,13 +120,10 @@ page, the store page, a profile load, the admin queue. In practice a buyer
 watching their payment page is exactly the traffic needed to confirm it, and
 anyone who wanders off is picked up the moment they come back.
 
-To have it run regardless, set a shared secret:
-
-```bash
-npx wrangler pages secret put CRYPTO_SCAN_SECRET   # any long random string
-```
-
-then point any scheduler at it every few minutes. It accepts `GET` (so the free
+To have it run regardless, add one more **Secret** the same way —
+`CRYPTO_SCAN_SECRET`, any long random string (`node -e
+"console.log(require('crypto').randomBytes(32).toString('hex'))"` will make you
+one) — redeploy, then point any scheduler at it every few minutes. It accepts `GET` (so the free
 services work) and `POST`:
 
 ```

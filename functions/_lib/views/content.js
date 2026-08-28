@@ -43,6 +43,8 @@ const CHANGELOG = [
     'Every ticket is a live chat thread with a real person, with screenshots and log files attached.',
     'Rate a ticket when it is done, and tell us whether a help article actually helped.',
     'Staff side: a full ticket queue with priorities, SLA timers, assignment, tags, canned replies, internal notes and optional AI summaries and reply drafts.',
+    'A public status page at /status — component health, live incidents, scheduled maintenance and 90 days of history, with a machine-readable /status.json for uptime monitors.',
+    'While anything is degraded, the help centre and the ticket form say so up front, so you are not the fifth person to report it.',
   ]],
   ['1.0.0', '2026-08-24', 'Initial public release', [
     'Match stats and heatmaps, crosshair & config manager, FPS presets, skin tracker.',

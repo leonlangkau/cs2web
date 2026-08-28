@@ -20,8 +20,10 @@ import { register as registerPayments } from "./routes-payments.js";
 import { register as registerOnchain } from "./routes-onchain.js";
 import { register as registerForum } from "./routes-forum.js";
 import { register as registerSupport } from "./routes-support.js";
+import { register as registerStatus } from "./routes-status.js";
 import { register as registerAdmin } from "./routes-admin.js";
 import { register as registerAdminSupport } from "./routes-admin-support.js";
+import { register as registerAdminStatus } from "./routes-admin-status.js";
 
 const APP_VERSION = "1.1.0";
 const MAX_BODY_BYTES = 256 * 1024;
@@ -85,8 +87,17 @@ class Context {
           const form = await request.formData();
           const out = {};
           this._files = [];
+          this._multi = new Map();
           for (const [k, v] of form.entries()) {
-            if (typeof v === "string") { out[k] = v; continue; }
+            if (typeof v === "string") {
+              out[k] = v;
+              // A checkbox group posts the same name repeatedly; the flat map
+              // keeps last-wins (which every existing form relies on) and the
+              // full list is available through c.req.all().
+              if (!this._multi.has(k)) this._multi.set(k, []);
+              this._multi.get(k).push(v);
+              continue;
+            }
             // The body stream can only be read once, so uploaded files are
             // kept here for c.req.files(); the text map keeps the filename so
             // routes that only care about field names are unaffected.
@@ -97,9 +108,13 @@ class Context {
         } else {
           this._body = {};
           this._files = [];
+          this._multi = new Map();
         }
         return this._body;
       },
+
+      /** Every value posted under `name` — for checkbox groups and multi-selects. */
+      all: (name) => (this._multi ? this._multi.get(name) || [] : []),
 
       /**
        * Uploaded files from a multipart body, as [{ field, file }]. Empty
@@ -250,8 +265,10 @@ function createApp({ resolveDb, env = {} }) {
   registerOnchain(app);
   registerForum(app);
   registerSupport(app);
+  registerStatus(app);
   registerAdmin(app);
   registerAdminSupport(app);
+  registerAdminStatus(app);
 
   app.notFound((c) => c.html(errorPage(c.get("view") || fallbackView(), {
     code: 404, title: "Not found", message: "This page does not exist.",

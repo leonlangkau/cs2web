@@ -22,6 +22,7 @@ import {
   normalizeStatus, normalizePriority, normalizeCategory, normalizeTags, tagList,
   cleanBody, cleanLine, supportConfig, slaDueAt, normalizeRef,
   addMessage, addEvent, sweepSla, sweepAutoClose, sweepAttachments, sameRequester,
+  recomputeTicketState,
   emailRequester, staffReplyMail, ticketClosedMail, alertStaff,
 } from "./support.js";
 
@@ -902,10 +903,22 @@ function register(app) {
       // Re-base the first-response clock on the new priority, measured from
       // when the ticket arrived — not from now, or an escalation would hand
       // us back time we had already used.
+      //
+      // Relaxing the priority also has to lift a breach the new deadline no
+      // longer justifies: a ticket that blew a 2h urgent target is not still
+      // breaching once it is a 72h low, and leaving the flag on would keep it
+      // red in the queue forever. Only while it is genuinely unanswered.
+      const due = slaDueAt(priority, cfg, sqliteMs(ticket.created_at));
+      const stillBreached = ticket.first_response_at ? Number(ticket.sla_breached) : (due <= Date.now() ? 1 : 0);
       await db.run(
-        `UPDATE tickets SET priority = ?, sla_due_at = ?, updated_at = datetime('now') WHERE id = ?`,
-        priority, slaDueAt(priority, cfg, sqliteMs(ticket.created_at)), ticket.id
+        `UPDATE tickets SET priority = ?, sla_due_at = ?, sla_breached = ?, updated_at = datetime('now')
+          WHERE id = ?`,
+        priority, due, stillBreached, ticket.id
       );
+      if (Number(ticket.sla_breached) === 1 && stillBreached === 0) {
+        await addEvent(db, ticket.id, user.username, 'sla_reset',
+          `breach cleared — ${priority} allows longer than the time already spent`);
+      }
       await addEvent(db, ticket.id, user.username, 'priority', `${ticket.priority} → ${priority}`);
       await adminAudit(c, `set ticket ${ticket.ref} priority to ${priority}`);
       if (priority === 'urgent') {
@@ -992,6 +1005,11 @@ function register(app) {
       setFlash(c, 'error', 'That ticket has itself been merged into another one. Merge into the survivor instead.');
       return c.redirect(`/admin/support/${ticket.id}`, 302);
     }
+    if (target.status === 'closed') {
+      setFlash(c, 'error', 'That ticket is closed. Merging a live conversation into a closed one would '
+        + 'bury it — reopen the survivor first, or merge the other way round.');
+      return c.redirect(`/admin/support/${ticket.id}`, 302);
+    }
     if (!sameRequester(ticket, target)) {
       setFlash(c, 'error', 'Those tickets are from different people. Merging would either strand one of '
         + 'them at a dead link or hand them the other\'s conversation — link them with a note instead.');
@@ -1024,8 +1042,14 @@ function register(app) {
       body: `This ticket was merged into ${target.ref}, where the conversation continues. `
         + 'Your other ticket is listed under "Your tickets" on the support page.',
     });
+    // The survivor now holds messages it never had: its first-response stamp,
+    // its last-activity timestamps and its open/answered state all have to be
+    // rebuilt from what it actually contains.
+    await recomputeTicketState(db, target.id);
+
     await addEvent(db, target.id, user.username, 'merged_in', `${ticket.ref} ("${ticket.subject}") merged in`);
-    await addEvent(db, ticket.id, user.username, 'merged_into', `merged into ${target.ref}`);
+    await addEvent(db, ticket.id, user.username, 'merged_into',
+      `merged into ${target.ref} (matched on ${ticket.user_id ? 'account' : 'an unverified email address'})`);
     await adminAudit(c, `merged ticket ${ticket.ref} into ${target.ref}`);
     setFlash(c, 'success', `${ticket.ref} merged into ${target.ref}.`);
     return c.redirect(`/admin/support/${target.id}`, 302);

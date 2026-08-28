@@ -516,4 +516,65 @@ CREATE TABLE IF NOT EXISTS support_views (
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS idx_support_views_owner ON support_views(owner_id, position);
+
+-- ============================================================================
+-- Status page. Admin-editable service health, shown at /status and folded into
+-- the help centre and the ticket form — a visitor about to report a known
+-- outage should see it before they type, not after we reply.
+-- ============================================================================
+
+-- One row per thing that can be up or down. \`status\` is ordered by severity in
+-- functions/_lib/status.js, which is what lets the page compute one overall
+-- verdict without a second column to keep in sync.
+CREATE TABLE IF NOT EXISTS status_components (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  slug        TEXT NOT NULL UNIQUE,
+  name        TEXT NOT NULL,
+  description TEXT NOT NULL DEFAULT '',
+  status      TEXT NOT NULL DEFAULT 'operational'
+              CHECK (status IN ('operational','maintenance','degraded','partial','major')),
+  position    INTEGER NOT NULL DEFAULT 0,
+  visible     INTEGER NOT NULL DEFAULT 1,
+  changed_at  INTEGER,
+  created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_status_components_visible ON status_components(visible, position);
+
+-- An incident or a planned maintenance window. \`components\` is a comma-joined
+-- list of component slugs — the same storage choice as ticket tags: a handful
+-- of short values, always read with the row, never joined against.
+--
+-- Timestamps are ms epoch, the convention used everywhere the value is
+-- compared against Date.now() in JS.
+CREATE TABLE IF NOT EXISTS status_incidents (
+  id              INTEGER PRIMARY KEY AUTOINCREMENT,
+  title           TEXT NOT NULL,
+  kind            TEXT NOT NULL DEFAULT 'incident' CHECK (kind IN ('incident','maintenance')),
+  impact          TEXT NOT NULL DEFAULT 'minor' CHECK (impact IN ('none','minor','major','critical')),
+  state           TEXT NOT NULL DEFAULT 'investigating'
+                  CHECK (state IN ('investigating','identified','monitoring','resolved','scheduled','in_progress','completed')),
+  components      TEXT NOT NULL DEFAULT '',
+  started_at      INTEGER NOT NULL,
+  resolved_at     INTEGER,
+  scheduled_for   INTEGER,
+  scheduled_until INTEGER,
+  created_by      TEXT,
+  created_at      TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at      TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_status_incidents_open ON status_incidents(resolved_at, started_at);
+CREATE INDEX IF NOT EXISTS idx_status_incidents_started ON status_incidents(started_at);
+
+-- The running commentary on an incident. Append-only by design: a status page
+-- that quietly rewrites what it said an hour ago is worth nothing.
+CREATE TABLE IF NOT EXISTS status_updates (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  incident_id INTEGER NOT NULL REFERENCES status_incidents(id) ON DELETE CASCADE,
+  state       TEXT NOT NULL,
+  body        TEXT NOT NULL,
+  author_name TEXT NOT NULL,
+  created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_status_updates_incident ON status_updates(incident_id, id);
 `;

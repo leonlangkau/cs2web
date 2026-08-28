@@ -1,7 +1,8 @@
 # GoyHub — CS2 Companion Website
 
 Full website for the GoyHub CS2 companion app: animated landing page with gated
-download, community forum, a help centre and support desk with live chat,
+download, community forum, a help centre and support desk with live chat, a
+public status page,
 account system with IP audit logging, a self-hosted proof-of-work CAPTCHA, and a
 secured admin backend.
 
@@ -134,6 +135,32 @@ Copy `.dev.vars.example` to `.dev.vars` and set `CAPTCHA_SECRET` and
   reply (reusing the existing provider, silently off without one), and a
   Discord-compatible webhook can ping your staff channel on new tickets,
   escalations and SLA breaches
+
+### Status page
+- **`/status`** — component health, live incidents with their update trail,
+  scheduled maintenance and 90 days of history, open to everyone including
+  logged-out and banned visitors (the people who most need to know whether
+  sign-in is broken are the ones who cannot sign in)
+- **The headline is derived, never stored.** The worst visible component decides
+  the banner, the beacon colour and the pulse — so "All systems operational"
+  cannot sit above a component marked *Major outage*
+- **Animation that means something**: a beacon pulses only while something is
+  actually wrong, so a glance at a pinned tab is enough; the banner gets a slow
+  tint sweep during an incident; and a row flashes once when a live update
+  changes it, so nothing is swapped in silently. All of it collapses under
+  `prefers-reduced-motion`, and the page is correct before any JavaScript runs
+- **Admin → Status** — set any component's state in two clicks, open an incident
+  or schedule maintenance (which moves its components with it), post updates,
+  and an *all clear* button. Resolving hands components back — but only the ones
+  no other open incident still claims
+- **It feeds the support funnel**: while anything is degraded, the help centre,
+  the support inbox and the new-ticket form all carry a "we already know about
+  this" strip naming the incident. The moment before someone describes a problem
+  we already know about is the only moment that saves anyone any work
+- **`/status.json`** — the same data with CORS open, for an uptime monitor, the
+  desktop app, or anything else. The page itself polls it every 30s
+- Where a support webhook is configured, opening and resolving an incident pings
+  the staff channel too
 
 ### Forum
 - Categories → threads → replies, with views, pinning, locking and pagination

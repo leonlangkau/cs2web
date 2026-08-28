@@ -75,7 +75,8 @@ function footer(ctx) {
     <nav aria-label="Product"><h3>Product</h3>
       <a href="/download">Download</a><a href="/#features">Features</a><a href="/changelog">Changelog</a><a href="/faq">FAQ</a></nav>
     <nav aria-label="Support"><h3>Support</h3>
-      <a href="/help">Help centre</a><a href="/support/new">Contact support</a><a href="/support">My tickets</a></nav>
+      <a href="/help">Help centre</a><a href="/support/new">Contact support</a>
+      <a href="/support">My tickets</a><a href="/status">Service status</a></nav>
     <nav aria-label="Community"><h3>Community</h3>
       <a href="/forum">Forum</a><a href="/forum/c/support">Support</a><a href="/forum/c/configs">Configs &amp; Setups</a></nav>
     <nav aria-label="Account"><h3>Account</h3>${accountLinks}</nav>

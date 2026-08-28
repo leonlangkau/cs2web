@@ -372,8 +372,15 @@ function detail(ctx, {
       <button class="btn btn-warn btn-sm" type="submit">Add internal note</button></div>
   </form>`;
 
+  const mergeWarning = ticket.user_id
+    ? ''
+    : `<p class="fineprint">This ticket has no account behind it, so a merge is matched on the email
+        address the sender typed — which nobody has verified. Check the conversation reads like the same
+        person before merging, because the messages move permanently.</p>`;
+
   const dangerRow = `<div class="panel-form ticket-danger">
     <h3>Housekeeping</h3>
+    ${mergeWarning}
     <div class="ticket-controls">
       ${actionForm('tags', `<input type="text" name="tags" maxlength="200" value="${esc(ticket.tags)}"
         placeholder="tags, comma separated" aria-label="Tags">

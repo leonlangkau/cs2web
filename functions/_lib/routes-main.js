@@ -160,7 +160,7 @@ function register(app) {
   app.get('/sitemap.xml', async (c) => {
     const origin = new URL(c.req.url).origin;
     const urls = ['/', '/download', '/upgrade', '/faq', '/changelog', '/help', '/support/new',
-      '/terms', '/privacy', '/auth/signup', '/auth/login'];
+      '/status', '/terms', '/privacy', '/auth/signup', '/auth/login'];
 
     // Published help articles are the pages people actually search for, so
     // they belong in the sitemap. Bounded, and a failure here (a database

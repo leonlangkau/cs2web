@@ -15,6 +15,7 @@ import * as captcha from "./captcha.js";
 import * as ai from "./ai.js";
 import { searchArticles, terms, categoryForSection } from "./kb.js";
 import { cleanup } from "./bootstrap.js";
+import { statusHeadsUp } from "./status.js";
 import {
   readUploads, saveUploads, attachmentResponse,
 } from "./attachments.js";
@@ -119,7 +120,9 @@ function register(app) {
       )).n)
       : 0;
 
-    return c.html(views.helpIndex(c.get('view'), { sections, popular, q, results, openTickets }));
+    return c.html(views.helpIndex(c.get('view'), {
+      sections, popular, q, results, openTickets, headsUp: await statusHeadsUp(db),
+    }));
   });
 
   app.get('/help/s/:slug', async (c) => {
@@ -226,7 +229,9 @@ function register(app) {
         WHERE a.published = 1 ORDER BY a.pinned DESC, a.views DESC LIMIT 5`
     );
 
-    return c.html(views.supportHome(c.get('view'), { tickets, guestTickets, popular, cfg }));
+    return c.html(views.supportHome(c.get('view'), {
+      tickets, guestTickets, popular, cfg, headsUp: await statusHeadsUp(db),
+    }));
   });
 
   /* ---------------- New ticket ---------------- */
@@ -294,6 +299,9 @@ function register(app) {
       needsCaptcha: !user,
       aiDeflect: ai.aiConfig(c.get('cfg') || {}).deflect,
       fromArticle,
+      // Someone about to describe an outage we already know about should see
+      // that before they type, not after we reply.
+      headsUp: await statusHeadsUp(db),
     }));
   });
 
@@ -387,6 +395,7 @@ function register(app) {
         suggestions, cfg, needsCaptcha: !user,
         aiDeflect: ai.aiConfig(env).deflect,
         fromArticle,
+        headsUp: await statusHeadsUp(db),
       }), 400);
     }
 
@@ -508,23 +517,31 @@ function register(app) {
       }), 400);
     }
 
-    // Always answer the same way, whether or not the pair matched: this
-    // endpoint must not confirm that a reference or an address exists.
+    // Whether email is configured is a property of the SITE, not of the pair
+    // submitted — so it is answered before any lookup happens. Deciding it
+    // after would make the "cannot re-send" message an oracle confirming that
+    // the reference and address really do go together.
+    if (!cfg.emailNotify) {
+      return c.html(views.guestLookup(c.get('view'), {
+        errors: ['Email is not configured on this site, so a ticket link cannot be re-sent. '
+          + 'Open a new ticket and mention the old reference in it.'],
+        values: { ref, email },
+      }), 400);
+    }
+
+    // Past this point the answer is identical whether or not the pair matched:
+    // this endpoint must never confirm that a reference or an address exists.
     const ticket = await loadTicket(db, ref);
     const matches = ticket && ticket.key_hash
       && String(ticket.guest_email || '').toLowerCase() === email.toLowerCase();
 
     if (matches) {
-      if (!cfg.emailNotify) {
-        return c.html(views.guestLookup(c.get('view'), {
-          errors: ['Email is not configured on this site, so the link cannot be re-sent. '
-            + 'Open a new ticket and mention the old reference.'],
-          values: { ref, email },
-        }), 400);
-      }
       // The key itself is not recoverable (only its hash is stored), so issue
       // a fresh one and retire the old link — the same trade the password
-      // reset flow makes.
+      // reset flow makes. Anyone who knows both the reference AND the address
+      // can therefore invalidate a saved link; they cannot READ anything,
+      // because the replacement only ever goes to the address on the ticket,
+      // and the 6/hour per-IP bucket keeps it from being worth doing.
       const rotated = await issueTicketKey();
       await db.run('UPDATE tickets SET key_hash = ? WHERE id = ?', rotated.hash, ticket.id);
       await emailRequester(env, cfg, ticket, {
@@ -599,7 +616,7 @@ function register(app) {
 
     return c.html(views.ticketView(c.get('view'), {
       ticket, messages, attachments, mergedInto,
-      canReply: ticket.status !== 'closed' && !mergedInto,
+      canReply: !mergedInto,
       accessKey: access.via === 'key' && access.source === 'url' ? access.key : null,
       cfg, suggestions,
     }));
@@ -631,7 +648,7 @@ function register(app) {
     return c.json({
       ok: true,
       status: ticket.status,
-      canReply: ticket.status !== 'closed',
+      canReply: !ticket.merged_into,
       messages: messages.map((m) => ({
         id: m.id,
         author: m.author_name,
@@ -669,7 +686,12 @@ function register(app) {
       return c.redirect(back, 302);
     };
 
-    if (ticket.status === 'closed') return fail('This ticket is closed. Open a new one and mention this reference.');
+    // A closed ticket reopens on a reply — addMessage() has always implemented
+    // that, the closing email promises it, and only a MERGED ticket is a real
+    // dead end (its conversation lives on another ticket now).
+    if (ticket.merged_into) {
+      return fail('This ticket was merged into another one — reply there instead.');
+    }
 
     // Keyed per ticket, with staff on their own budget: an angry customer
     // sending twenty short messages must not throttle the reply.

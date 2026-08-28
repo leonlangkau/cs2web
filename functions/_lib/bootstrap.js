@@ -1,5 +1,6 @@
 import { hashPassword, verifyPassword, newToken, sha256hex } from "./crypto.js";
 import { seedHelpCentre, seedMacros } from "./kb.js";
+import { seedStatus } from "./status.js";
 
 /**
  * Reserved account that inherits the threads and posts of a deleted user, so
@@ -359,6 +360,7 @@ async function seed(db, env = {}) {
   // deletes an article does not find it reinstated on the next cold start.
   await seedHelpCentre(db);
   await seedMacros(db);
+  await seedStatus(db);
 
   return { generatedPassword };
 }
@@ -371,12 +373,36 @@ async function seed(db, env = {}) {
  * the person are denormalised copies that a foreign key will not touch.
  */
 async function scrubSupportIdentity(db, userId, placeholderName) {
+  const row = await db.get('SELECT username FROM users WHERE id = ?', userId);
+  const username = row ? row.username : null;
+
   await db.run(
     'UPDATE ticket_messages SET author_name = ? WHERE author_id = ?', placeholderName, userId
   );
   await db.run(
     'UPDATE ticket_attachments SET uploader_name = ? WHERE uploader_id = ?', placeholderName, userId
   );
+  await db.run(
+    'UPDATE ticket_notes SET author_name = ? WHERE author_id = ?', placeholderName, userId
+  );
+  await db.run(
+    'UPDATE user_notes SET author_name = ? WHERE author_id = ?', placeholderName, userId
+  );
+  await db.run(
+    'UPDATE tickets SET assignee_name = ? WHERE assignee_id = ?', placeholderName, userId
+  );
+  // These columns hold a NAME with no id beside it, so they can only be found
+  // by the name — which is exactly why they are easy to forget.
+  if (username) {
+    await db.run('UPDATE tickets SET closed_by = ? WHERE closed_by = ?', placeholderName, username);
+    await db.run('UPDATE ticket_events SET actor_name = ? WHERE actor_name = ?', placeholderName, username);
+    await db.run(
+      'UPDATE status_incidents SET created_by = ? WHERE created_by = ?', placeholderName, username
+    ).catch(() => {});
+    await db.run(
+      'UPDATE status_updates SET author_name = ? WHERE author_name = ?', placeholderName, username
+    ).catch(() => {});
+  }
   await db.run(
     'UPDATE tickets SET guest_email = NULL, guest_name = NULL, key_hash = NULL, ip = NULL, user_agent = NULL WHERE user_id = ?',
     userId

@@ -11,6 +11,7 @@
 import { page } from "./layout.js";
 import { esc, timeAgo, map, emailLink } from "./util.js";
 import { renderArticle, excerpt } from "../kb.js";
+import { statusNote } from "./status.js";
 import {
   STATUS_LABELS, PRIORITY_LABELS, CATEGORIES, CATEGORY_LABELS, MAX_SUBJECT, MAX_BODY,
 } from "../support.js";
@@ -46,7 +47,7 @@ const articleCard = (a) => `<a class="thread-row thread-row--flush help-row" hre
  * Help centre
  * ------------------------------------------------------------------ */
 
-function helpIndex(ctx, { sections, popular, q, results, openTickets = 0 }) {
+function helpIndex(ctx, { sections, popular, q, results, openTickets = 0, headsUp = null }) {
   const searchBlock = `<form class="filter-bar help-search" method="get" action="/help">
     <input type="search" name="q" value="${esc(q || '')}" maxlength="120" autocomplete="off"
            placeholder="Describe your problem, e.g. &quot;GoyHub crashes on launch&quot;" aria-label="Search the help centre">
@@ -93,6 +94,7 @@ function helpIndex(ctx, { sections, popular, q, results, openTickets = 0 }) {
         <a class="btn btn-primary" href="/support/new">Contact support</a>
       </div>
     </div>
+    ${statusNote(headsUp)}
     ${yourTickets}
     ${searchBlock}
     ${resultsBlock}
@@ -208,7 +210,7 @@ const ticketRow = (t, keyed) => `<a class="thread-row ticket-row" href="/support
   </span>
 </a>`;
 
-function supportHome(ctx, { tickets, guestTickets, popular, cfg }) {
+function supportHome(ctx, { tickets, guestTickets, popular, cfg, headsUp = null }) {
   const mine = tickets.length
     ? `<div class="thread-list">${map(tickets, (t) => ticketRow(t, null))}</div>`
     : `<p class="muted empty-state">${ctx.user
@@ -234,6 +236,8 @@ function supportHome(ctx, { tickets, guestTickets, popular, cfg }) {
         <a class="btn btn-primary" href="/support/new">New ticket</a>
       </div>
     </div>
+
+    ${statusNote(headsUp)}
 
     <div class="support-steps">
       <div class="support-step"><span class="support-step-n">1</span>
@@ -270,7 +274,7 @@ function supportHome(ctx, { tickets, guestTickets, popular, cfg }) {
  * New ticket
  * ------------------------------------------------------------------ */
 
-function newTicket(ctx, { errors = [], values = {}, suggestions = [], cfg, needsCaptcha, aiDeflect, fromArticle }) {
+function newTicket(ctx, { errors = [], values = {}, suggestions = [], cfg, needsCaptcha, aiDeflect, fromArticle, headsUp = null }) {
   const categoryOptions = map(CATEGORIES, ([id, label]) =>
     `<option value="${esc(id)}" ${values.category === id ? 'selected' : ''}>${esc(label)}</option>`);
 
@@ -323,6 +327,7 @@ function newTicket(ctx, { errors = [], values = {}, suggestions = [], cfg, needs
     <h1 class="section-title">Contact support</h1>
     <p class="muted">Everyone gets a reply — free accounts, paid members and visitors without an account.
       Tickets are a live chat, so you can keep talking in the same thread.</p>
+    ${statusNote(headsUp)}
     ${articleNote}
     ${errorList(errors)}
     ${suggestionBlock}
@@ -468,6 +473,7 @@ function ratingBlock(ctx, ticket, keyField) {
 }
 
 function ticketView(ctx, { ticket, messages, attachments, canReply, accessKey, cfg, suggestions = [], mergedInto = null }) {
+  const isClosed = ticket.status === 'solved' || ticket.status === 'closed';
   const keyQuery = accessKey ? `?k=${encodeURIComponent(accessKey)}` : '';
   const keyField = accessKey ? `<input type="hidden" name="k" value="${esc(accessKey)}">` : '';
   const lastId = messages.length ? messages[messages.length - 1].id : 0;
@@ -478,7 +484,9 @@ function ticketView(ctx, { ticket, messages, attachments, canReply, accessKey, c
              enctype="multipart/form-data">
         ${csrf(ctx)}${keyField}
         <textarea name="body" rows="3" maxlength="${MAX_BODY}" required
-                  placeholder="Add anything new — an error message, what you tried, a screenshot."></textarea>
+                  placeholder="${isClosed
+                    ? 'Not fixed after all? Reply here and this ticket reopens.'
+                    : 'Add anything new — an error message, what you tried, a screenshot.'}"></textarea>
         <div class="chat-composer-actions">
           ${cfg.attachMaxCount > 0 ? `<label class="chat-attach">
             <span class="btn btn-ghost btn-sm">Attach</span>
@@ -488,9 +496,8 @@ function ticketView(ctx, { ticket, messages, attachments, canReply, accessKey, c
           <button class="btn btn-primary btn-sm" type="submit">Send</button>
         </div>
       </form>`
-    : `<p class="muted locked-note">This ticket is closed. ${accessKey || ctx.user
-      ? '<a href="/support/new">Open a new one</a> if it comes back.'
-      : ''}</p>`;
+    : `<p class="muted locked-note">This conversation moved to another ticket.
+        <a href="/support">Your tickets</a> lists it.</p>`;
 
   const openSuggestions = suggestions.length && ticket.status === 'open' && !ticket.first_response_at
     ? `<div class="try-first try-first-inline">
@@ -518,7 +525,7 @@ function ticketView(ctx, { ticket, messages, attachments, canReply, accessKey, c
       </div>
       <div class="forum-head-actions">
         <a class="btn btn-ghost btn-sm" href="/help">Help centre</a>
-        ${canReply ? `<form method="post" action="/support/t/${encodeURIComponent(ticket.ref)}/close${keyQuery}"
+        ${canReply && !isClosed ? `<form method="post" action="/support/t/${encodeURIComponent(ticket.ref)}/close${keyQuery}"
           class="inline-form" data-confirm="Close this ticket? You can reopen it by replying.">
           ${csrf(ctx)}${keyField}
           <button class="btn btn-outline btn-sm" type="submit">It's solved — close it</button></form>` : ''}
@@ -539,6 +546,9 @@ function ticketView(ctx, { ticket, messages, attachments, canReply, accessKey, c
         <h2>Conversation</h2>
         <span class="muted chat-live" id="chat-live" hidden>Live</span>
       </div>
+      ${isClosed && canReply
+        ? '<p class="muted locked-note chat-reopen-note">This ticket is closed. Replying below reopens it.</p>'
+        : ''}
       <div class="chat-log" id="chat-log">${messages.length
         ? map(messages, (m) => chatMessage(m, { attachments, keyQuery }))
         : '<p class="muted chat-empty">No messages yet.</p>'}</div>

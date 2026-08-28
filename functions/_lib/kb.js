@@ -38,7 +38,11 @@ function inline(escaped) {
     // [label](target) — internal paths and https:// only; anything else is
     // rendered as plain text so a javascript:/data: URL can never become a link.
     .replace(/\[([^\]]{1,120})\]\(([^)\s]{1,300})\)/g, (whole, label, href) => {
-      if (/^\/[^/]/.test(href) || href === '/') return `<a href="${href}">${label}</a>`;
+      // Browsers normalise a backslash to a slash inside a URL, so "/\evil.com"
+      // resolves protocol-relative and leaves the site. Require a plain path.
+      if (href === '/' || (/^\/[^/\\]/.test(href) && !href.includes('\\'))) {
+        return `<a href="${href}">${label}</a>`;
+      }
       if (/^https:&#x2F;&#x2F;/.test(href) || /^https:\/\//.test(href)) {
         const clean = href.replace(/&#x2F;/g, '/');
         return `<a href="${clean}" rel="noopener noreferrer nofollow" target="_blank">${label}</a>`;

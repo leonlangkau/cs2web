@@ -22,6 +22,7 @@ function head(ctx, heading) {
     ${tab('/admin/logs', 'IP logs', p.startsWith('/admin/logs'))}
     ${tab('/admin/fingerprints', 'Fingerprints', p.startsWith('/admin/fingerprints'))}
     ${tab('/admin/support', 'Support', p.startsWith('/admin/support'))}
+    ${tab('/admin/status', 'Status', p.startsWith('/admin/status'))}
     ${tab('/admin/reports', 'Reports', p.startsWith('/admin/reports'))}
     ${tab('/admin/forum', 'Forum', p.startsWith('/admin/forum'))}
   </nav>`;

@@ -212,7 +212,10 @@ function resolveAccess(c, ticket, submittedKey = null) {
   const user = c.get('user');
 
   if (isStaff(user)) return { ok: true, role: 'staff', via: 'session' };
-  if (user && ticket.user_id && Number(ticket.user_id) === Number(user.id)) {
+  // `!= null` rather than a truthy test: UID 0 is a real account in this
+  // codebase (the reserved vanity block starts at zero), and a falsy check
+  // would lock that member out of their own ticket.
+  if (user && ticket.user_id != null && Number(ticket.user_id) === Number(user.id)) {
     return { ok: true, role: 'owner', via: 'session' };
   }
   if (ticket.key_hash) {
@@ -392,7 +395,9 @@ async function sweepAutoClose(db, cfg, { limit = 50 } = {}) {
   const cutoff = Date.now() - cfg.autoCloseDays * 86_400_000;
   const stale = await db.all(
     `SELECT id FROM tickets
-      WHERE status = 'solved' AND COALESCE(last_staff_at, 0) < ? AND COALESCE(last_user_at, 0) < ?
+      WHERE status = 'solved'
+        AND closed_at IS NOT NULL AND closed_at < ?
+        AND COALESCE(last_user_at, 0) < ?
       ORDER BY id LIMIT ?`,
     cutoff, cutoff, limit
   );
@@ -433,6 +438,40 @@ async function sweepAttachments(db, cfg, { limit = 40 } = {}) {
     );
   }
   return stale.length;
+}
+
+/**
+ * Recomputes a ticket's derived lifecycle fields from the messages it actually
+ * holds. Needed after a merge, which moves a conversation between tickets and
+ * would otherwise leave the survivor claiming a first response that happened
+ * on the other ticket, or an "awaiting reply" state that is no longer true.
+ */
+async function recomputeTicketState(db, ticketId) {
+  const rows = await db.all(
+    `SELECT author_role, created_at FROM ticket_messages WHERE ticket_id = ? ORDER BY id`, ticketId
+  );
+  if (!rows.length) return;
+  const msMs = (v) => {
+    const t = new Date(`${String(v).replace(' ', 'T')}Z`).getTime();
+    return Number.isFinite(t) ? t : Date.now();
+  };
+  const staff = rows.filter((r) => r.author_role === 'staff');
+  const user = rows.filter((r) => r.author_role === 'user');
+  const lastIsUser = rows[rows.length - 1].author_role === 'user';
+
+  await db.run(
+    `UPDATE tickets
+        SET first_response_at = ?, last_staff_at = ?, last_user_at = ?,
+            status = CASE WHEN status IN ('solved','closed') THEN status
+                          WHEN ? = 1 THEN 'open' ELSE 'answered' END,
+            updated_at = datetime('now')
+      WHERE id = ?`,
+    staff.length ? msMs(staff[0].created_at) : null,
+    staff.length ? msMs(staff[staff.length - 1].created_at) : null,
+    user.length ? msMs(user[user.length - 1].created_at) : null,
+    lastIsUser ? 1 : 0,
+    ticketId
+  );
 }
 
 /* ------------------------------------------------------------------ *
@@ -518,6 +557,6 @@ export {
   allocateRef, normalizeRef, issueTicketKey, rememberTicketKey, forgetTicketKey,
   readTicketCookie, cookieKeyFor, checkAccess, resolveAccess,
   ticketPath, ticketUrl, requesterEmail, requesterName, sameRequester,
-  addMessage, addEvent, sweepSla, sweepAutoClose, sweepAttachments,
+  addMessage, addEvent, sweepSla, sweepAutoClose, sweepAttachments, recomputeTicketState,
   emailRequester, staffReplyMail, ticketOpenedMail, ticketClosedMail, alertStaff,
 };

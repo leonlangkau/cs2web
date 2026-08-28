@@ -352,6 +352,44 @@ one with its default: `SUPPORT_GUEST_TICKETS`, `SUPPORT_SLA_*_HOURS`,
 > (default 180) drops the contents of files on long-closed tickets while
 > keeping the record that they existed.
 
+## The status page
+
+`/status` works out of the box with a seeded set of components (website,
+accounts, app, match tracking, forum, payments, support), all reading
+Operational. Nothing to configure.
+
+Staff run it from **Admin → Status**:
+
+- change any component's state from the dropdown — that is live on `/status`
+  the moment you press Set;
+- **Report something** opens an incident (or schedules maintenance), moves the
+  components it names, and posts the first public update in the same step;
+- posting an update with the final state (**Resolved** / **Completed**) closes
+  the incident and hands its components back — except any that another open
+  incident still claims;
+- **All clear** puts every component back to Operational in one click.
+
+The banner at the top is not a setting: it is whatever the worst visible
+component says, so it can never contradict the list beneath it.
+
+Two things happen automatically once something is degraded: the help centre and
+the new-ticket form carry a "we already know about this" strip naming the
+incident, and — where `SUPPORT_WEBHOOK_URL` is set — opening and resolving an
+incident pings your staff channel.
+
+`/status.json` is the same data with `Access-Control-Allow-Origin: *`. Point an
+uptime monitor at it, or read it from the desktop app:
+
+```json
+{ "status": "degraded", "headline": "Degraded performance",
+  "components": [{ "slug": "stats", "name": "Match tracking", "status": "degraded", … }],
+  "incidents": [{ "title": "Match tracking is delayed", … }] }
+```
+
+> Maintenance windows are entered and displayed in **UTC**. The form says so and
+> the server reads them that way, so a window never shifts by an admin's
+> timezone between typing it and publishing it.
+
 ## How it's laid out
 
 ```

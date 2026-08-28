@@ -17,7 +17,7 @@ import { redactSecrets, aiConfig } from "../functions/_lib/ai.js";
 import { notifySupport } from "../functions/_lib/webhooks.js";
 import { safeFilename, sniff, toBase64, fromBase64 } from "../functions/_lib/attachments.js";
 import {
-  normalizeTags, normalizeRef, cleanBody, slaDueAt, supportConfig, sweepSla,
+  normalizeTags, normalizeRef, cleanBody, slaDueAt, supportConfig, sweepSla, sweepAutoClose,
 } from "../functions/_lib/support.js";
 
 const ENV = {
@@ -976,6 +976,161 @@ test("AI assist is absent, not broken, without a key", async () => {
 
   const res = await staff.post(`/admin/support/${ticket.id}/ai/summary`, {});
   assert.equal(res.status, 302, "posting it anyway is handled, not a 500");
+});
+
+test("a closed ticket reopens when the requester replies, as the closing email promises", async () => {
+  const { app, db } = await buildTestApp(ENV);
+  const { client } = await signUp(app, ENV, "comesback");
+  await client.get("/support/new");
+  const created = await client.post("/support/new", {
+    subject: "Crosshair keeps resetting", category: "ingame",
+    body: "My crosshair resets to the default every time CS2 restarts.",
+  });
+  const ref = created.headers.get("location").split("/").pop();
+  const ticket = await db.get("SELECT id FROM tickets WHERE ref = ?", ref);
+
+  const staff = await adminClient(app);
+  await staff.get(`/admin/support/${ticket.id}`);
+  await staff.post(`/admin/support/${ticket.id}/status`, { status: "closed" });
+  assert.equal((await db.get("SELECT status FROM tickets WHERE id = ?", ticket.id)).status, "closed");
+
+  const page = await (await client.get(`/support/t/${ref}`)).text();
+  assert.match(page, /Replying below reopens it/, "the page says what a reply will do");
+  assert.match(page, /chat-composer/, "and there is something to reply with");
+
+  const replied = await client.post(`/support/t/${ref}/reply`, { body: "It has come back, sorry." });
+  assert.equal(replied.status, 302);
+  const reopened = await db.get("SELECT status, closed_at FROM tickets WHERE id = ?", ticket.id);
+  assert.equal(reopened.status, "open");
+  assert.equal(reopened.closed_at, null, "and it is no longer stamped closed");
+});
+
+test("UID 0 is a real member and can read their own ticket", async () => {
+  // The reserved vanity block starts at zero, so a truthy check on user_id
+  // would lock exactly one account out of the entire support system.
+  const { app, db } = await buildTestApp(ENV);
+  const zero = await db.get("SELECT id, username FROM users WHERE id = 0");
+  assert.ok(zero, "the vanity block seeds a user at UID 0");
+  await db.run("UPDATE users SET password_hash = (SELECT password_hash FROM users WHERE username = 'admin'), tier = 'user' WHERE id = 0");
+
+  const client = makeClient(app, ENV);
+  await client.get("/auth/login");
+  const login = await client.post("/auth/login", {
+    identifier: zero.username, password: ENV.ADMIN_PASSWORD,
+  });
+  assert.equal(login.status, 302, "UID 0 can sign in");
+
+  await client.get("/support/new");
+  const created = await client.post("/support/new", {
+    subject: "A ticket from user zero", category: "other",
+    body: "This account has the id zero, which is a perfectly ordinary id.",
+  });
+  assert.equal(created.status, 302);
+  const ref = created.headers.get("location").split("/").pop();
+
+  const res = await client.get(`/support/t/${ref}`);
+  assert.equal(res.status, 200, "and can read the ticket they just opened");
+  assert.match(await res.text(), /A ticket from user zero/);
+});
+
+test("a solved ticket gets its full grace period before auto-closing", async () => {
+  const { app, db } = await buildTestApp(ENV);
+  const cfg = supportConfig({});
+  const { ref } = await openGuestTicket(app, ENV);
+  const ticket = await db.get("SELECT id FROM tickets WHERE ref = ?", ref);
+
+  // Solved just now, but the last message is a fortnight old — which is the
+  // ordinary shape of a ticket answered by phone or closed after a long wait.
+  const fortnightAgo = Date.now() - 14 * 86_400_000;
+  await db.run(
+    "UPDATE tickets SET status = 'solved', closed_at = ?, last_staff_at = ?, last_user_at = ? WHERE id = ?",
+    Date.now(), fortnightAgo, fortnightAgo, ticket.id
+  );
+  assert.equal(await sweepAutoClose(db, cfg), 0, "the grace period runs from the close, not the last message");
+
+  await db.run("UPDATE tickets SET closed_at = ? WHERE id = ?", fortnightAgo, ticket.id);
+  assert.equal(await sweepAutoClose(db, cfg), 1);
+  assert.equal((await db.get("SELECT status FROM tickets WHERE id = ?", ticket.id)).status, "closed");
+});
+
+test("relaxing a priority lifts a breach the new deadline no longer justifies", async () => {
+  const { app, db } = await buildTestApp(ENV);
+  const { ref } = await openGuestTicket(app, ENV);
+  const ticket = await db.get("SELECT id FROM tickets WHERE ref = ?", ref);
+  // Urgent, opened three hours ago, breached against the 2h target.
+  await db.run(
+    "UPDATE tickets SET priority = 'urgent', sla_breached = 1, sla_due_at = ?, created_at = datetime('now', '-3 hours') WHERE id = ?",
+    Date.now() - 3_600_000, ticket.id
+  );
+
+  const staff = await adminClient(app);
+  await staff.get(`/admin/support/${ticket.id}`);
+  await staff.post(`/admin/support/${ticket.id}/priority`, { priority: "low" });
+
+  const after = await db.get("SELECT sla_breached, sla_due_at FROM tickets WHERE id = ?", ticket.id);
+  assert.equal(Number(after.sla_breached), 0, "72 hours have not passed, so it is not breaching");
+  assert.ok(Number(after.sla_due_at) > Date.now());
+
+  const events = await db.all("SELECT * FROM ticket_events WHERE ticket_id = ? AND kind = 'sla_reset'", ticket.id);
+  assert.equal(events.length, 1, "and the change is on the record");
+});
+
+test("merging rebuilds the survivor's lifecycle and refuses a closed survivor", async () => {
+  const { app, db } = await buildTestApp(ENV);
+  const a = await openGuestTicket(app, ENV, { subject: "First report" });
+  const b = await openGuestTicket(app, ENV, { subject: "Same thing again" });
+  const target = await db.get("SELECT id FROM tickets WHERE ref = ?", a.ref);
+  const source = await db.get("SELECT id FROM tickets WHERE ref = ?", b.ref);
+
+  const staff = await adminClient(app);
+  // A closed survivor would bury the live conversation being merged into it.
+  await staff.get(`/admin/support/${target.id}`);
+  await staff.post(`/admin/support/${target.id}/status`, { status: "closed" });
+  await staff.get(`/admin/support/${source.id}`);
+  await staff.post(`/admin/support/${source.id}/merge`, { into: a.ref });
+  assert.equal((await db.get("SELECT merged_into FROM tickets WHERE id = ?", source.id)).merged_into, null,
+    "refused while the survivor is closed");
+
+  // Reopen it and the merge goes through, with the survivor's state rebuilt.
+  await staff.get(`/admin/support/${target.id}`);
+  await staff.post(`/admin/support/${target.id}/status`, { status: "open" });
+  await staff.post(`/admin/support/${target.id}/reply`, { body: "Looking into it." });
+  await staff.get(`/admin/support/${source.id}`);
+  await staff.post(`/admin/support/${source.id}/merge`, { into: a.ref });
+
+  const merged = await db.get("SELECT * FROM tickets WHERE id = ?", target.id);
+  // The merged-in message was written BEFORE the staff reply, so chronologically
+  // it is already answered — the state is rebuilt from message order, not from
+  // which ticket a message arrived on.
+  assert.equal(merged.status, "answered");
+  assert.ok(merged.first_response_at, "the staff reply it holds still counts as the first response");
+  assert.ok(Number(merged.last_user_at) > 0);
+
+  // A customer message that lands after the reply flips it back to open.
+  const c = await openGuestTicket(app, ENV, { subject: "Still broken" });
+  const third = await db.get("SELECT id FROM tickets WHERE ref = ?", c.ref);
+  await staff.get(`/admin/support/${third.id}`);
+  await staff.post(`/admin/support/${third.id}/merge`, { into: a.ref });
+  assert.equal((await db.get("SELECT status FROM tickets WHERE id = ?", target.id)).status, "open",
+    "the newest message is now the customer's, so it needs an answer");
+});
+
+test("the ticket-link lookup answers identically however the site is configured", async () => {
+  // With email off, the response must not depend on whether the pair matched —
+  // otherwise the "cannot re-send" message is an oracle.
+  const { app } = await buildTestApp(ENV);
+  const { ref } = await openGuestTicket(app, ENV);
+  const client = makeClient(app, ENV);
+  await client.get("/support/lookup");
+
+  // Same reference, one real address and one wrong: the only thing that could
+  // differ is what the form echoes back, so normalise that away.
+  const real = await client.post("/support/lookup", { ref, email: "guest@example.com" });
+  const fake = await client.post("/support/lookup", { ref, email: "nobody@example.com" });
+  assert.equal(real.status, fake.status);
+  const normalise = (html) => html.replace(/guest@example\.com|nobody@example\.com/g, "SOMEONE");
+  assert.equal(normalise(await real.text()), normalise(await fake.text()),
+    "the response says nothing about whether the pair matched");
 });
 
 /* ================================================================== *

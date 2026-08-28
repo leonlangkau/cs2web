@@ -1,6 +1,6 @@
 import { page } from "./layout.js";
 import { esc, timeAgo, map, pagination } from "./util.js";
-import { TIER_LABELS, STAFF_TIERS, isFullAdmin } from "../tiers.js";
+import { TIER_LABELS, STAFF_TIERS, isFullAdmin, isStaff } from "../tiers.js";
 import { planDuration, PERIOD_PRESETS } from "../plans.js";
 
 const tierTag = (tier) => tier && tier !== 'user'
@@ -94,6 +94,7 @@ function dashboard(ctx, { stats, recentLogs, recentUsers }) {
 function users(ctx, { users: rows, q, page: current, pages, total, tiers, tierLabels }) {
   const csrf = `<input type="hidden" name="_csrf" value="${esc(ctx.csrfToken)}">`;
   const canManageTiers = isFullAdmin(ctx.user);
+  const canAdjustSubs = isStaff(ctx.user);
   const DAY = 86_400_000;
 
   const subCell = (u) => {
@@ -107,7 +108,7 @@ function users(ctx, { users: rows, q, page: current, pages, total, tiers, tierLa
       const left = Math.ceil((Number(u.paid_until) - Date.now()) / DAY);
       state = `<strong>${esc(left)}d</strong> <span class="muted">left · ends ${esc(new Date(Number(u.paid_until)).toISOString().slice(0, 10))}</span>`;
     }
-    const adjust = canManageTiers && u.id !== ctx.user.id ? `
+    const adjust = canAdjustSubs && u.id !== ctx.user.id ? `
       <form method="post" action="/admin/users/${esc(u.id)}/paid-days" class="inline-form sub-adjust">${csrf}
         <input type="number" name="delta_days" min="-3650" max="3650" required placeholder="±days"
                aria-label="Adjust days for ${esc(u.username)}">
@@ -119,7 +120,7 @@ function users(ctx, { users: rows, q, page: current, pages, total, tiers, tierLa
     const profileLink = `<a class="btn btn-ghost btn-xs" href="/u/${encodeURIComponent(u.username)}">Profile</a>`;
     const fpLink = `<a class="btn btn-ghost btn-xs" href="/admin/fingerprints?q=${encodeURIComponent(u.username)}">Fingerprints</a>`;
     if (u.id === ctx.user.id) return `<span class="muted">you</span> ${profileLink} ${fpLink}`;
-    const banBtn = u.banned
+    const banBtn = isFullAdmin(u) ? '' : u.banned
       ? `<form method="post" action="/admin/users/${esc(u.id)}/unban" class="inline-form">${csrf}<button class="btn btn-ghost btn-xs" type="submit">Unban</button></form>`
       : `<form method="post" action="/admin/users/${esc(u.id)}/ban" class="inline-form" data-confirm="Ban ${esc(u.username)}? They will be signed out everywhere.">${csrf}<button class="btn btn-warn btn-xs" type="submit">Ban</button></form>`;
 
@@ -152,7 +153,7 @@ function users(ctx, { users: rows, q, page: current, pages, total, tiers, tierLa
     return `${profileLink} ${fpLink} ${banBtn} ${manage}`;
   };
 
-  const massPanel = canManageTiers ? `
+  const massPanel = canAdjustSubs ? `
     <div class="panel sub-mass-panel">
       <form method="post" action="/admin/subscriptions/adjust" class="filter-bar panel-form"
             data-confirm="Adjust EVERY dated Paid subscription by the entered number of days?">${csrf}
@@ -176,7 +177,7 @@ function users(ctx, { users: rows, q, page: current, pages, total, tiers, tierLa
       <span class="muted">${esc(total)} user${total === 1 ? '' : 's'}</span>
     </form>
     ${massPanel}
-    ${!canManageTiers ? '<p class="muted">Tier changes, subscriptions and account tools require full Admin access.</p>' : ''}
+    ${!canManageTiers ? '<p class="muted">Tier changes and account tools require full Admin access.</p>' : ''}
     <div class="panel users-table"><div class="table-wrap"><table>
       <thead><tr><th>User</th><th>IPs</th><th>Subscription</th><th>Actions</th></tr></thead>
       <tbody>${map(rows, (u) => `<tr class="${u.banned ? 'row-banned' : ''}">
@@ -198,9 +199,9 @@ function users(ctx, { users: rows, q, page: current, pages, total, tiers, tierLa
 }
 
 /**
- * Crypto payments queue. Read-only for staff; the "Credit" button is full admin
- * only, because it grants a paid membership without a confirmed payment.
- * "Re-check" is staff-level — it only ever applies BTCPay's own verdict.
+ * Crypto payments queue. Both "Credit" (grants a paid membership without a
+ * confirmed payment) and "Re-check" (applies BTCPay's own verdict) are
+ * staff-level.
  */
 /**
  * Shop products — the membership lengths on sale at /buy.
@@ -299,7 +300,7 @@ function shop(ctx, { products, currency, live, usingEnvFallback, envPlans }) {
 
 function payments(ctx, { rows, status, statuses, page: current, pages, total, live, swept }) {
   const csrf = `<input type="hidden" name="_csrf" value="${esc(ctx.csrfToken)}">`;
-  const canCredit = isFullAdmin(ctx.user);
+  const canCredit = isStaff(ctx.user);
 
   const row = (p) => `<tr class="${p.credited_at ? 'row-resolved' : ''}">
     <td class="mono detail-cell" title="${esc(p.order_id)}">${esc(String(p.order_id).slice(0, 10))}…</td>
@@ -360,7 +361,7 @@ function payments(ctx, { rows, status, statuses, page: current, pages, total, li
  */
 function chain(ctx, { config, orders, transfers, status, statuses, page: current, pages, total, scan }) {
   const csrf = `<input type="hidden" name="_csrf" value="${esc(ctx.csrfToken)}">`;
-  const canCredit = isFullAdmin(ctx.user);
+  const canCredit = isStaff(ctx.user);
 
   const configPanel = `<div class="panel panel-spaced">
     <h3>Receiving addresses</h3>

@@ -403,6 +403,8 @@ CREATE INDEX IF NOT EXISTS idx_tickets_status ON tickets(status, priority, id);
 CREATE INDEX IF NOT EXISTS idx_tickets_assignee ON tickets(assignee_id, status);
 CREATE INDEX IF NOT EXISTS idx_tickets_sla ON tickets(sla_breached, sla_due_at);
 CREATE INDEX IF NOT EXISTS idx_tickets_updated ON tickets(updated_at);
+-- Guest tickets are claimed by matching this against a newly verified address.
+CREATE INDEX IF NOT EXISTS idx_tickets_guest_email ON tickets(guest_email);
 
 -- The conversation itself — this is what the live chat polls. It holds ONLY
 -- what the requester is allowed to read: staff-private text lives in

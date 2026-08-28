@@ -445,6 +445,33 @@ async function sweepAttachments(db, cfg, { limit = 40 } = {}) {
 }
 
 /**
+ * Hands a member the guest tickets they opened at the same address, before
+ * they had an account.
+ *
+ * Gated on a VERIFIED address, and that gate is the whole point: signing up
+ * only proves you can type an email, so adopting on the strength of a
+ * signup would let anyone register someone else's address and read their
+ * conversation. The key_hash is deliberately left in place so an emailed
+ * link the person already has keeps working alongside their new account.
+ */
+async function adoptGuestTickets(db, user) {
+  if (!user || !user.email || !user.email_verified_at) return 0;
+  const orphans = await db.all(
+    'SELECT id FROM tickets WHERE user_id IS NULL AND guest_email = ? COLLATE NOCASE LIMIT 50',
+    user.email
+  );
+  for (const ticket of orphans) {
+    await db.run(
+      "UPDATE tickets SET user_id = ?, updated_at = datetime('now') WHERE id = ? AND user_id IS NULL",
+      user.id, ticket.id
+    );
+    await addEvent(db, ticket.id, 'system', 'adopted',
+      `claimed by ${user.username} after they verified ${user.email}`);
+  }
+  return orphans.length;
+}
+
+/**
  * Recomputes a ticket's derived lifecycle fields from the messages it actually
  * holds. Needed after a merge, which moves a conversation between tickets and
  * would otherwise leave the survivor claiming a first response that happened
@@ -562,5 +589,6 @@ export {
   readTicketCookie, cookieKeyFor, checkAccess, resolveAccess,
   ticketPath, ticketUrl, requesterEmail, requesterName, sameRequester,
   addMessage, addEvent, sweepSla, sweepAutoClose, sweepAttachments, recomputeTicketState,
+  adoptGuestTickets,
   emailRequester, staffReplyMail, ticketOpenedMail, ticketClosedMail, alertStaff,
 };

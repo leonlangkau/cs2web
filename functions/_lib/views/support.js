@@ -12,6 +12,7 @@ import { page } from "./layout.js";
 import { esc, timeAgo, map, emailLink } from "./util.js";
 import { renderArticle, excerpt } from "../kb.js";
 import { statusNote } from "./status.js";
+import { ACCEPT_ATTR } from "../attachments.js";
 import {
   STATUS_LABELS, PRIORITY_LABELS, CATEGORIES, CATEGORY_LABELS, MAX_SUBJECT, MAX_BODY,
 } from "../support.js";
@@ -313,8 +314,7 @@ function newTicket(ctx, { errors = [], values = {}, suggestions = [], cfg, needs
   const attachBlock = cfg.attachMaxCount > 0 ? `
       <label><span>Screenshot or log <small class="muted">(optional, up to
         ${esc(cfg.attachMaxCount)} files, ${esc(cfg.attachMaxKb)} KB each)</small></span>
-        <input type="file" name="files" multiple
-               accept=".png,.jpg,.jpeg,.gif,.webp,.txt,.log,.cfg,.json,.pdf,image/*,text/plain,application/pdf"></label>` : '';
+        <input type="file" name="files" multiple accept="${esc(ACCEPT_ATTR)}"></label>` : '';
 
   const articleNote = fromArticle
     ? `<p class="switch-note">You came from <a href="/help/a/${encodeURIComponent(fromArticle.slug)}">${esc(fromArticle.title)}</a>.
@@ -370,8 +370,11 @@ function newTicket(ctx, { errors = [], values = {}, suggestions = [], cfg, needs
 }
 
 /** Shown once, right after a guest ticket is created — the only time the key is displayed. */
-function ticketCreated(ctx, { ticket, key, emailed }) {
-  const link = `/support/t/${encodeURIComponent(ticket.ref)}?k=${encodeURIComponent(key)}`;
+function ticketCreated(ctx, { ticket, key, emailed, origin = '', canAdopt = false }) {
+  const path = `/support/t/${encodeURIComponent(ticket.ref)}?k=${encodeURIComponent(key)}`;
+  // Absolute, because the instruction on this page is "copy it somewhere safe"
+  // and a bare path pasted into a notes app resolves to nothing.
+  const link = `${origin}${path}`;
   const body = `
 <div class="section content-page">
   <div class="container narrow">
@@ -392,25 +395,25 @@ function ticketCreated(ctx, { ticket, key, emailed }) {
                     data-copied="Copied">Copy</button></div>
           <p class="pay-field-hint">Anyone with this link can read and reply to the ticket. Do not share it.</p>
         </div>
-        <a class="btn btn-primary" href="${esc(link)}">Open the ticket</a>
+        <a class="btn btn-primary" href="${esc(path)}">Open the ticket</a>
       </div>
     </div>
 
-    <p class="switch-note"><a href="/auth/signup">Create a free account</a> with the same email address and
-      your tickets follow you to any device — free accounts get the identical support queue.</p>
+    ${canAdopt ? `<p class="switch-note"><a href="/auth/signup">Create a free account</a> with this same
+      email address and verify it, and this ticket moves onto the account — reachable from any device,
+      with no link to keep. Free accounts get the identical support queue.</p>`
+      : `<p class="switch-note"><a href="/auth/signup">A free account</a> keeps every future ticket in one
+      place, with no link to look after. Free accounts get the identical support queue.</p>`}
   </div>
 </div>`;
   return page(ctx, { title: `Ticket ${ticket.ref}`, body, scripts: ['/js/support.js'] });
 }
 
-function guestLookup(ctx, { errors = [], values = {}, sent }) {
-  const body = `
-<div class="section content-page">
-  <div class="container narrow">
-    <h1 class="section-title">Find your ticket</h1>
-    ${errorList(errors)}
-    ${sent ? '<p class="switch-note">If that reference and email match a ticket, the link is on its way to that address.</p>' : ''}
-    <p class="muted">Paste the ticket link you were given, or ask for it again by reference and email.</p>
+function guestLookup(ctx, { errors = [], values = {}, sent, emailConfigured = true }) {
+  // Without an email provider this form can only ever fail, so it is not
+  // offered — a dead end you can fill in is worse than an honest wall.
+  const form = emailConfigured
+    ? `<p class="muted">Paste the ticket link you were given, or ask for it again by reference and email.</p>
 
     <form method="post" action="/support/lookup" class="stack">
       ${csrf(ctx)}
@@ -420,7 +423,18 @@ function guestLookup(ctx, { errors = [], values = {}, sent }) {
       <label><span>The email you used</span>
         <input type="email" name="email" required maxlength="254" value="${esc(values.email || '')}"></label>
       <button type="submit" class="btn btn-primary btn-block">Email me the link</button>
-    </form>
+    </form>`
+    : `<p class="switch-note">This site cannot send email, so a ticket link cannot be re-sent. If you have
+      lost yours, <a href="/support/new">open a new ticket</a> and quote the old reference in it — support
+      can find the original from that.</p>`;
+
+  const body = `
+<div class="section content-page">
+  <div class="container narrow">
+    <h1 class="section-title">Find your ticket</h1>
+    ${errorList(errors)}
+    ${sent ? '<p class="switch-note">If that reference and email match a ticket, the link is on its way to that address.</p>' : ''}
+    ${form}
     <p class="fineprint">Signed-in members never need this — <a href="/support">your tickets</a> are always
       listed on your account.</p>
   </div>
@@ -468,14 +482,22 @@ function ratingBlock(ctx, ticket, keyField) {
     </div>`;
   }
   if (ticket.status !== 'solved' && ticket.status !== 'closed') return '';
+  // Radios rather than five submit buttons: with submit buttons, pressing
+  // Enter anywhere in this form files a permanent one-star rating, because
+  // implicit submission activates the FIRST submit control on the page.
   return `<form class="csat" method="post" action="/support/t/${encodeURIComponent(ticket.ref)}/rate">
     ${csrf(ctx)}${keyField}
-    <span class="csat-label">How did we do?</span>
-    <span class="csat-stars">${[1, 2, 3, 4, 5].map((n) =>
-      `<button class="csat-star" type="submit" name="rating" value="${n}"
-        title="${n} out of 5" aria-label="Rate ${n} out of 5">★</button>`).join('')}</span>
+    <fieldset class="csat-stars">
+      <legend class="csat-label">How did we do?</legend>
+      ${[1, 2, 3, 4, 5].map((n) => `<label class="csat-star">
+        <input type="radio" name="rating" value="${n}" required class="sr-only">
+        <span aria-hidden="true">★</span>
+        <span class="sr-only">${n} out of 5</span>
+      </label>`).join('')}
+    </fieldset>
     <input type="text" name="comment" maxlength="500" placeholder="Anything you'd like to add? (optional)"
            aria-label="Optional feedback">
+    <button class="btn btn-outline btn-sm" type="submit">Send</button>
   </form>`;
 }
 
@@ -490,15 +512,14 @@ function ticketView(ctx, { ticket, messages, attachments, canReply, accessKey, c
              method="post" action="/support/t/${encodeURIComponent(ticket.ref)}/reply${keyQuery}"
              enctype="multipart/form-data">
         ${csrf(ctx)}${keyField}
-        <textarea name="body" rows="3" maxlength="${MAX_BODY}" required
+        <textarea name="body" rows="3" maxlength="${MAX_BODY}"
                   placeholder="${isClosed
                     ? 'Not fixed after all? Reply here and this ticket reopens.'
                     : 'Add anything new — an error message, what you tried, a screenshot.'}"></textarea>
         <div class="chat-composer-actions">
           ${cfg.attachMaxCount > 0 ? `<label class="chat-attach">
             <span class="btn btn-ghost btn-sm">Attach</span>
-            <input type="file" name="files" multiple class="sr-only"
-                   accept=".png,.jpg,.jpeg,.gif,.webp,.txt,.log,.cfg,.json,.pdf,image/*,text/plain,application/pdf">
+            <input type="file" name="files" multiple class="sr-only" accept="${esc(ACCEPT_ATTR)}">
             <span class="muted chat-attach-name"></span></label>` : '<span></span>'}
           <button class="btn btn-primary btn-sm" type="submit">Send</button>
         </div>
@@ -556,7 +577,8 @@ function ticketView(ctx, { ticket, messages, attachments, canReply, accessKey, c
       ${isClosed && canReply
         ? '<p class="muted locked-note chat-reopen-note">This ticket is closed. Replying below reopens it.</p>'
         : ''}
-      <div class="chat-log" id="chat-log">${messages.length
+      <div class="chat-log" id="chat-log" role="log" aria-live="polite" aria-relevant="additions"
+           aria-label="Conversation with support">${messages.length
         ? map(messages, (m) => chatMessage(m, { attachments, keyQuery }))
         : '<p class="muted chat-empty">No messages yet.</p>'}</div>
       ${composer}

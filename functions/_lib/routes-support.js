@@ -82,9 +82,13 @@ function submittedKey(c, body = null) {
  * does not exist or the key is wrong, so ticket references cannot be probed.
  */
 function needTicketKey(c, extra = []) {
+  const emailConfigured = supportConfig(c.get('cfg') || {}).emailNotify;
   return c.html(views.guestLookup(c.get('view'), {
-    errors: ['That ticket link is not valid on this browser. Ask for it again below.', ...extra],
+    errors: [emailConfigured
+      ? 'That ticket link is not valid on this browser. Ask for it again below.'
+      : 'That ticket link is not valid on this browser.', ...extra],
     values: {},
+    emailConfigured,
   }), 404);
 }
 
@@ -489,6 +493,10 @@ function register(app) {
     if (guestKey) {
       return c.html(views.ticketCreated(c.get('view'), {
         ticket, key: guestKey.key, emailed: cfg.emailNotify,
+        origin: new URL(c.req.url).origin,
+        // Adoption is gated on a verified address, which needs a mail provider
+        // — so only promise it where it can actually happen.
+        canAdopt: cfg.emailNotify,
       }));
     }
     setFlash(c, 'success', `Ticket ${ref} is open — we'll reply right here.`);
@@ -537,7 +545,9 @@ function register(app) {
 
   /* ---------------- Guest lookup ---------------- */
 
-  app.get('/support/lookup', (c) => c.html(views.guestLookup(c.get('view'), { errors: [], values: {} })));
+  app.get('/support/lookup', (c) => c.html(views.guestLookup(c.get('view'), {
+    errors: [], values: {}, emailConfigured: cfgFor(c).emailNotify,
+  })));
 
   app.post('/support/lookup', async (c) => {
     const db = c.get('db');
@@ -555,6 +565,7 @@ function register(app) {
       return c.html(views.guestLookup(c.get('view'), {
         errors: ['Enter a ticket reference like GH-1A2B3C4D and the email address you used.'],
         values: { ref: String(body.ref || ''), email },
+        emailConfigured: cfg.emailNotify,
       }), 400);
     }
 
@@ -564,9 +575,7 @@ function register(app) {
     // the reference and address really do go together.
     if (!cfg.emailNotify) {
       return c.html(views.guestLookup(c.get('view'), {
-        errors: ['Email is not configured on this site, so a ticket link cannot be re-sent. '
-          + 'Open a new ticket and mention the old reference in it.'],
-        values: { ref, email },
+        errors: [], values: { ref, email }, emailConfigured: false,
       }), 400);
     }
 
@@ -594,7 +603,9 @@ function register(app) {
       await audit(c, 'ticket_key_reissued', { username: email, detail: ticket.ref });
     }
 
-    return c.html(views.guestLookup(c.get('view'), { errors: [], values: {}, sent: true }));
+    return c.html(views.guestLookup(c.get('view'), {
+      errors: [], values: {}, sent: true, emailConfigured: cfg.emailNotify,
+    }));
   });
 
   /* ================================================================ *

@@ -25,7 +25,7 @@ const LOG_EVENTS = ['signup', 'login', 'login_failed', 'login_blocked', 'logout'
   'ip_autoban', 'signup_surge_blocked', 'post_reported', 'email_changed', 'account_deleted',
   'password_reset_requested', 'password_reset', 'email_verified', 'shout_deleted',
   'chain_order_created', 'chain_order_failed', 'chain_tx_submitted', 'chain_payment_rejected',
-  'ticket_opened', 'ticket_key_reissued'];
+  'ticket_opened', 'ticket_key_reissued', 'ticket_adopted'];
 
 // High-volume, low-signal events — routine traffic rather than something an
 // admin needs to review. Excluded by the "Important only" log filter so a

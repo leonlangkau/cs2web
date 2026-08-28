@@ -12,6 +12,7 @@ import { esc, timeAgo, map, pagination } from "./util.js";
 import { head, tierTag } from "./admin.js";
 import { isFullAdmin } from "../tiers.js";
 import { renderArticle } from "../kb.js";
+import { ACCEPT_ATTR } from "../attachments.js";
 import {
   STATUSES, STATUS_LABELS, PRIORITIES, PRIORITY_LABELS, CATEGORIES, CATEGORY_LABELS,
   MAX_BODY, MAX_NOTE, tagList,
@@ -354,8 +355,7 @@ function detail(ctx, {
               placeholder="Reply to the customer. This is sent to them."></textarea>
     <div class="chat-composer-actions">
       <label class="chat-attach"><span class="btn btn-ghost btn-sm">Attach</span>
-        <input type="file" name="files" multiple class="sr-only"
-               accept=".png,.jpg,.jpeg,.gif,.webp,.txt,.log,.cfg,.json,.pdf">
+        <input type="file" name="files" multiple class="sr-only" accept="${esc(ACCEPT_ATTR)}">
         <span class="muted chat-attach-name"></span></label>
       <span class="composer-right">
         <label class="filter-check"><input type="checkbox" name="solve" value="1"> Mark solved</label>
@@ -408,12 +408,12 @@ function detail(ctx, {
 
     <div class="page-head">
       <div>
-        <h1 class="section-title thread-heading">
+        <p class="section-title thread-heading ticket-subject">
           <span class="uid-badge">${esc(ticket.ref)}</span>
           ${statusTag(ticket.status)}${priorityTag(ticket.priority)}
           ${ticket.spam ? '<span class="tag tag-banned">SPAM?</span>' : ''}
           ${esc(ticket.subject)}
-        </h1>
+        </p>
         <p class="muted">${esc(CATEGORY_LABELS[ticket.category] || ticket.category)} ·
           opened ${esc(timeAgo(ticket.created_at))} ·
           ${ticket.assignee_name ? `assigned to ${esc(ticket.assignee_name)}` : 'unassigned'} ·

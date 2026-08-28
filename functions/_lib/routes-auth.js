@@ -9,6 +9,7 @@ import {
 import { sendEmail, isEmailConfigured } from "./email.js";
 import { createAuthToken, peekAuthToken, consumeAuthToken } from "./tokens.js";
 import { verifyTurnstile } from "./turnstile.js";
+import { adoptGuestTickets } from "./support.js";
 import { tooMany } from "./routes-main.js";
 
 const USERNAME_RE = /^[A-Za-z0-9_]{3,20}$/;
@@ -253,6 +254,16 @@ function register(app) {
       return c.redirect(c.get('user') ? '/profile' : '/auth/login', 302);
     }
     await db.run("UPDATE users SET email_verified_at = datetime('now') WHERE id = ?", row.user_id);
+    // Verifying the address is what makes it safe to hand over the tickets
+    // opened at it before there was an account.
+    const verified = await db.get('SELECT id, username, email, email_verified_at FROM users WHERE id = ?', row.user_id);
+    const adopted = await adoptGuestTickets(db, verified);
+    if (adopted > 0) {
+      await audit(c, 'ticket_adopted', {
+        userId: verified.id, username: verified.username,
+        detail: `${adopted} guest ticket${adopted === 1 ? '' : 's'} claimed on verification`,
+      });
+    }
     const user = await db.get('SELECT username FROM users WHERE id = ?', row.user_id);
     await audit(c, 'email_verified', { userId: row.user_id, username: user ? user.username : null });
     setFlash(c, 'success', 'Email verified. Thanks!');

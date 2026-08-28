@@ -697,6 +697,82 @@ test("only the requester rates a ticket, and only once", async () => {
   assert.equal(Number(stillFive.rating), 5);
 });
 
+test("the rating form cannot be filed by pressing Enter in the comment box", async () => {
+  const { app, db } = await buildTestApp(ENV);
+  const { client } = await signUp(app, ENV, "keyboarder");
+  await client.get("/support/new");
+  const created = await client.post("/support/new", {
+    subject: "A question about configs", category: "ingame",
+    body: "Where does GoyHub keep the config files it writes for me?",
+  });
+  const ref = created.headers.get("location").split("/").pop();
+  const ticket = await db.get("SELECT id FROM tickets WHERE ref = ?", ref);
+
+  const staff = await adminClient(app);
+  await staff.get(`/admin/support/${ticket.id}`);
+  await staff.post(`/admin/support/${ticket.id}/reply`, { body: "In your AppData folder.", solve: "1" });
+
+  const page = await (await client.get(`/support/t/${ref}`)).text();
+  const form = page.slice(page.indexOf('<form class="csat"'));
+  const csat = form.slice(0, form.indexOf("</form>"));
+
+  // Five submit buttons would mean implicit submission files a permanent 1.
+  assert.ok(!/type="submit"[^>]*name="rating"/.test(csat), "stars are not submit buttons");
+  assert.match(csat, /type="radio" name="rating"/, "they are a radio group");
+  assert.equal((csat.match(/type="submit"/g) || []).length, 1,
+    "and the form has exactly one submit control");
+});
+
+test("guest tickets move onto an account only once the address is verified", async () => {
+  const env = { ...ENV, EMAIL_PROVIDER: "test", EMAIL_FROM: "support@goyhub.test", REQUIRE_VERIFIED_EMAIL: "0" };
+  const { app, db } = await buildTestApp(env);
+  globalThis.__testEmails = [];
+
+  const { ref } = await openGuestTicket(app, env, { email: "adopter@example.com" });
+  const before = await db.get("SELECT user_id FROM tickets WHERE ref = ?", ref);
+  assert.equal(before.user_id, null);
+
+  // Signing up alone proves nothing — anyone can type someone else's address.
+  const { client } = await signUp(app, env, "adopter", "adopter@example.com");
+  const afterSignup = await db.get("SELECT user_id FROM tickets WHERE ref = ?", ref);
+  assert.equal(afterSignup.user_id, null, "not adopted on signup — that would be a takeover");
+
+  // Verifying it does.
+  const verify = globalThis.__testEmails.find((m) => /verify/i.test(m.text));
+  assert.ok(verify, "a verification email went out");
+  const token = verify.text.match(/\/auth\/verify\/([a-f0-9]{64})/)[1];
+  const res = await client.get(`/auth/verify/${token}`);
+  assert.equal(res.status, 302);
+
+  const adopted = await db.get("SELECT user_id FROM tickets WHERE ref = ?", ref);
+  const user = await db.get("SELECT id FROM users WHERE username = 'adopter'");
+  assert.equal(Number(adopted.user_id), Number(user.id), "now it is theirs");
+
+  const inbox = await (await client.get("/support")).text();
+  assert.match(inbox, new RegExp(ref), "and it shows in their account's ticket list");
+  globalThis.__testEmails = [];
+});
+
+test("the lost-link page does not offer a form that cannot work", async () => {
+  const { app } = await buildTestApp(ENV);
+  const noMail = await (await makeClient(app, ENV).get("/support/lookup")).text();
+  assert.ok(!/Email me the link/.test(noMail), "no dead-end form without a mail provider");
+  assert.match(noMail, /cannot send email/);
+  assert.match(noMail, /open a new ticket/i, "and it says what to do instead");
+
+  const env = { ...ENV, EMAIL_PROVIDER: "test", EMAIL_FROM: "s@goyhub.test" };
+  const withMail = await buildTestApp(env);
+  const html = await (await makeClient(withMail.app, env).get("/support/lookup")).text();
+  assert.match(html, /Email me the link/);
+});
+
+test("the guest's ticket link is something you can actually paste somewhere", async () => {
+  const { app } = await buildTestApp(ENV);
+  const { html } = await openGuestTicket(app, ENV);
+  assert.match(html, /http:\/\/local\/support\/t\/GH-[0-9A-F]{8}\?k=[a-f0-9]{64}/,
+    "absolute, because the page tells them to copy it somewhere safe");
+});
+
 test("screenshots attach and come back; dangerous types do not", async () => {
   const { app, db } = await buildTestApp(ENV);
   const { client } = await signUp(app, ENV, "uploader");

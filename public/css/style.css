@@ -2007,3 +2007,31 @@ tbody tr.row-banned:hover td { background: var(--tint-danger); }
   }
   .beacon-ring { opacity: .35; transform: scale(1.15); }
 }
+
+/* A clipped file input is still tabbable, so its visible label has to show
+   the focus that landed on it — otherwise keyboard focus simply disappears. */
+.chat-attach:focus-within .btn {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* CSAT stars are radios (implicit form submission would otherwise file a
+   permanent one-star rating from the comment box), so the star is drawn by
+   the label and lit by :checked and :hover. */
+.csat-stars { border: 0; padding: 0; margin: 0; display: inline-flex; align-items: center; gap: .1rem; }
+.csat-stars .csat-label { padding: 0; margin-right: .4rem; }
+.csat-star {
+  cursor: pointer;
+  font-size: 1.35rem;
+  line-height: 1;
+  color: var(--border-strong);
+  padding: 0 .05rem;
+  transition: color .15s ease;
+}
+.csat-star:hover, .csat-stars:hover .csat-star { color: var(--warn); }
+.csat-star:hover ~ .csat-star { color: var(--border-strong); }
+.csat-star:has(input:checked) { color: var(--warn); }
+.csat-star:has(input:checked) ~ .csat-star { color: var(--border-strong); }
+.csat-star:focus-within { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
+.ai-consent { margin: .2rem 0 .4rem; }
+.ticket-subject { font-weight: 600; }

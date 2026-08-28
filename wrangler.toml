@@ -87,6 +87,42 @@ SIGNUP_SURGE_LIMIT = "30"
 # Secret) or with `npx wrangler pages secret put NAME`, exactly like
 # ADMIN_PASSWORD. See the secrets note near the bottom of this file.
 #
+# DIRECT-TO-WALLET (ETH / SOL / USDT) — independent of BTCPay, and can run
+# alongside it. Paste your own receiving addresses in as SECRETS (ETH_ADDRESS
+# and SOL_ADDRESS — see the secrets note below) and /buy gains a coin picker;
+# the site watches those addresses and grants Paid once a payment confirms on
+# chain. Nothing here holds or needs a private key. Full guide: CRYPTO-SETUP.md.
+#
+# The chain APIs are public and keyless by default (Blockscout for Ethereum,
+# the Solana mainnet RPC). Everything below is optional tuning:
+#   CRYPTO_ASSETS                 allowlist, e.g. "eth,sol" (default: all configured)
+#   CRYPTO_ETH_CONFIRMATIONS      blocks before ETH/USDT-ERC20 counts (default 12)
+#   CRYPTO_SOL_CONFIRMATIONS      Solana is read at `finalized` already (default 1)
+#   CRYPTO_UNDERPAY_TOLERANCE_PCT how far under the quote still counts as paid,
+#                                 covering exchange withdrawal rounding (default 1)
+#   CRYPTO_PAY_WINDOW_MINUTES     how long a quote is honoured (default 60)
+#   CRYPTO_MATCH_HOURS            how long a LATE payment is still matched to its
+#                                 order (default 48) — money that arrives slowly
+#                                 must still upgrade the account
+#   CRYPTO_SCAN_INTERVAL_SECONDS  floor on how often the chains are polled (default 20)
+#   CRYPTO_SCAN_DEPTH             recent transactions each scan reads (default 25)
+#   RATE_LIMIT_CRYPTO_ORDER       orders a member can open per hour (default 12)
+#   RATE_LIMIT_CRYPTO_TX          transaction hashes a member can submit per hour (default 10)
+#   USDT_ERC20_ADDRESS /          only if USDT should land somewhere other than
+#   USDT_SPL_ADDRESS              ETH_ADDRESS / SOL_ADDRESS
+# CRYPTO_ASSETS = "eth,sol,usdt-erc20,usdt-spl"
+# CRYPTO_ETH_CONFIRMATIONS = "12"
+# CRYPTO_UNDERPAY_TOLERANCE_PCT = "1"
+# CRYPTO_PAY_WINDOW_MINUTES = "60"
+# CRYPTO_MATCH_HOURS = "48"
+#
+# ETH_ADDRESS and SOL_ADDRESS are SECRETS — never put them here. So are
+# CRYPTO_SCAN_SECRET (which lets an external cron drive the chain watcher via
+# /api/crypto/scan, so payments confirm while nobody is on the site) and the
+# optional higher-limit provider keys ETHERSCAN_API_KEY, SOLANA_RPC_URL and
+# COINGECKO_API_KEY. Add them exactly like ADMIN_PASSWORD — see the secrets
+# note near the bottom of this file.
+#
 # FALLBACKS (used only when BTCPay is not configured):
 #   CRYPTO_PAY_URL        hosted checkout link (Coinbase Commerce, NOWPayments…)
 #   CRYPTO_PAY_ADDRESSES  manual addresses, e.g. "BTC:bc1qxy...,ETH:0xab...,LTC:ltc1..."

@@ -19,6 +19,7 @@
 import { getInvoice } from "./btcpay.js";
 import { audit } from "./middleware.js";
 import { isStaff } from "./tiers.js";
+import { grantMembership } from "./membership.js";
 
 /** Invoice statuses BTCPay reports as fully paid + confirmed. */
 const SETTLED_STATUSES = new Set(['settled', 'complete', 'confirmed']);
@@ -104,40 +105,21 @@ async function verifyAndCredit(c, cfg, payment, source = 'webhook') {
     return { granted: false, reason: 'user_gone' };
   }
 
-  // Staff already sit above Paid and never expire — record the payment but
-  // don't touch their tier. The new expiry is computed in SQL against the row's
-  // LIVE value, so two invoices settling at once extend rather than clobber each
-  // other. A failed grant rolls the claim back, so the next trigger retries it
-  // rather than leaving the member charged-but-not-upgraded.
-  if (!isStaff(target)) {
-    const periodDays = payment.period_days === null || payment.period_days === undefined
-      ? null : Number(payment.period_days);
-    try {
-      if (periodDays === null) {
-        await db.run("UPDATE users SET tier = 'paid', paid_until = NULL WHERE id = ?", target.id);
-      } else {
-        const ms = Math.floor(periodDays) * 86_400_000;
-        const now = Date.now();
-        await db.run(
-          `UPDATE users SET tier = 'paid', paid_until = CASE
-             WHEN tier = 'paid' AND paid_until IS NULL THEN NULL          -- keep an existing lifetime
-             WHEN paid_until IS NULL OR paid_until < ? THEN ? + ?         -- new/expired: start from now
-             ELSE paid_until + ? END                                      -- active: extend from current expiry
-           WHERE id = ?`,
-          now, now, ms, ms, target.id
-        );
-      }
-    } catch (err) {
-      await db.run(
-        "UPDATE payments SET credited_at = NULL, status = 'processing', updated_at = datetime('now') WHERE id = ?",
-        payment.id
-      ).catch(() => {});
-      console.error('BTCPay grant failed after credit claim:', err);
-      return { granted: false, reason: 'grant_failed' };
-    }
-    // No session teardown: loadContext reads tier/paid_until fresh on every
-    // request, so the upgrade is live on the member's next page load.
+  // Staff already sit above Paid and never expire — record the payment but don't
+  // touch their tier. A failed grant rolls the claim back, so the next trigger
+  // retries it rather than leaving the member charged-but-not-upgraded.
+  try {
+    await grantMembership(db, target, payment.period_days);
+  } catch (err) {
+    await db.run(
+      "UPDATE payments SET credited_at = NULL, status = 'processing', updated_at = datetime('now') WHERE id = ?",
+      payment.id
+    ).catch(() => {});
+    console.error('BTCPay grant failed after credit claim:', err);
+    return { granted: false, reason: 'grant_failed' };
   }
+  // No session teardown: loadContext reads tier/paid_until fresh on every
+  // request, so the upgrade is live on the member's next page load.
 
   await audit(c, 'membership_granted', {
     userId: target.id, username: payment.username,

@@ -18,7 +18,7 @@
  * and on Node 22 (the test harness).
  */
 import { hmacHex, safeEqual } from "./crypto.js";
-import { storePlans } from "./plans.js";
+import { storePlans, storeCurrency } from "./plans.js";
 
 /** 15s ceiling on any call to the BTCPay host so a stalled server can't hang a request. */
 const FETCH_TIMEOUT_MS = 15_000;
@@ -50,8 +50,7 @@ function btcpayConfig(env = {}) {
   const apiKey = String(env.BTCPAY_API_KEY || '').trim();
   const webhookSecret = String(env.BTCPAY_WEBHOOK_SECRET || '').trim();
 
-  const currencyRaw = String(env.PAID_PRICE_CURRENCY || 'USD').trim().toUpperCase();
-  const currency = /^[A-Z]{2,10}$/.test(currencyRaw) ? currencyRaw : 'USD';
+  const currency = storeCurrency(env);
 
   // The catalogue (STORE_PLANS, or the single PAID_PRICE_AMOUNT plan). `amount`
   // and `periodDays` stay on the config as the DEFAULT plan, so every existing

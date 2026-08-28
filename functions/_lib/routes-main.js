@@ -10,6 +10,7 @@ import { meetsTier, isStaff } from "./tiers.js";
 import { issueLicense } from "./license.js";
 import { newToken } from "./crypto.js";
 import { btcpayConfig } from "./btcpay.js";
+import { onchainConfig, reconcileForUser as reconcileChainForUser } from "./onchain.js";
 import { reconcileForUser } from "./fulfil.js";
 import { resolvePlans } from "./plans.js";
 
@@ -60,6 +61,12 @@ async function siteStats(db) {
  *   CRYPTO_PAY_ADDRESSES manual fallback, "BTC:bc1...,ETH:0x...,LTC:ltc1..."
  *   PAID_PRICE           display string, e.g. "$10 / month"
  * With none set, the upgrade page shows an honest "coming soon" + contact.
+ *
+ * Running alongside all of the above is the direct-to-wallet path (ETH_ADDRESS /
+ * SOL_ADDRESS — see onchain.js), which needs no server and no processor at all.
+ * The two are deliberately not exclusive: a deployment can offer BTCPay's
+ * Bitcoin checkout and direct ETH/SOL/USDT side by side, and the store page
+ * shows whichever are actually configured.
  */
 function paymentConfig(env = {}, plans = null) {
   const addresses = String(env.CRYPTO_PAY_ADDRESSES || '')
@@ -85,6 +92,8 @@ function paymentConfig(env = {}, plans = null) {
   const price = String(env.PAID_PRICE || '').trim()
     || (btc.configured && cheapest ? `from ${cheapest.amount} ${btc.currency}` : '');
 
+  const chain = onchainConfig(env);
+
   return {
     btcpay: {
       configured: btc.configured,
@@ -92,6 +101,15 @@ function paymentConfig(env = {}, plans = null) {
       amount: btc.amount,
       periodDays: btc.periodDays,
       plans: catalogue,
+    },
+    // Direct-to-wallet coins. Only what is actually payable right now: an
+    // address that failed validation is not offered (see chainConfig).
+    chain: {
+      configured: chain.configured,
+      currency: chain.currency,
+      assets: chain.assets.map((a) => ({
+        key: a.key, symbol: a.symbol, label: a.label, network: a.network,
+      })),
     },
     url: String(env.CRYPTO_PAY_URL || '').trim(),
     addresses,
@@ -173,7 +191,13 @@ function register(app) {
   // a webhook that may be unconfigured, delayed or lost.
   const buyPage = async (c) => {
     const user = c.get('user');
-    if (user) await reconcileForUser(c, btcpayConfig(c.get('cfg')), user.id);
+    if (user) {
+      await reconcileForUser(c, btcpayConfig(c.get('cfg')), user.id);
+      // Same idea for direct-wallet orders: somebody who paid and simply came
+      // back to the site is credited here, without waiting on anything else.
+      await reconcileChainForUser(c, onchainConfig(c.get('cfg')), user.id)
+        .catch((err) => console.error('chain reconcile failed on store page:', err));
+    }
     return c.html(views.upgradePage(c.get('view'), {
       pay: paymentConfig(c.get('cfg'), await resolvePlans(c.get('db'), c.get('cfg'))),
     }));

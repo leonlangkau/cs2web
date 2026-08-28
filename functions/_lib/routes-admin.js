@@ -7,17 +7,24 @@ import { hashPassword } from "./crypto.js";
 import { setSetting, ANNOUNCEMENT_KEY } from "./settings.js";
 import { btcpayConfig } from "./btcpay.js";
 import { verifyAndCredit, sweepOpenPayments } from "./fulfil.js";
+import { grantMembership } from "./membership.js";
+import { onchainConfig, maybeScan, creditOrder, matchTransfer, orderView } from "./onchain.js";
+import { requiredConfirmations, explorerLink } from "./chains.js";
+import { fromUnits, parseUnits } from "./units.js";
 import { storePlans, planDuration } from "./plans.js";
 
 const LOGS_PER_PAGE = 50;
 const USERS_PER_PAGE = 25;
 const PAYMENTS_PER_PAGE = 40;
 const PAYMENT_STATUSES = ['new', 'processing', 'settled', 'expired', 'invalid'];
+const CHAIN_ORDERS_PER_PAGE = 40;
+const CHAIN_STATUSES = ['new', 'seen', 'underpaid', 'settled', 'expired', 'cancelled'];
 const FINGERPRINTS_PER_PAGE = 25;
 const LOG_EVENTS = ['signup', 'login', 'login_failed', 'login_blocked', 'logout', 'download',
   'admin_action', 'captcha_failed', 'terms_accepted', 'password_changed', 'loader_auth', 'loader_auth_failed',
   'ip_autoban', 'signup_surge_blocked', 'post_reported', 'email_changed', 'account_deleted',
-  'password_reset_requested', 'password_reset', 'email_verified', 'shout_deleted'];
+  'password_reset_requested', 'password_reset', 'email_verified', 'shout_deleted',
+  'chain_order_created', 'chain_order_failed', 'chain_tx_submitted', 'chain_payment_rejected'];
 
 // High-volume, low-signal events — routine traffic rather than something an
 // admin needs to review. Excluded by the "Important only" log filter so a
@@ -385,28 +392,214 @@ function register(app) {
       return c.redirect(backTo(c, '/admin/payments'), 302);
     }
 
-    if (!STAFF_TIERS.has(String(target.tier))) {
-      const days = payment.period_days === null || payment.period_days === undefined
-        ? null : Number(payment.period_days);
-      if (days === null) {
-        await db.run("UPDATE users SET tier = 'paid', paid_until = NULL WHERE id = ?", target.id);
-      } else {
-        const ms = Math.floor(days) * 86_400_000;
-        const now = Date.now();
-        await db.run(
-          `UPDATE users SET tier = 'paid', paid_until = CASE
-             WHEN tier = 'paid' AND paid_until IS NULL THEN NULL
-             WHEN paid_until IS NULL OR paid_until < ? THEN ? + ?
-             ELSE paid_until + ? END
-           WHERE id = ?`,
-          now, now, ms, ms, target.id
-        );
-      }
-    }
+    await grantMembership(db, target, payment.period_days);
     await adminAudit(c, `manually credited payment ${payment.order_id} for ${payment.username} `
       + `(${payment.amount} ${payment.currency}${payment.period_days ? `, ${payment.period_days}d` : ', lifetime'})`);
     setFlash(c, 'success', `Order ${payment.order_id} credited — ${payment.username} is now Paid.`);
     return c.redirect(backTo(c, '/admin/payments'), 302);
+  });
+
+  // --- Direct-to-wallet payments (ETH / SOL / USDT) -----------------------
+  //
+  // The automatic path needs no admin at all. What lands here is the residue:
+  // an order somebody paid oddly, or a transfer that arrived with no single
+  // order to attach it to. Both mean money is already in the wallet, so every
+  // action below is about attribution, never about taking payment.
+
+  /** Decorates an order row with the formatted values the view renders. */
+  const decorateOrder = (cfg, row) => {
+    const asset = cfg.byKey[row.asset];
+    const expected = parseUnits(row.expected_units) ?? 0n;
+    const received = parseUnits(row.received_units);
+    return {
+      ...row,
+      symbol: asset ? asset.symbol : String(row.asset).toUpperCase(),
+      expectedAmount: fromUnits(expected, Number(row.decimals)),
+      receivedAmount: received === null ? null : fromUnits(received, Number(row.decimals)),
+      shortfall: received !== null && received < expected
+        ? `${fromUnits(expected - received, Number(row.decimals))} ${asset ? asset.symbol : ''}` : null,
+      needed: asset ? requiredConfirmations(cfg, asset) : 0,
+      explorer: asset && row.tx_hash ? explorerLink(asset, row.tx_hash) : '',
+    };
+  };
+
+  app.get('/admin/crypto', async (c) => {
+    const db = c.get('db');
+    const cfg = onchainConfig(c.get('cfg'));
+    const url = new URL(c.req.url);
+    const now = Date.now();
+
+    // Pages Functions have no cron, so opening this page also nudges the scan.
+    const swept = await maybeScan(c, cfg, { source: `admin ${c.get('user').username}` })
+      .catch(() => null);
+    const scanNote = swept && swept.results && swept.results.length
+      ? swept.results.map((r) => `${r.asset}: ${r.error ? `error — ${r.error}` : `${r.seen} seen, ${r.credited} credited`}`).join(' · ')
+      : '';
+
+    const status = CHAIN_STATUSES.includes(url.searchParams.get('status'))
+      ? url.searchParams.get('status') : '';
+    const where = status ? 'WHERE status = ?' : '';
+    const params = status ? [status] : [];
+    const total = Number((await db.get(`SELECT COUNT(*) AS n FROM chain_orders ${where}`, ...params)).n);
+    const pages = Math.max(1, Math.ceil(total / CHAIN_ORDERS_PER_PAGE));
+    const page = Math.max(1, Math.min(pages, intParam(url.searchParams.get('page'))));
+    const rows = await db.all(
+      `SELECT * FROM chain_orders ${where} ORDER BY id DESC LIMIT ? OFFSET ?`,
+      ...params, CHAIN_ORDERS_PER_PAGE, (page - 1) * CHAIN_ORDERS_PER_PAGE
+    );
+
+    // Money in the wallet that nothing claimed. Each one is offered the live
+    // orders for its coin, cheapest mismatch first, so assigning it is one click.
+    const stranded = await db.all(
+      `SELECT * FROM chain_transfers
+        WHERE status IN ('unmatched', 'ambiguous') ORDER BY id DESC LIMIT 25`
+    );
+    const transfers = [];
+    for (const t of stranded) {
+      const asset = cfg.byKey[t.asset];
+      const candidates = await db.all(
+        `SELECT * FROM chain_orders
+          WHERE asset = ? AND credited_at IS NULL AND status <> 'cancelled' AND match_until >= ?
+          ORDER BY id DESC LIMIT 25`, t.asset, now
+      );
+      transfers.push({
+        ...t,
+        symbol: asset ? asset.symbol : String(t.asset).toUpperCase(),
+        amount: asset ? `${fromUnits(parseUnits(t.units) ?? 0n, asset.decimals)} ${asset.symbol}` : String(t.units),
+        explorer: asset ? explorerLink(asset, t.tx_hash) : '',
+        candidates: candidates.map((o) => decorateOrder(cfg, o)),
+      });
+    }
+
+    return c.html(views.chain(c.get('view'), {
+      config: {
+        assets: cfg.assets.map((a) => ({
+          symbol: a.symbol, network: a.network, address: a.address,
+          confirmations: requiredConfirmations(cfg, a),
+        })),
+        invalid: cfg.invalid,
+        tolerancePct: cfg.toleranceBp / 100,
+        payWindowMinutes: cfg.payWindowMinutes,
+        matchHours: cfg.matchHours,
+        scanIntervalSeconds: cfg.scanIntervalSeconds,
+        scanSecret: Boolean(cfg.scanSecret),
+      },
+      orders: rows.map((r) => decorateOrder(cfg, r)),
+      transfers,
+      status, statuses: CHAIN_STATUSES,
+      page, pages, total,
+      scan: scanNote,
+    }));
+  });
+
+  app.post('/admin/crypto/scan', async (c) => {
+    const cfg = onchainConfig(c.get('cfg'));
+    if (!cfg.configured) {
+      setFlash(c, 'error', 'No receiving addresses are configured, so there is nothing to scan.');
+      return c.redirect('/admin/crypto', 302);
+    }
+    const result = await maybeScan(c, cfg, { force: true, source: `admin ${c.get('user').username}` });
+    const summary = (result.results || [])
+      .map((r) => `${r.asset}: ${r.error ? `error — ${r.error}` : `${r.seen} seen, ${r.credited} credited`}`)
+      .join(' · ');
+    setFlash(c, (result.results || []).some((r) => r.error) ? 'error' : 'success',
+      summary || `Nothing to scan (${result.skipped || 'no pending orders'}).`);
+    return c.redirect('/admin/crypto', 302);
+  });
+
+  const findChainOrder = async (c) => {
+    const id = intParam(c.req.param('id'), -1);
+    return id > 0 ? c.get('db').get('SELECT * FROM chain_orders WHERE id = ?', id) : null;
+  };
+
+  // Grant a membership for an order with no confirmed on-chain match — money
+  // that arrived some other way, or a chain the APIs cannot see right now.
+  // Full admin only, and always audited as manual.
+  app.post('/admin/crypto/orders/:id/credit', async (c) => {
+    const gate = requireAdmin(c);
+    if (gate) return gate;
+    const order = await findChainOrder(c);
+    if (!order) return notFound(c, 'No such order.');
+    if (order.credited_at) {
+      setFlash(c, 'error', `Order ${order.order_id} was already credited.`);
+      return c.redirect('/admin/crypto', 302);
+    }
+    const cfg = onchainConfig(c.get('cfg'));
+    const verdict = await creditOrder(c, cfg, order, null, `manual credit by ${c.get('user').username}`);
+    if (verdict.granted) {
+      await adminAudit(c, `manually credited on-chain order ${order.order_id} for ${order.username}`);
+      setFlash(c, 'success', `Order ${order.order_id} credited — ${order.username} is now Paid.`);
+    } else {
+      setFlash(c, 'error', `Order ${order.order_id}: ${verdict.reason}.`);
+    }
+    return c.redirect('/admin/crypto', 302);
+  });
+
+  app.post('/admin/crypto/orders/:id/cancel', async (c) => {
+    const order = await findChainOrder(c);
+    if (!order) return notFound(c, 'No such order.');
+    const claim = await c.get('db').run(
+      `UPDATE chain_orders SET status = 'cancelled', updated_at = datetime('now')
+       WHERE id = ? AND credited_at IS NULL`, order.id
+    );
+    if (claim.changes > 0) await adminAudit(c, `cancelled on-chain order ${order.order_id}`);
+    setFlash(c, claim.changes > 0 ? 'success' : 'error', claim.changes > 0
+      ? `Order ${order.order_id} cancelled.`
+      : `Order ${order.order_id} is already credited and cannot be cancelled.`);
+    return c.redirect('/admin/crypto', 302);
+  });
+
+  // Attribute a stranded payment to the order it actually paid for. This is the
+  // action that resolves the queue above.
+  app.post('/admin/crypto/transfers/:id/assign', async (c) => {
+    const gate = requireAdmin(c);
+    if (gate) return gate;
+    const db = c.get('db');
+    const id = intParam(c.req.param('id'), -1);
+    const transfer = id > 0 ? await db.get('SELECT * FROM chain_transfers WHERE id = ?', id) : null;
+    if (!transfer) return notFound(c, 'No such payment.');
+    if (transfer.status === 'credited') {
+      setFlash(c, 'error', 'That payment has already been credited.');
+      return c.redirect('/admin/crypto', 302);
+    }
+
+    const body = await formBody(c);
+    const orderId = String(body.order || '').trim().slice(0, 64);
+    const order = await db.get(
+      'SELECT * FROM chain_orders WHERE order_id = ? AND asset = ?', orderId, transfer.asset
+    );
+    if (!order) {
+      setFlash(c, 'error', 'That order no longer exists, or is for a different coin.');
+      return c.redirect('/admin/crypto', 302);
+    }
+    if (order.credited_at) {
+      setFlash(c, 'error', `Order ${order.order_id} was already credited.`);
+      return c.redirect('/admin/crypto', 302);
+    }
+
+    const cfg = onchainConfig(c.get('cfg'));
+    const verdict = await creditOrder(c, cfg, order, transfer, `assigned by ${c.get('user').username}`);
+    if (verdict.granted) {
+      await adminAudit(c, `assigned ${transfer.asset} payment ${String(transfer.tx_hash).slice(0, 20)} `
+        + `to order ${order.order_id} for ${order.username}`);
+      setFlash(c, 'success', `Credited to ${order.username}.`);
+    } else {
+      setFlash(c, 'error', `Could not credit that: ${verdict.reason}.`);
+    }
+    return c.redirect('/admin/crypto', 302);
+  });
+
+  app.post('/admin/crypto/transfers/:id/ignore', async (c) => {
+    const id = intParam(c.req.param('id'), -1);
+    const claim = await c.get('db').run(
+      `UPDATE chain_transfers SET status = 'ignored', updated_at = datetime('now')
+       WHERE id = ? AND status <> 'credited'`, id
+    );
+    if (claim.changes > 0) await adminAudit(c, `dismissed unattributed chain payment #${id}`);
+    setFlash(c, claim.changes > 0 ? 'success' : 'error', claim.changes > 0
+      ? 'Dismissed. It stays on record and can still be assigned later from the database.'
+      : 'That payment has already been credited.');
+    return c.redirect('/admin/crypto', 302);
   });
 
   app.post('/admin/users/:id/ban', async (c) => {

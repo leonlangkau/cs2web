@@ -1312,3 +1312,147 @@ tbody tr.row-banned:hover td { background: var(--tint-danger); }
   .btn-download.is-busy .dl-progress { opacity: 1; }
   .btn-download.is-busy .dl-progress::before { width: 100%; transform: none; }
 }
+
+/* ---------- Direct-to-wallet crypto payment page ---------- */
+
+.pay-subtitle { margin-top: -.4rem; }
+
+.pay-panel + .pay-panel { margin-top: 1.1rem; }
+
+.pay-status {
+  display: flex;
+  align-items: center;
+  gap: .7rem;
+  margin: 0 0 .8rem;
+}
+
+.pay-status-waiting {
+  padding: .85rem 1rem;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface-2, rgba(1, 55, 183, .05));
+  color: var(--text-muted, inherit);
+}
+
+/* A quiet, continuous "we are watching" cue. Reduced-motion users get a static
+   dot rather than nothing, so the state still reads as live. */
+.pay-spinner {
+  width: .8rem;
+  height: .8rem;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  border: 2px solid var(--brand, #0137B7);
+  border-top-color: transparent;
+  animation: pay-spin 900ms linear infinite;
+}
+
+@keyframes pay-spin { to { transform: rotate(360deg); } }
+
+@media (prefers-reduced-motion: reduce) {
+  .pay-spinner { animation: none; border-top-color: var(--brand, #0137B7); opacity: .6; }
+}
+
+.pay-network {
+  padding: .8rem 1rem;
+  border-radius: 10px;
+  border: 1px solid var(--warn-border, #e5b567);
+  background: var(--warn-bg, rgba(229, 181, 103, .12));
+  margin: 0 0 1rem;
+}
+
+.pay-grid {
+  display: flex;
+  gap: 1.4rem;
+  align-items: flex-start;
+  flex-wrap: wrap;
+}
+
+.pay-fields { flex: 1 1 20rem; min-width: 0; }
+
+.pay-field + .pay-field { margin-top: .9rem; }
+
+.pay-field-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: .6rem;
+  margin-bottom: .3rem;
+}
+
+.pay-field-label { font-weight: 600; }
+.pay-field-hint { font-size: .85em; opacity: .7; }
+
+.pay-field-body {
+  display: flex;
+  gap: .5rem;
+  align-items: stretch;
+}
+
+/* The two values a buyer must reproduce exactly. Wrapping rather than
+   truncating: a half-shown address invites a half-copied address. */
+.pay-value {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: .6rem .7rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-2, rgba(0, 0, 0, .04));
+  font-size: 1.02rem;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+  word-break: break-all;
+  user-select: all;
+}
+
+.pay-copy { flex: 0 0 auto; align-self: center; }
+.pay-copy.pay-copied { opacity: .75; }
+
+.pay-qr {
+  flex: 0 0 auto;
+  margin: 0;
+  text-align: center;
+}
+
+.pay-qr svg {
+  display: block;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+}
+
+.pay-qr figcaption { margin-top: .4rem; }
+
+.pay-received { margin: .4rem 0 0; }
+
+.pay-details {
+  margin-top: 1.1rem;
+  padding: .9rem 1.1rem;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+
+.pay-details summary { cursor: pointer; font-weight: 600; }
+.pay-details[open] summary { margin-bottom: .6rem; }
+
+/* Coin picker on the store page. */
+.coin-choices {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(8.5rem, 1fr));
+  gap: .5rem;
+  margin-top: .6rem;
+}
+
+.coin-choice { margin: 0; }
+
+.coin-choices .btn {
+  display: flex;
+  flex-direction: column;
+  gap: .1rem;
+  line-height: 1.25;
+  padding-top: .55rem;
+  padding-bottom: .55rem;
+}
+
+.coin-symbol { font-weight: 700; }
+.coin-network { font-size: .72em; opacity: .8; font-weight: 400; }
+
+.chain-note { margin-top: .8rem; }

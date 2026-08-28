@@ -233,4 +233,75 @@ CREATE TABLE IF NOT EXISTS products (
   updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS idx_products_active ON products(active, position);
+
+-- Direct-to-wallet crypto payments: ETH, SOL and USDT paid straight to the
+-- operator's own addresses, with no processor in the middle (see
+-- functions/_lib/chains.js and functions/_lib/onchain.js).
+--
+-- Every buyer pays the SAME address, so an order is bound to its payment by
+-- \`expected_units\`: each live order is quoted a unique amount, differing from
+-- its neighbours in the last few decimals by an amount worth about a cent. That
+-- is what lets an anonymous incoming transfer be attributed to one account.
+-- Amounts are integer base units (wei/lamports/token units) held as TEXT, since
+-- they routinely exceed what a JS number can represent exactly.
+--
+-- \`credited_at\` (ms epoch) is the idempotency guard, set exactly once, so a
+-- transaction seen by two overlapping scans can never grant two memberships.
+CREATE TABLE IF NOT EXISTS chain_orders (
+  id             INTEGER PRIMARY KEY AUTOINCREMENT,
+  order_id       TEXT NOT NULL UNIQUE,
+  user_id        INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  username       TEXT,
+  asset          TEXT NOT NULL,
+  chain          TEXT NOT NULL,
+  address        TEXT NOT NULL,
+  decimals       INTEGER NOT NULL,
+  expected_units TEXT NOT NULL,
+  min_units      TEXT NOT NULL,
+  received_units TEXT,
+  fiat_amount    TEXT NOT NULL,
+  fiat_currency  TEXT NOT NULL,
+  rate           TEXT NOT NULL,
+  period_days    INTEGER,
+  plan_id        TEXT,
+  plan_name      TEXT,
+  status         TEXT NOT NULL DEFAULT 'new' CHECK (status IN ('new','seen','underpaid','settled','expired','cancelled')),
+  tx_hash        TEXT,
+  confirmations  INTEGER NOT NULL DEFAULT 0,
+  credited_at    INTEGER,
+  expires_at     INTEGER NOT NULL,
+  match_until    INTEGER NOT NULL,
+  created_at     TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at     TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_chain_orders_user ON chain_orders(user_id);
+CREATE INDEX IF NOT EXISTS idx_chain_orders_open ON chain_orders(asset, credited_at, match_until);
+CREATE INDEX IF NOT EXISTS idx_chain_orders_status ON chain_orders(status);
+
+-- Every incoming transfer the chain scanner has ever seen, matched or not.
+--
+-- UNIQUE(asset, tx_hash) is the other half of the idempotency guard: one
+-- transaction can be claimed by at most one order, however many times it is
+-- re-scanned, and a deposit that matches nothing is kept here as \`unmatched\`
+-- rather than dropped, so an admin can see money that arrived and decide what
+-- it was for. One row per transaction, holding the TOTAL it paid us — explorers
+-- disagree about log and trace indices, so those are never used as identity.
+CREATE TABLE IF NOT EXISTS chain_transfers (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  asset         TEXT NOT NULL,
+  tx_hash       TEXT NOT NULL,
+  address       TEXT NOT NULL,
+  units         TEXT NOT NULL,
+  block         INTEGER NOT NULL DEFAULT 0,
+  block_time    INTEGER NOT NULL DEFAULT 0,
+  confirmations INTEGER NOT NULL DEFAULT 0,
+  order_id      TEXT,
+  status        TEXT NOT NULL DEFAULT 'seen' CHECK (status IN ('seen','credited','unmatched','ambiguous','ignored')),
+  note          TEXT,
+  created_at    TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at    TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE (asset, tx_hash)
+);
+CREATE INDEX IF NOT EXISTS idx_chain_transfers_status ON chain_transfers(status);
+CREATE INDEX IF NOT EXISTS idx_chain_transfers_order ON chain_transfers(order_id);
 `;

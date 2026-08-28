@@ -178,7 +178,7 @@ through the same audited, rate-limited, login-gated route.
 
 ---
 
-## Crypto payments (BTCPay Server)
+## Crypto payments — option A: BTCPay Server (Bitcoin)
 
 The `/upgrade` page can run a fully automated, **crypto-only** checkout backed
 by your own **BTCPay Server** — no card processor, no third party, no personal
@@ -212,6 +212,46 @@ creating the store, API key and webhook.
    `https://yourdomain.com/api/btcpay/webhook` (the guide walks through this),
    and paste that webhook's signing secret into `BTCPAY_WEBHOOK_SECRET`.
 4. Redeploy. The upgrade page switches from "coming soon" to a live pay button.
+
+---
+
+## Crypto payments — option B: straight to your own wallet (ETH, SOL, USDT)
+
+No server, no processor, no account with anybody: buyers send ETH, SOL or USDT
+directly to **your** wallet, and the site watches those addresses and grants
+**Paid** automatically once the payment confirms on chain. It runs happily
+**alongside** BTCPay — the store shows whichever are configured — or instead of
+it.
+
+Two secrets is the whole setup:
+
+```bash
+npx wrangler pages secret put ETH_ADDRESS   # covers ETH and USDT-ERC20
+npx wrangler pages secret put SOL_ADDRESS   # covers SOL and USDT-SPL
+```
+
+Use a wallet you hold the keys to, not an exchange deposit address. Both are
+validated before anything is offered — an Ethereum address is checked against
+its EIP-55 checksum, so a transposed character is caught rather than quietly
+collecting money nobody can spend. A address that fails takes its coins off the
+checkout and is flagged in **Admin → On-chain**.
+
+Because Pages Functions have no cron, the chains are polled during requests that
+were happening anyway — in particular the buyer's own payment page, which polls
+while they watch it. To have the watcher run regardless, set a shared secret:
+
+```bash
+npx wrangler pages secret put CRYPTO_SCAN_SECRET
+```
+
+and point any scheduler (cron-job.org, a GitHub Actions schedule, a Cloudflare
+**Worker** cron) at `https://yourdomain.com/api/crypto/scan?key=YOUR_SECRET`
+every few minutes. Unset, that endpoint is closed to everyone.
+
+Prices come from **Admin → Shop**, the same catalogue BTCPay sells, quoted at a
+live rate when the buyer clicks. Full guide, including tuning, the admin queue
+for payments that need a human, and how the "credit exactly once" guarantees
+work: [CRYPTO-SETUP.md](CRYPTO-SETUP.md).
 
 **How the security holds up** (all enforced in `functions/_lib/`):
 

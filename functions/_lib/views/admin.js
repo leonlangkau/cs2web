@@ -17,6 +17,7 @@ function head(ctx, heading) {
     ${tab('/admin/users', 'Users', p.startsWith('/admin/users'))}
     ${tab('/admin/shop', 'Shop', p.startsWith('/admin/shop'))}
     ${tab('/admin/payments', 'Payments', p.startsWith('/admin/payments'))}
+    ${tab('/admin/crypto', 'On-chain', p.startsWith('/admin/crypto'))}
     ${tab('/admin/logs', 'IP logs', p.startsWith('/admin/logs'))}
     ${tab('/admin/fingerprints', 'Fingerprints', p.startsWith('/admin/fingerprints'))}
     ${tab('/admin/reports', 'Reports', p.startsWith('/admin/reports'))}
@@ -346,6 +347,141 @@ function payments(ctx, { rows, status, statuses, page: current, pages, total, li
   return page(ctx, { title: 'Admin · Payments', body });
 }
 
+/**
+ * Direct-to-wallet payments (functions/_lib/onchain.js).
+ *
+ * Two tables, because there are two distinct kinds of problem. An ORDER that
+ * never got paid is normal and needs nothing. A TRANSFER that arrived and could
+ * not be attributed is the one thing here that genuinely needs a human: the
+ * money is real and in the operator's wallet, and somebody is waiting for it.
+ * So unattributed transfers sit at the top, with the order they most likely
+ * belong to one click away.
+ */
+function chain(ctx, { config, orders, transfers, status, statuses, page: current, pages, total, scan }) {
+  const csrf = `<input type="hidden" name="_csrf" value="${esc(ctx.csrfToken)}">`;
+  const canCredit = isFullAdmin(ctx.user);
+
+  const configPanel = `<div class="panel panel-spaced">
+    <h3>Receiving addresses</h3>
+    ${config.assets.length > 0
+      ? `<div class="table-wrap"><table>
+          <thead><tr><th>Coin</th><th>Network</th><th>Address</th><th>Confirmations</th></tr></thead>
+          <tbody>${map(config.assets, (a) => `<tr>
+            <td><strong>${esc(a.symbol)}</strong></td>
+            <td class="muted">${esc(a.network)}</td>
+            <td class="mono detail-cell" title="${esc(a.address)}">${esc(a.address)}</td>
+            <td>${esc(a.confirmations)}</td></tr>`)}</tbody>
+        </table></div>`
+      : `<p class="muted">No receiving addresses are configured, so no coins are on sale.
+          Set the <code class="mono">ETH_ADDRESS</code> and <code class="mono">SOL_ADDRESS</code>
+          secrets — see CRYPTO-SETUP.md.</p>`}
+    ${config.invalid.length > 0
+      ? `<p class="flash flash-error">Rejected: ${map(config.invalid, (i) =>
+          `<span class="mono">${esc(i.key)}</span> — ${esc(i.reason)}. `)}
+          These coins are <strong>not</strong> offered until the secret is corrected.</p>`
+      : ''}
+    <p class="fineprint">Underpayment tolerance ${esc(config.tolerancePct)}% ·
+      quote held ${esc(config.payWindowMinutes)} min ·
+      late payments matched for ${esc(config.matchHours)}h ·
+      scan no more than every ${esc(config.scanIntervalSeconds)}s.
+      ${config.scanSecret
+        ? 'An external cron may drive the watcher via <code class="mono">/api/crypto/scan</code>.'
+        : 'No <code class="mono">CRYPTO_SCAN_SECRET</code> is set, so the chains are only polled '
+          + 'while somebody is on the site.'}</p>
+    <form method="post" action="/admin/crypto/scan" class="inline-form">${csrf}
+      <button class="btn btn-outline btn-sm" type="submit">Scan the chains now</button></form>
+    ${scan ? `<span class="muted"> ${esc(scan)}</span>` : ''}
+  </div>`;
+
+  const orderRow = (o) => `<tr class="${o.credited_at ? 'row-resolved' : ''}">
+    <td class="mono detail-cell" title="${esc(o.order_id)}">${esc(String(o.order_id).slice(0, 10))}…</td>
+    <td>${o.username ? esc(o.username) : '<span class="muted">(gone)</span>'}</td>
+    <td>${esc(o.plan_name || 'Paid membership')}
+      <div class="muted">${esc(o.period_days ? `${o.period_days} days` : 'lifetime')}</div></td>
+    <td class="nowrap"><strong>${esc(o.expectedAmount)}</strong> ${esc(o.symbol)}
+      <div class="muted">${esc(o.fiat_amount)} ${esc(o.fiat_currency)}</div></td>
+    <td class="nowrap">${o.receivedAmount
+      ? `${esc(o.receivedAmount)} ${esc(o.symbol)}${o.shortfall
+        ? `<div class="muted">${esc(o.shortfall)} short</div>` : ''}`
+      : '<span class="muted">—</span>'}</td>
+    <td><span class="tag tag-pay tag-pay-${esc(o.status)}">${esc(o.status)}</span>
+      ${o.credited_at ? '<span class="tag tag-report-resolved">CREDITED</span>' : ''}
+      ${!o.credited_at && o.tx_hash ? `<div class="muted">${esc(o.confirmations)}/${esc(o.needed)} conf</div>` : ''}</td>
+    <td class="mono detail-cell" title="${esc(o.tx_hash || '')}">${o.tx_hash
+      ? (o.explorer
+        ? `<a href="${esc(o.explorer)}" rel="noopener nofollow" target="_blank">${esc(String(o.tx_hash).slice(0, 12))}…</a>`
+        : esc(String(o.tx_hash).slice(0, 12)))
+      : '—'}</td>
+    <td class="muted nowrap">${esc(timeAgo(o.created_at))}</td>
+    <td class="actions-cell">
+      ${canCredit && !o.credited_at ? `<form method="post" action="/admin/crypto/orders/${esc(o.id)}/credit" class="inline-form"
+        data-confirm="Grant this membership without a confirmed on-chain payment?">${csrf}
+        <button class="btn btn-warn btn-xs" type="submit">Credit</button></form>` : ''}
+      ${!o.credited_at && o.status !== 'cancelled' ? `<form method="post" action="/admin/crypto/orders/${esc(o.id)}/cancel" class="inline-form">${csrf}
+        <button class="btn btn-ghost btn-xs" type="submit">Cancel</button></form>` : ''}
+    </td></tr>`;
+
+  // The one table that actually needs attention: money in the wallet with no
+  // order to attach it to.
+  const transferRow = (t) => `<tr>
+    <td><strong>${esc(t.symbol)}</strong></td>
+    <td class="nowrap"><strong>${esc(t.amount)}</strong></td>
+    <td class="mono detail-cell" title="${esc(t.tx_hash)}">${t.explorer
+      ? `<a href="${esc(t.explorer)}" rel="noopener nofollow" target="_blank">${esc(String(t.tx_hash).slice(0, 16))}…</a>`
+      : esc(String(t.tx_hash).slice(0, 16))}</td>
+    <td><span class="tag tag-pay tag-pay-${esc(t.status)}">${esc(t.status)}</span>
+      ${t.note ? `<div class="muted">${esc(t.note)}</div>` : ''}</td>
+    <td class="muted nowrap">${esc(timeAgo(t.created_at))}</td>
+    <td class="actions-cell">
+      ${canCredit && t.candidates.length > 0 ? `<form method="post" action="/admin/crypto/transfers/${esc(t.id)}/assign" class="inline-form">${csrf}
+        <select name="order" aria-label="Credit this payment to">
+          ${map(t.candidates, (o) => `<option value="${esc(o.order_id)}">${esc(o.username)} — ${esc(o.expectedAmount)} ${esc(o.symbol)} (${esc(o.plan_name || 'membership')})</option>`)}
+        </select>
+        <button class="btn btn-warn btn-xs" type="submit">Credit to</button></form>` : ''}
+      ${t.status !== 'ignored' ? `<form method="post" action="/admin/crypto/transfers/${esc(t.id)}/ignore" class="inline-form">${csrf}
+        <button class="btn btn-ghost btn-xs" type="submit">Ignore</button></form>` : ''}
+    </td></tr>`;
+
+  const body = `
+<div class="section admin-page">
+  <div class="container">
+    ${head(ctx, 'On-chain payments')}
+    ${configPanel}
+
+    <div class="panel panel-spaced">
+      <h3>Payments needing a decision ${transfers.length ? `<span class="tag tag-report-open">${esc(transfers.length)}</span>` : ''}</h3>
+      ${transfers.length
+        ? `<p class="muted">These arrived at our addresses but couldn't be matched to exactly one
+            order — usually an odd amount, or two orders whose amounts overlap. The money is in the
+            wallet; pick who it belongs to.</p>
+          <div class="table-wrap"><table>
+            <thead><tr><th>Coin</th><th>Amount</th><th>Transaction</th><th>Why</th><th>Seen</th><th></th></tr></thead>
+            <tbody>${map(transfers, transferRow)}</tbody>
+          </table></div>`
+        : '<p class="muted">Nothing waiting. Every payment that has arrived was matched automatically.</p>'}
+    </div>
+
+    <form class="filter-bar" method="get" action="/admin/crypto">
+      <select name="status" aria-label="Filter by status">
+        <option value="">All statuses</option>
+        ${map(statuses, (st) => `<option value="${esc(st)}" ${status === st ? 'selected' : ''}>${esc(st)}</option>`)}
+      </select>
+      <button class="btn btn-outline btn-sm" type="submit">Filter</button>
+      ${status ? '<a class="btn btn-ghost btn-sm" href="/admin/crypto">Clear</a>' : ''}
+      <span class="muted">${esc(total)} order${total === 1 ? '' : 's'}</span>
+    </form>
+
+    <div class="panel"><div class="table-wrap"><table>
+      <thead><tr><th>Order</th><th>User</th><th>Plan</th><th>Expected</th><th>Received</th>
+        <th>Status</th><th>Transaction</th><th>Started</th><th></th></tr></thead>
+      <tbody>${orders.length ? map(orders, orderRow) : '<tr><td colspan="9" class="muted center">No on-chain orders yet.</td></tr>'}</tbody>
+    </table></div></div>
+    ${pagination(current, pages, (n) => `/admin/crypto?${new URLSearchParams({ ...(status ? { status } : {}), page: String(n) })}`)}
+  </div>
+</div>`;
+  return page(ctx, { title: 'Admin · On-chain payments', body });
+}
+
 function logs(ctx, { logs: rows, q, event, events, important, page: current, pages, total, ipBans }) {
   const csrf = `<input type="hidden" name="_csrf" value="${esc(ctx.csrfToken)}">`;
   const banForm = (ip) => `<form method="post" action="/admin/ip-bans/${encodeURIComponent(ip)}/unban" class="inline-form"
@@ -613,4 +749,5 @@ function forumAdmin(ctx, { categories, threads }) {
   return page(ctx, { title: 'Admin · Forum', body });
 }
 
-export { dashboard, users, shop, payments, logs, fingerprints, fingerprintDetail, reports, forumAdmin };
+export { dashboard, users, shop, payments, logs, fingerprints, fingerprintDetail, reports, forumAdmin, chain,
+};

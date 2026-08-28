@@ -2,6 +2,7 @@ import { page } from "./layout.js";
 import { esc, timeAgo, map, emailLink } from "./util.js";
 import { meetsTier, tierOf, TIER_LABELS } from "../tiers.js";
 import { planDuration } from "../plans.js";
+import { coinChoices } from "./pay.js";
 
 const DOWNLOAD_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m0 0l-5-5m5 5l5-5M4 19h16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
 const DL_ARROW_ICON = '<svg class="dl-arrow" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m0 0l-5-5m5 5l5-5M4 19h16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
@@ -216,9 +217,14 @@ function upgradePage(ctx, { pay }) {
 
   let payBlock;
   const catalogue = (pay.btcpay && pay.btcpay.plans) || [];
-  if (pay.btcpay && pay.btcpay.configured && catalogue.length > 0) {
+  const btcpayOn = Boolean(pay.btcpay && pay.btcpay.configured);
+  // Direct-to-wallet coins, if any addresses are configured. The two checkouts
+  // are independent: either, both or neither can be live.
+  const coins = (pay.chain && pay.chain.configured && pay.chain.assets) || [];
+
+  if ((btcpayOn || coins.length > 0) && catalogue.length > 0) {
     const plans = catalogue;
-    const currency = pay.btcpay.currency;
+    const currency = btcpayOn ? pay.btcpay.currency : pay.chain.currency;
 
     const planCard = (plan) => `<article class="plan-card">
         <h3 class="plan-name">${esc(plan.name)}</h3>
@@ -226,18 +232,31 @@ function upgradePage(ctx, { pay }) {
           <span class="plan-currency">${esc(currency)}</span></p>
         <p class="plan-term">${esc(planDuration(plan.periodDays))}</p>
         ${plan.description ? `<p class="plan-blurb">${esc(plan.description)}</p>` : ''}
-        ${ctx.user
+        ${btcpayOn && ctx.user
           ? `<form method="post" action="/upgrade/checkout">${csrf}
               <input type="hidden" name="plan" value="${esc(plan.id)}">
               <button class="btn btn-primary btn-block" type="submit">Pay with crypto</button>
             </form>`
-          : `<a class="btn btn-outline btn-block" href="/auth/login?next=%2Fbuy">Sign in to buy</a>`}
+          : ''}
+        ${btcpayOn && !ctx.user
+          ? `<a class="btn btn-outline btn-block" href="/auth/login?next=%2Fbuy">Sign in to buy</a>`
+          : ''}
+        ${coins.length > 0 ? coinChoices(ctx, plan, coins) : ''}
       </article>`;
+
+    const btcpayNote = btcpayOn
+      ? `You'll be taken to our self-hosted <strong>BTCPay</strong> checkout to pay in
+        Bitcoin (on-chain or Lightning). No card, no third-party processor, no personal details.`
+      : '';
+    const coinNote = coins.length > 0
+      ? `Pick a coin and you'll get a payment address and an exact amount to send. Nothing is held
+        by a processor — the payment goes straight to our own wallet, and the site watches the
+        chain for it.`
+      : '';
 
     payBlock = `
       <div class="plan-grid">${map(plans, planCard)}</div>
-      <p class="fineprint">You'll be taken to our self-hosted <strong>BTCPay</strong> checkout to pay in
-        Bitcoin (on-chain or Lightning). No card, no third-party processor, no personal details.
+      <p class="fineprint">${btcpayNote} ${coinNote}
         Your account upgrades to <strong>Paid</strong> automatically once the payment confirms; usually a
         few minutes, and it does not depend on you staying on the page.
         ${ctx.user ? '' : 'Payments attach to your account, so sign in first — a free account takes a moment.'}</p>`;

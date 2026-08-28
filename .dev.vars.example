@@ -39,3 +39,24 @@ ADMIN_PASSWORD=choose-a-strong-password
 # PAID_PRICE_AMOUNT=10.00
 # PAID_PRICE_CURRENCY=USD
 # PAID_PERIOD_DAYS=30       # empty or 0 = lifetime membership
+
+# Direct-to-wallet crypto payments (optional). Paste your OWN receiving
+# addresses and /buy gains a coin picker for ETH, SOL and USDT; the site
+# watches the chain and upgrades the account once a payment confirms. Runs
+# happily alongside BTCPay, or instead of it. Full guide: CRYPTO-SETUP.md.
+#
+# Nothing here holds or needs a private key — these are receive-only addresses
+# and every chain call is read-only.
+# ETH_ADDRESS=0x0000000000000000000000000000000000000000
+# SOL_ADDRESS=YourBase58SolanaAddressHere
+
+# Lets an external cron drive the chain watcher (GET or POST
+# /api/crypto/scan?key=...), so payments confirm while nobody is browsing.
+# Unset, the endpoint is closed to everyone.
+# CRYPTO_SCAN_SECRET=another_long_random_string
+
+# The chain and price APIs are keyless by default (Blockscout, the Solana
+# mainnet RPC, Coinbase). Set these only if you want higher rate limits.
+# ETHERSCAN_API_KEY=
+# SOLANA_RPC_URL=
+# COINGECKO_API_KEY=

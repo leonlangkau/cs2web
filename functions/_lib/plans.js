@@ -31,6 +31,15 @@ function planDuration(days) {
 }
 
 /**
+ * The currency the shop prices in. One definition, because the BTCPay checkout
+ * and the direct-wallet checkout must agree about what "10.00" means.
+ */
+function storeCurrency(env = {}) {
+  const raw = String(env.PAID_PRICE_CURRENCY || 'USD').trim().toUpperCase();
+  return /^[A-Z]{2,10}$/.test(raw) ? raw : 'USD';
+}
+
+/**
  * Parses STORE_PLANS. An entry that does not parse cleanly is dropped rather
  * than shipped as a broken price — a typo costs one plan, never a wrong charge.
  */
@@ -130,6 +139,6 @@ async function resolvePlan(db, env, id) {
 }
 
 export {
-  storePlans, findPlan, parsePlans, planDuration,
+  storePlans, findPlan, parsePlans, planDuration, storeCurrency,
   resolvePlans, resolvePlan, rowToPlan, PERIOD_PRESETS,
 };

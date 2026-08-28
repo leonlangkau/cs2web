@@ -96,3 +96,11 @@ ADMIN_PASSWORD=choose-a-strong-password
 # SUPPORT_ATTACH_RETAIN_DAYS=180
 # SUPPORT_AUTOCLOSE_DAYS=7
 # SUPPORT_EMAIL_NOTIFY=1
+
+# Rate-limit buckets for the support desk. Defaults live in
+# functions/_lib/limits.js; wrangler.toml lists every one with its meaning.
+# RATE_LIMIT_TICKET=10
+# RATE_LIMIT_TICKET_REPLY=60
+# RATE_LIMIT_TICKET_POLL=900
+# RATE_LIMIT_ATTACH=30
+# RATE_LIMIT_AI_GLOBAL=800

@@ -200,6 +200,36 @@ function terms(ctx) {
       prior notice — see section 15. You must also comply with all laws that apply to you, and with the terms
       of any third-party service you use alongside GoyHub, including Steam and Counter-Strike 2.</p>` },
 
+    { id: 's7a', title: 'Support', html: `
+      <p>7a.1 We provide a help centre and a support desk. Support is available to every account,
+      including free ones, and to visitors without an account. It is not a paid benefit and we do not
+      gate it behind a membership.</p>
+      <p>7a.2 We do not promise a response within any particular time. The targets shown to our staff are
+      internal goals, not a contractual commitment, and nothing on the status page or in a ticket creates
+      a service level agreement.</p>
+      <p>7a.3 When you open a ticket without an account, the private link you are given is the only thing
+      protecting that conversation. Look after it as you would a password. Anyone you give it to can read
+      and reply to the ticket, and we cannot tell them apart from you.</p>
+      <p>7a.4 <strong>Never put a password, licence key, recovery phrase or private key in a support
+      ticket.</strong> We will never ask for one, and no member of our staff needs one to help you. We
+      filter obvious credentials out of ticket text automatically, but that is a safety net and not a
+      guarantee.</p>
+      <p>7a.5 You are responsible for what you attach. Do not upload anything you do not have the right to
+      share, anything containing another person's personal data, or anything malicious. We may remove an
+      attachment at any time, and file contents are deleted on a schedule after a ticket closes — see the
+      <a href="/privacy">Privacy Policy</a>.</p>
+      <p>7a.6 Our staff are people. Abuse, threats or harassment directed at them may result in a ticket
+      being closed and, for repeated behaviour, the same consequences as any other breach of section 7.
+      Disagreeing with us, forcefully, is not abuse; targeting an individual is.</p>
+      <p>7a.7 Support tickets are private between you and our staff, and are not published. Do not use a
+      ticket to send us content you intend to be public — the <a href="/forum">forum</a> is for that.</p>
+      <p>7a.8 Where we have enabled it, we use an automated assistant to help our staff read and answer
+      tickets. It never sends you a reply on its own; a person writes or approves everything you receive.
+      Section 7 of the <a href="/privacy">Privacy Policy</a> explains exactly what it does, and how to opt
+      out of it entirely.</p>
+      <p>7a.9 We may close a ticket that has been inactive, that duplicates another, or that is plainly
+      not a support request. Replying to a closed ticket reopens it.</p>` },
+
     { id: 's8', title: 'Your content', html: `
       <p>You keep ownership of the threads, posts, configurations and other material you submit to the Service
       (<strong>"Your Content"</strong>). We do not claim ownership of it, and we are not responsible for it: we

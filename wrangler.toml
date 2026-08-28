@@ -178,7 +178,7 @@ STORE_PLANS = "7d:1 Week:3.00:7,14d:2 Weeks:5.00:14,30d:1 Month:10.00:30,90d:3 M
 # SUPPORT_SLA_HIGH_HOURS = "8"
 # SUPPORT_SLA_URGENT_HOURS = "2"
 # SUPPORT_AUTOCLOSE_DAYS = "7"  # solved tickets nobody came back to; "0" = never
-# SUPPORT_ATTACH_MAX_KB = "512" # per file (max 700 — D1 caps a value at 1 MB
+# SUPPORT_ATTACH_MAX_KB = "512" # per file (max 600 — D1 caps a value at 1 MB
 #                               # and base64 inflates by a third)
 # SUPPORT_ATTACH_MAX_COUNT = "4"   # per message; "0" disables attachments
 # SUPPORT_ATTACH_TICKET_MAX_KB = "8192"  # total per conversation (8 MB). The
@@ -203,6 +203,21 @@ STORE_PLANS = "7d:1 Week:3.00:7,14d:2 Weeks:5.00:14,30d:1 Month:10.00:30,90d:3 M
 # SUPPORT_AI_CLASSIFY = "1"  # auto category / priority / language / spam flag
 #
 # The AI never replies to a customer on its own: a human presses send.
+#
+# Support rate-limit buckets, all optional and all sized in
+# functions/_lib/limits.js. Raise one only if a real person is hitting it.
+# RATE_LIMIT_TICKET = "10"          # new tickets, per hour, per account (per IP for guests)
+# RATE_LIMIT_TICKET_REPLY = "60"    # chat messages per ticket per 10 min (staff budgeted separately)
+# RATE_LIMIT_TICKET_POLL = "900"    # live-chat polls per IP per 10 min
+# RATE_LIMIT_TICKET_LOOKUP = "6"    # "email me my ticket link" per IP per hour
+# RATE_LIMIT_ATTACH = "30"          # files accepted per IP per hour
+# RATE_LIMIT_ATTACH_READ = "300"    # attachment downloads per IP per hour
+# RATE_LIMIT_HELP_VOTE = "40"       # article "did this help?" per IP per hour
+# RATE_LIMIT_HELP_VIEW = "1"        # counted article reads, per IP per article per hour
+# RATE_LIMIT_AI_ASSIST = "60"       # staff summary/draft calls per agent per hour
+# RATE_LIMIT_AI_DEFLECT = "30"      # "try this first" AI matching per IP per hour
+# RATE_LIMIT_AI_GLOBAL = "800"      # site-wide AI calls per day (the free-tier guard)
+# RATE_LIMIT_SUPPORT_SWEEP = "240"  # external cron hits on /api/support/sweep per IP per hour
 
 # Secrets are NOT set here. Add them in the Pages dashboard (Settings →
 # Variables and Secrets) or with `npx wrangler pages secret put NAME`, or in

@@ -2,7 +2,7 @@ import * as views from "./views/admin.js";
 import * as site from "./views/site.js";
 import { DELETED_USERNAME, deletedUserId, relocateUserId, RESERVED_UID_MAX } from "./bootstrap.js";
 import { requireAdmin, requireStaff, destroyUserSessions, audit, formBody, setFlash, clientIp } from "./middleware.js";
-import { TIERS, TIER_LABELS, STAFF_TIERS } from "./tiers.js";
+import { TIERS, TIER_LABELS, STAFF_TIERS, isFullAdmin } from "./tiers.js";
 import { hashPassword } from "./crypto.js";
 import { setSetting, ANNOUNCEMENT_KEY } from "./settings.js";
 import { btcpayConfig } from "./btcpay.js";
@@ -366,9 +366,9 @@ function register(app) {
   });
 
   // Grant a membership by hand — for money that arrived out of band, or an
-  // invoice BTCPay has lost. Full admin only, and always audited as manual.
+  // invoice BTCPay has lost. Staff-level, and always audited as manual.
   app.post('/admin/payments/:id/credit', async (c) => {
-    const gate = requireAdmin(c);
+    const gate = requireStaff(c);
     if (gate) return gate;
     const db = c.get('db');
     const payment = await findPayment(c);
@@ -516,9 +516,9 @@ function register(app) {
 
   // Grant a membership for an order with no confirmed on-chain match — money
   // that arrived some other way, or a chain the APIs cannot see right now.
-  // Full admin only, and always audited as manual.
+  // Staff-level, and always audited as manual.
   app.post('/admin/crypto/orders/:id/credit', async (c) => {
-    const gate = requireAdmin(c);
+    const gate = requireStaff(c);
     if (gate) return gate;
     const order = await findChainOrder(c);
     if (!order) return notFound(c, 'No such order.');
@@ -554,7 +554,7 @@ function register(app) {
   // Attribute a stranded payment to the order it actually paid for. This is the
   // action that resolves the queue above.
   app.post('/admin/crypto/transfers/:id/assign', async (c) => {
-    const gate = requireAdmin(c);
+    const gate = requireStaff(c);
     if (gate) return gate;
     const db = c.get('db');
     const id = intParam(c.req.param('id'), -1);
@@ -610,6 +610,10 @@ function register(app) {
     if (!user) return notFound(c, 'No such user.');
     if (user.id === c.get('user').id) {
       setFlash(c, 'error', 'You cannot ban yourself.');
+      return c.redirect(backTo(c, '/admin/users'), 302);
+    }
+    if (isFullAdmin(user)) {
+      setFlash(c, 'error', 'Admins cannot be banned from here.');
       return c.redirect(backTo(c, '/admin/users'), 302);
     }
     await db.run('UPDATE users SET banned = 1 WHERE id = ?', user.id);
@@ -668,11 +672,11 @@ function register(app) {
     return c.redirect(backTo(c, '/admin/users'), 302);
   });
 
-  // Adjust one Paid member's remaining days (full admin). Positive extends,
+  // Adjust one Paid member's remaining days (staff-level). Positive extends,
   // negative shortens; time is added on top of what's left (or from now if
   // already expired). Works on lifetime subs too — they become dated.
   app.post('/admin/users/:id/paid-days', async (c) => {
-    const gate = requireAdmin(c);
+    const gate = requireStaff(c);
     if (gate) return gate;
     const db = c.get('db');
     const user = await findUser(c);
@@ -702,7 +706,7 @@ function register(app) {
   // Mass adjustment: every DATED Paid subscription shifts by N days (e.g.
   // "+3 to everyone" after downtime). Lifetime subscriptions are untouched.
   app.post('/admin/subscriptions/adjust', async (c) => {
-    const gate = requireAdmin(c);
+    const gate = requireStaff(c);
     if (gate) return gate;
     const db = c.get('db');
     const body = await formBody(c);

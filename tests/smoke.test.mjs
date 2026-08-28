@@ -446,6 +446,13 @@ test("tiers: forum/download gating, admin-only tier changes, staff moderation bo
   assert.equal((await db.get("SELECT banned FROM users WHERE id = ?", otherId)).banned, 1, "ban applied");
   await mod.post(`/admin/users/${otherId}/unban`);
 
+  // But nobody — not even full Admin — can ban another admin from here.
+  await admin.post(`/admin/users/${otherId}/tier`, { tier: "admin" });
+  res = await admin.post(`/admin/users/${otherId}/ban`);
+  assert.equal(res.status, 302, "ban-admin request redirects, but is refused");
+  assert.equal((await db.get("SELECT banned FROM users WHERE id = ?", otherId)).banned, 0, "admin target stays unbanned");
+  await admin.post(`/admin/users/${otherId}/tier`, { tier: "user" });
+
   // Upgrade free_user to Paid (as an admin would) and confirm the forum opens up.
   await admin.post(`/admin/users/${otherId}/tier`, { tier: "paid" });
   await free.get("/auth/login");
@@ -1505,17 +1512,6 @@ test("subscriptions: per-user day adjustment, mass adjustment, unambiguous API f
   row = await db.get("SELECT paid_until FROM users WHERE username='sub_expired'");
   assert.ok(Number(row.paid_until) > Date.now() + 2 * DAY, "expired sub included, counted from now");
 
-  // Staff below admin cannot use either control.
-  const dev = makeClient(app);
-  await dev.get("/auth/signup");
-  await dev.post("/auth/signup", { username: "sub_dev", email: "sd2@example.com", password: "supersecret1", confirm: "supersecret1", ...(await solveCaptcha(dev)) });
-  await db.run("UPDATE users SET tier='developer' WHERE username='sub_dev'");
-  await dev.get("/auth/login");
-  await dev.post("/auth/login", { identifier: "sub_dev", password: "supersecret1", next: "/" });
-  await dev.get("/admin/users");
-  assert.equal((await dev.post("/admin/subscriptions/adjust", { delta_days: "9" })).status, 404, "mass adjust is full-admin only");
-  assert.equal((await dev.post(`/admin/users/${await id("sub_active")}/paid-days`, { delta_days: "9" })).status, 404, "per-user adjust is full-admin only");
-
   // API: both expiries clearly distinguishable; daysLeft/ISO provided.
   const api = (path, body) => app.fetch(new Request("http://local" + path, {
     method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body),
@@ -1528,6 +1524,32 @@ test("subscriptions: per-user day adjustment, mass adjustment, unambiguous API f
   const life = await (await api("/api/loader/auth", { username: "sub_life", password: "supersecret1" })).json();
   assert.ok(life.subscription.lifetime === true && life.subscription.daysLeft === null && life.paid === true,
     "lifetime is explicit: paid=true, daysLeft=null, lifetime=true");
+
+  // Any staff tier (developer, trial_admin, admin) can use both controls —
+  // approving subs is staff-level, not full-admin-only.
+  const dev = makeClient(app);
+  await dev.get("/auth/signup");
+  await dev.post("/auth/signup", { username: "sub_dev", email: "sd2@example.com", password: "supersecret1", confirm: "supersecret1", ...(await solveCaptcha(dev)) });
+  await db.run("UPDATE users SET tier='developer' WHERE username='sub_dev'");
+  await dev.get("/auth/login");
+  await dev.post("/auth/login", { identifier: "sub_dev", password: "supersecret1", next: "/" });
+  await dev.get("/admin/users");
+  const targetC = makeClient(app);
+  await targetC.get("/auth/signup");
+  await targetC.post("/auth/signup", { username: "sub_target", email: "st2@example.com", password: "supersecret1", confirm: "supersecret1", ...(await solveCaptcha(targetC)) });
+  await db.run("UPDATE users SET tier='paid', paid_until=? WHERE username='sub_target'", now + 10 * DAY);
+  const targetId = await id("sub_target");
+  assert.equal((await dev.post(`/admin/users/${targetId}/paid-days`, { delta_days: "9" })).status, 302, "developer (staff) can adjust an individual sub");
+  row = await db.get("SELECT paid_until FROM users WHERE id = ?", targetId);
+  assert.ok(Math.abs(Number(row.paid_until) - (now + 19 * DAY)) < 60_000, "developer's individual adjust applied");
+  const beforeMass = Number((await db.get("SELECT paid_until FROM users WHERE id = ?", targetId)).paid_until);
+  assert.equal((await dev.post("/admin/subscriptions/adjust", { delta_days: "9" })).status, 302, "developer (staff) can mass-adjust subs");
+  row = await db.get("SELECT paid_until FROM users WHERE id = ?", targetId);
+  assert.ok(Math.abs(Number(row.paid_until) - (beforeMass + 9 * DAY)) < 60_000, "developer's mass adjust applied");
+
+  // A non-staff (Paid) user still cannot.
+  assert.equal((await freeC.post("/admin/subscriptions/adjust", { delta_days: "9" })).status, 404, "non-staff cannot mass-adjust subs");
+  assert.equal((await freeC.post(`/admin/users/${targetId}/paid-days`, { delta_days: "9" })).status, 404, "non-staff cannot adjust an individual sub");
 });
 
 test("btcpay: signature verification and paid-until math", async () => {

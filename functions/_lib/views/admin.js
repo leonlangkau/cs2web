@@ -1,6 +1,6 @@
 import { page } from "./layout.js";
 import { esc, timeAgo, map, pagination } from "./util.js";
-import { TIER_LABELS, STAFF_TIERS, isFullAdmin } from "../tiers.js";
+import { TIER_LABELS, STAFF_TIERS, isFullAdmin, isStaff } from "../tiers.js";
 import { planDuration, PERIOD_PRESETS } from "../plans.js";
 
 const tierTag = (tier) => tier && tier !== 'user'
@@ -11,6 +11,7 @@ function head(ctx, heading) {
   const p = ctx.path;
   return `<div class="page-head">
     <div><h1 class="section-title">${esc(heading)}</h1></div>
+    <button type="button" class="btn btn-outline btn-sm ip-hide-toggle" id="ip-hide-toggle" aria-pressed="true">Show all IPs</button>
   </div>
   <nav class="admin-tabs" aria-label="Admin sections">
     ${tab('/admin', 'Dashboard', p === '/admin')}
@@ -28,7 +29,7 @@ function head(ctx, heading) {
 const logRow = (l) => `<tr>
   <td><span class="tag tag-event tag-${esc(l.event)}">${esc(l.event)}</span></td>
   <td>${esc(l.username || '-')}</td>
-  <td class="mono">${esc(l.ip)}</td>
+  <td class="mono ip-addr">${esc(l.ip)}</td>
   <td class="muted">${esc(timeAgo(l.created_at))}</td></tr>`;
 
 function dashboard(ctx, { stats, recentLogs, recentUsers }) {
@@ -79,7 +80,7 @@ function dashboard(ctx, { stats, recentLogs, recentUsers }) {
           <tbody>${map(recentUsers, (u) => `<tr>
             <td>${esc(u.username)}${tierTag(u.tier)}
               ${u.banned ? '<span class="tag tag-banned">BANNED</span>' : ''}</td>
-            <td class="mono">${esc(u.signup_ip || '-')}</td>
+            <td class="mono ip-addr">${esc(u.signup_ip || '-')}</td>
             <td class="muted">${esc(timeAgo(u.created_at))}</td></tr>`)}
           </tbody></table></div>
       </div>
@@ -93,6 +94,7 @@ function dashboard(ctx, { stats, recentLogs, recentUsers }) {
 function users(ctx, { users: rows, q, page: current, pages, total, tiers, tierLabels }) {
   const csrf = `<input type="hidden" name="_csrf" value="${esc(ctx.csrfToken)}">`;
   const canManageTiers = isFullAdmin(ctx.user);
+  const canAdjustSubs = isStaff(ctx.user);
   const DAY = 86_400_000;
 
   const subCell = (u) => {
@@ -106,7 +108,7 @@ function users(ctx, { users: rows, q, page: current, pages, total, tiers, tierLa
       const left = Math.ceil((Number(u.paid_until) - Date.now()) / DAY);
       state = `<strong>${esc(left)}d</strong> <span class="muted">left · ends ${esc(new Date(Number(u.paid_until)).toISOString().slice(0, 10))}</span>`;
     }
-    const adjust = canManageTiers && u.id !== ctx.user.id ? `
+    const adjust = canAdjustSubs && u.id !== ctx.user.id ? `
       <form method="post" action="/admin/users/${esc(u.id)}/paid-days" class="inline-form sub-adjust">${csrf}
         <input type="number" name="delta_days" min="-3650" max="3650" required placeholder="±days"
                aria-label="Adjust days for ${esc(u.username)}">
@@ -118,7 +120,7 @@ function users(ctx, { users: rows, q, page: current, pages, total, tiers, tierLa
     const profileLink = `<a class="btn btn-ghost btn-xs" href="/u/${encodeURIComponent(u.username)}">Profile</a>`;
     const fpLink = `<a class="btn btn-ghost btn-xs" href="/admin/fingerprints?q=${encodeURIComponent(u.username)}">Fingerprints</a>`;
     if (u.id === ctx.user.id) return `<span class="muted">you</span> ${profileLink} ${fpLink}`;
-    const banBtn = u.banned
+    const banBtn = isFullAdmin(u) ? '' : u.banned
       ? `<form method="post" action="/admin/users/${esc(u.id)}/unban" class="inline-form">${csrf}<button class="btn btn-ghost btn-xs" type="submit">Unban</button></form>`
       : `<form method="post" action="/admin/users/${esc(u.id)}/ban" class="inline-form" data-confirm="Ban ${esc(u.username)}? They will be signed out everywhere.">${csrf}<button class="btn btn-warn btn-xs" type="submit">Ban</button></form>`;
 
@@ -151,7 +153,7 @@ function users(ctx, { users: rows, q, page: current, pages, total, tiers, tierLa
     return `${profileLink} ${fpLink} ${banBtn} ${manage}`;
   };
 
-  const massPanel = canManageTiers ? `
+  const massPanel = canAdjustSubs ? `
     <div class="panel sub-mass-panel">
       <form method="post" action="/admin/subscriptions/adjust" class="filter-bar panel-form"
             data-confirm="Adjust EVERY dated Paid subscription by the entered number of days?">${csrf}
@@ -175,7 +177,7 @@ function users(ctx, { users: rows, q, page: current, pages, total, tiers, tierLa
       <span class="muted">${esc(total)} user${total === 1 ? '' : 's'}</span>
     </form>
     ${massPanel}
-    ${!canManageTiers ? '<p class="muted">Tier changes, subscriptions and account tools require full Admin access.</p>' : ''}
+    ${!canManageTiers ? '<p class="muted">Tier changes and account tools require full Admin access.</p>' : ''}
     <div class="panel users-table"><div class="table-wrap"><table>
       <thead><tr><th>User</th><th>IPs</th><th>Subscription</th><th>Actions</th></tr></thead>
       <tbody>${map(rows, (u) => `<tr class="${u.banned ? 'row-banned' : ''}">
@@ -184,8 +186,8 @@ function users(ctx, { users: rows, q, page: current, pages, total, tiers, tierLa
           <div class="muted"><span class="uid-badge${u.id <= 1001 ? ' uid-reserved' : ''}">UID ${esc(u.id)}</span>
             · joined ${esc(timeAgo(u.created_at))}</div>
           <div class="muted">${esc(u.email)} ${u.email_verified_at ? '✓' : '<span title="email unverified">✗</span>'}</div></td>
-        <td><div class="mono">${esc(u.signup_ip || '-')}</div>
-          <div class="mono muted">${esc(u.last_login_ip || '-')}</div>
+        <td><div class="mono ip-addr">${esc(u.signup_ip || '-')}</div>
+          <div class="mono muted ip-addr">${esc(u.last_login_ip || '-')}</div>
           <div class="muted">${esc(timeAgo(u.last_login_at))}</div></td>
         <td class="sub-cell">${subCell(u)}</td>
         <td class="actions-cell">${actions(u)}</td></tr>`)}
@@ -197,9 +199,9 @@ function users(ctx, { users: rows, q, page: current, pages, total, tiers, tierLa
 }
 
 /**
- * Crypto payments queue. Read-only for staff; the "Credit" button is full admin
- * only, because it grants a paid membership without a confirmed payment.
- * "Re-check" is staff-level — it only ever applies BTCPay's own verdict.
+ * Crypto payments queue. Both "Credit" (grants a paid membership without a
+ * confirmed payment) and "Re-check" (applies BTCPay's own verdict) are
+ * staff-level.
  */
 /**
  * Shop products — the membership lengths on sale at /buy.
@@ -298,7 +300,7 @@ function shop(ctx, { products, currency, live, usingEnvFallback, envPlans }) {
 
 function payments(ctx, { rows, status, statuses, page: current, pages, total, live, swept }) {
   const csrf = `<input type="hidden" name="_csrf" value="${esc(ctx.csrfToken)}">`;
-  const canCredit = isFullAdmin(ctx.user);
+  const canCredit = isStaff(ctx.user);
 
   const row = (p) => `<tr class="${p.credited_at ? 'row-resolved' : ''}">
     <td class="mono detail-cell" title="${esc(p.order_id)}">${esc(String(p.order_id).slice(0, 10))}…</td>
@@ -359,7 +361,7 @@ function payments(ctx, { rows, status, statuses, page: current, pages, total, li
  */
 function chain(ctx, { config, orders, transfers, status, statuses, page: current, pages, total, scan }) {
   const csrf = `<input type="hidden" name="_csrf" value="${esc(ctx.csrfToken)}">`;
-  const canCredit = isFullAdmin(ctx.user);
+  const canCredit = isStaff(ctx.user);
 
   const configPanel = `<div class="panel panel-spaced">
     <h3>Receiving addresses</h3>
@@ -514,7 +516,7 @@ function logs(ctx, { logs: rows, q, event, events, important, page: current, pag
             <td class="muted">${esc(l.id)}</td>
             <td><span class="tag tag-event tag-${esc(l.event)}">${esc(l.event)}</span></td>
             <td>${esc(l.username || '-')}</td>
-            <td class="mono">${l.ipHidden
+            <td class="mono ip-addr">${l.ipHidden
               ? `<span class="muted" title="Admin accounts' IPs are hidden from other staff">${esc(l.ip)}</span>`
               : `<a href="/admin/logs?q=${encodeURIComponent(l.ip)}">${esc(l.ip)}</a>`}</td>
             <td class="muted detail-cell">${esc(l.detail || '-')}</td>
@@ -534,7 +536,7 @@ function logs(ctx, { logs: rows, q, event, events, important, page: current, pag
         <tbody>${ipBans.length === 0
           ? '<tr><td colspan="6" class="muted center">No IPs currently banned.</td></tr>'
           : map(ipBans, (b) => `<tr>
-              <td class="mono">${esc(b.ip)}</td>
+              <td class="mono ip-addr">${esc(b.ip)}</td>
               <td class="muted detail-cell">${esc(b.reason || '-')}</td>
               <td class="muted">${esc(b.banned_by || '-')}</td>
               <td class="muted nowrap">${b.expires_at
@@ -569,7 +571,7 @@ function fingerprintRow(f) {
     <td class="muted">${esc(f.language || '-')} · ${esc(f.timezone || '-')}</td>
     <td>${f.username ? esc(f.username) : '<span class="muted">anonymous</span>'}
       ${f.email ? `<div class="muted">${esc(f.email)}</div>` : ''}</td>
-    <td class="mono">${f.ipHidden
+    <td class="mono ip-addr">${f.ipHidden
       ? `<span class="muted" title="Admin accounts' IPs are hidden from other staff">${esc(f.ip)}</span>`
       : `<a href="/admin/fingerprints?q=${encodeURIComponent(f.ip)}">${esc(f.ip)}</a>`}</td>
     <td class="muted nowrap">${esc(timeAgo(f.last_seen))}</td>
@@ -610,7 +612,7 @@ function fingerprintDetail(ctx, { hash, sightings }) {
 
   const row = (s) => `<tr>
     <td class="muted nowrap">${esc(s.created_at)} UTC</td>
-    <td class="mono">${s.ipHidden
+    <td class="mono ip-addr">${s.ipHidden
       ? `<span class="muted" title="Admin accounts' IPs are hidden from other staff">${esc(s.ip)}</span>`
       : esc(s.ip)}</td>
     <td>${s.username ? esc(s.username) : '<span class="muted">anonymous</span>'}</td>

@@ -84,8 +84,8 @@ Copy `.dev.vars.example` to `.dev.vars` and set `CAPTCHA_SECRET` and
 - **Admin → Shop**: add, edit, reorder, hide and delete products (full admin).
   Editing a price only affects future sales — every order snapshots what it was
   sold at
-- **Admin → Payments**: the order queue, with re-check (staff) and manual credit
-  (full admin), both audited
+- **Admin → Payments**: the order queue, with re-check and manual credit both
+  staff-level and audited
 - Loader API: `POST /api/loader/auth` (username+password → tier + signed
   license) and `POST /api/loader/verify` (server-side check, live tier)
 

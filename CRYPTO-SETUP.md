@@ -61,14 +61,13 @@ Use a wallet **you** control the keys to.
 > rotated, are sometimes shared, and often reject tokens sent on a network the
 > deposit page did not expect. Use a wallet whose seed phrase you hold.
 
-Any Ethereum wallet works, including multi-chain ones — Phantom, for instance,
-derives both a Solana and an Ethereum account from one seed, so a single app can
-hold all four of the coins this sells. Whether a given wallet *displays* an
-incoming token is a question about that wallet's UI, never about whether the
-money arrived: an ERC-20 balance lives in the token contract keyed by your
-address, so it is yours the moment the transfer confirms, and any wallet holding
-that private key can reach it — importing the seed elsewhere recovers a token a
-wallet declines to show.
+Any Ethereum wallet works, and a multi-chain one derives both a Solana and an
+Ethereum account from a single seed, so one app can hold all four of the coins
+this sells. Whether a given wallet *displays* an incoming token is a question
+about that wallet's UI, never about whether the money arrived: an ERC-20 balance
+lives in the token contract keyed by your address, so it is yours the moment the
+transfer confirms, and any wallet holding that private key can reach it —
+importing the seed elsewhere recovers a token a wallet declines to show.
 
 The site validates both before offering them. An Ethereum address is checked
 against its **EIP-55 checksum** — the mixed-case pattern in a normal `0x…`

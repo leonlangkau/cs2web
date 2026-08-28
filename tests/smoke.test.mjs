@@ -1609,8 +1609,11 @@ test("btcpay: checkout creates an invoice and a settled webhook grants Paid (ide
     assert.ok(res.status === 302 && member.jar.has("ghsession"), "member logged in");
 
     // The upgrade page shows the automated pay button now that BTCPay is set.
+    // It is labelled by COIN, like every other payment option — the buyer picks
+    // a currency, not one of our two checkout implementations.
     let html = await (await member.get("/upgrade")).text();
-    assert.ok(html.includes('action="/upgrade/checkout"') && html.includes("Pay with crypto"), "checkout form shown");
+    assert.ok(html.includes('action="/upgrade/checkout"'), "checkout form shown");
+    assert.ok(html.includes(">BTC<") && html.includes("Bitcoin / Lightning"), "labelled by coin and network");
 
     // Start checkout -> a pending payment row + redirect to the BTCPay invoice.
     res = await member.raw("POST", "/upgrade/checkout", { _csrf: member.jar.get("ghcsrf") });

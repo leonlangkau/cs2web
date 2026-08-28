@@ -184,22 +184,34 @@ function payNotFound(ctx) {
   return page(ctx, { title: 'Payment not found', body });
 }
 
-/** The coin buttons shown under each plan on the store page. */
-function coinChoices(ctx, plan, assets) {
-  const csrf = `<input type="hidden" name="_csrf" value="${esc(ctx.csrfToken)}">`;
+/**
+ * The payment buttons under each plan on the store page.
+ *
+ * Every option gets the same button, whichever checkout is behind it: a buyer
+ * is choosing a COIN, and which of our two payment paths happens to handle it
+ * is our implementation detail, not a distinction worth making them parse. So
+ * Bitcoin (which goes to the BTCPay checkout) sits in the same grid, in the
+ * same shape, as the coins paid direct to a wallet.
+ *
+ * `options` are { action, symbol, network, asset } — `asset` only for the
+ * direct-wallet ones, which need to name the coin in the form.
+ */
+function payChoices(ctx, plan, options) {
+  if (options.length === 0) return '';
   if (!ctx.user) {
     return `<a class="btn btn-outline btn-block" href="/auth/login?next=%2Fbuy">Sign in to buy</a>`;
   }
-  return `<div class="coin-choices">${map(assets, (a) => `
-    <form method="post" action="/upgrade/crypto" class="coin-choice">
+  const csrf = `<input type="hidden" name="_csrf" value="${esc(ctx.csrfToken)}">`;
+  return `<div class="coin-choices">${map(options, (o) => `
+    <form method="post" action="${esc(o.action)}" class="coin-choice">
       ${csrf}
       <input type="hidden" name="plan" value="${esc(plan.id)}">
-      <input type="hidden" name="asset" value="${esc(a.key)}">
+      ${o.asset ? `<input type="hidden" name="asset" value="${esc(o.asset)}">` : ''}
       <button class="btn btn-primary btn-block" type="submit">
-        <span class="coin-symbol">${esc(a.symbol)}</span>
-        <span class="coin-network">${esc(a.network)}</span>
+        <span class="coin-symbol">${esc(o.symbol)}</span>
+        <span class="coin-network">${esc(o.network)}</span>
       </button>
     </form>`)}</div>`;
 }
 
-export { payPage, payNotFound, coinChoices, statusBlock };
+export { payPage, payNotFound, payChoices, statusBlock };

@@ -191,6 +191,13 @@ const solTx = (signature, units, { address = SOL_ADDRESS, at = nowSeconds() } = 
 /** The throttle exists to protect the upstream APIs; tests fast-forward past it. */
 const elapseScanWindow = (db) => db.run("DELETE FROM settings WHERE key = 'chain_scan_at'");
 
+/** Pins an order's quote, so a test asserts the matching rule rather than which
+    random discriminator it happened to be given. */
+const setQuote = (db, id, units) => db.run(
+  "UPDATE chain_orders SET expected_units = ?, min_units = ? WHERE id = ?",
+  String(units), String((units * 99n) / 100n), id
+);
+
 /** Rates are cached for 90s. Dropping the cache is how a test says "time passed". */
 const elapseRateCache = (db) => db.run("DELETE FROM settings WHERE key LIKE 'rate:%'");
 
@@ -481,33 +488,6 @@ test("SPL USDT is watched at the owner's token account, not the wallet address",
  * The cases that must NOT credit
  * ------------------------------------------------------------------ */
 
-test("a payment matching two live orders credits neither — it goes to a human", async () => {
-  const { app, db } = await buildTestApp(CHAIN_ENV);
-  const chain = { rates: { ETH: "3000" }, latestBlock: 1000, txlist: [] };
-
-  await withChain(chain, async () => {
-    const a = await openOrder(app, db, CHAIN_ENV, "ambig_a");
-    const b = await openOrder(app, db, CHAIN_ENV, "ambig_b");
-
-    // An amount that clears BOTH orders' minimums but equals neither exactly.
-    const higher = BigInt(a.order.expected_units) > BigInt(b.order.expected_units)
-      ? BigInt(a.order.expected_units) : BigInt(b.order.expected_units);
-    chain.txlist = [ethTx(TX_A, higher + 7n, { confs: 30 })];
-    await elapseScanWindow(db);
-    await a.client.get(`/pay/${a.order.order_id}/status`);
-
-    assert.equal((await db.all("SELECT id FROM chain_orders WHERE credited_at IS NOT NULL")).length, 0,
-      "neither buyer is credited from an ambiguous payment");
-    for (const name of ["ambig_a", "ambig_b"]) {
-      assert.equal((await db.get("SELECT tier FROM users WHERE username = ?", name)).tier, "user",
-        `${name} was not upgraded on money that might be somebody else's`);
-    }
-    const transfer = await db.get("SELECT * FROM chain_transfers ORDER BY id DESC LIMIT 1");
-    assert.equal(transfer.status, "ambiguous", "the money is recorded and queued for a decision");
-    assert.ok(transfer.note.includes("needs a human"));
-  });
-});
-
 test("an underpayment inside tolerance credits; well under it does not", async () => {
   const { app, db } = await buildTestApp(CHAIN_ENV);
   const chain = { rates: { ETH: "3000" }, latestBlock: 1000, txlist: [] };
@@ -762,6 +742,62 @@ test("a modest overpayment is ordinary and still credits", async () => {
     await client.get(`/pay/${order.order_id}/status`);
     assert.equal((await db.get("SELECT tier FROM users WHERE username = 'rounder'")).tier, "paid",
       "5% over is just an overpayment");
+  });
+});
+
+test("a rounded payment goes to the quote it is nearest, not to a stranger", async () => {
+  // Exchange withdrawal forms round, and buyers retype figures. Such a payment
+  // still sits a hair from ONE quote and far from every other, because quotes
+  // are spaced deliberately — so it should just work, with two orders open.
+  const { app, db } = await buildTestApp(CHAIN_ENV);
+  const chain = { rates: { ETH: "3000" }, latestBlock: 1000, txlist: [] };
+
+  await withChain(chain, async () => {
+    const a = await openOrder(app, db, CHAIN_ENV, "rounded_payer");
+    const b = await openOrder(app, db, CHAIN_ENV, "other_open");
+
+    // Quotes are pinned rather than left to the random discriminator, so the
+    // test asserts the rule and not which tags happened to be drawn.
+    const STEP = 10n ** 10n; // one payable decimal for ETH: 8 dp against 18
+    const aAmount = BigInt(a.order.expected_units);
+    await setQuote(db, b.order.id, aAmount + STEP * 60n);
+
+    // A's wallet drops the last digit of A's figure: one step low.
+    chain.txlist = [ethTx(TX_A, aAmount - STEP, { confs: 30 })];
+    await elapseScanWindow(db);
+    await a.client.get(`/pay/${a.order.order_id}/status`);
+
+    assert.equal((await db.get("SELECT tier FROM users WHERE username = 'rounded_payer'")).tier,
+      "paid", "the payment lands on the quote it is nearest");
+    assert.equal((await db.get("SELECT tier FROM users WHERE username = 'other_open'")).tier,
+      "user", "and not on the other order that was also technically in range");
+  });
+});
+
+test("a payment genuinely between two quotes goes to a human", async () => {
+  const { app, db } = await buildTestApp(CHAIN_ENV);
+  const chain = { rates: { ETH: "3000" }, latestBlock: 1000, txlist: [] };
+
+  await withChain(chain, async () => {
+    const a = await openOrder(app, db, CHAIN_ENV, "tie_a");
+    const b = await openOrder(app, db, CHAIN_ENV, "tie_b");
+
+    const STEP = 10n ** 10n;
+    const aAmount = BigInt(a.order.expected_units);
+    const bAmount = aAmount + STEP * 40n;
+    await setQuote(db, b.order.id, bAmount);
+
+    // Exactly between the two: "nearest" would be a coin toss.
+    chain.txlist = [ethTx(TX_A, (aAmount + bAmount) / 2n, { confs: 30 })];
+    await elapseScanWindow(db);
+    await a.client.get(`/pay/${a.order.order_id}/status`);
+
+    for (const name of ["tie_a", "tie_b"]) {
+      assert.equal((await db.get("SELECT tier FROM users WHERE username = ?", name)).tier, "user",
+        `${name} is not upgraded on a coin toss`);
+    }
+    assert.equal((await db.get("SELECT status FROM chain_transfers ORDER BY id DESC LIMIT 1")).status,
+      "ambiguous");
   });
 });
 

@@ -261,7 +261,7 @@ const ipBanGate = async (c, next) => {
 /**
  * Application-layer flood control, applied to every dynamic route:
  *
- *  - a per-IP burst cap (RATE_LIMIT_BURST requests/minute, default 240 —
+ *  - a per-IP burst cap (RATE_LIMIT_BURST requests/minute, default 600 —
  *    far above human browsing, well below a scripted flood) answered with 429;
  *  - repeated breaches (RATE_LIMIT_FLOOD per 10 min) escalate to a temporary
  *    automatic IP ban (AUTO_IP_BAN_MINUTES, default 60) so the offender stops

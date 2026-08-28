@@ -33,12 +33,12 @@ CAPTCHA_DIFFICULTY = "16"
 PBKDF2_ITERATIONS = "100000"
 
 # Rate limits: attempts per window (10 min / hour / minute / 3 hours / minute).
-RATE_LIMIT_LOGIN = "10"
-RATE_LIMIT_SIGNUP = "5"
-RATE_LIMIT_POST = "6"
-RATE_LIMIT_DOWNLOAD = "20"  # per IP per 3h; staff/admin are exempt entirely (see routes-main.js)
-RATE_LIMIT_SHOUT = "3"
-RATE_LIMIT_REPORT = "5"
+RATE_LIMIT_LOGIN = "20"
+RATE_LIMIT_SIGNUP = "10"
+RATE_LIMIT_POST = "15"
+RATE_LIMIT_DOWNLOAD = "60"  # per IP per 3h; staff/admin are exempt entirely (see routes-main.js)
+RATE_LIMIT_SHOUT = "10"
+RATE_LIMIT_REPORT = "15"
 
 # Flood / mass-account protection (application layer — Cloudflare's own WAF,
 # Bot Fight Mode and Under Attack mode remain the first line for real DDoS).
@@ -46,10 +46,10 @@ RATE_LIMIT_REPORT = "5"
 #   RATE_LIMIT_FLOOD     burst breaches per 10 min before a temporary auto IP ban
 #   AUTO_IP_BAN_MINUTES  how long an automatic flood ban lasts
 #   SIGNUP_SURGE_LIMIT   site-wide signups per 10 min before registration pauses ("0" disables)
-RATE_LIMIT_BURST = "240"
-RATE_LIMIT_FLOOD = "5"
+RATE_LIMIT_BURST = "600"
+RATE_LIMIT_FLOOD = "10"
 AUTO_IP_BAN_MINUTES = "60"
-SIGNUP_SURGE_LIMIT = "30"
+SIGNUP_SURGE_LIMIT = "100"
 
 # Crypto payments (the /upgrade page). All optional — with none set the page
 # shows an honest "payments coming soon" note with the support contact.
@@ -80,7 +80,7 @@ SIGNUP_SURGE_LIMIT = "30"
 # PAID_PRICE_CURRENCY = "USD"
 # STORE_PLANS = "m1:1 Month:9.99:30,m12:12 Months:79.99:365,life:Lifetime:149.99:0"
 # PAID_PERIOD_DAYS = "30"
-# RATE_LIMIT_CHECKOUT = "8"   # invoices a member can create per hour (abuse cap)
+# RATE_LIMIT_CHECKOUT = "20"  # invoices a member can create per hour (abuse cap)
 #
 # BTCPAY_API_KEY and BTCPAY_WEBHOOK_SECRET are SECRETS — never put them here.
 # Add them in the Pages dashboard (Settings → Variables and Secrets, type

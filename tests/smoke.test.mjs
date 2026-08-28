@@ -383,7 +383,7 @@ test("public pages, forum, legal, gate, auth, captcha, admin, moderation, downlo
   const hammer = makeClient(app);
   await hammer.get("/auth/login");
   let got429 = false;
-  for (let i = 0; i < 14 && !got429; i += 1) {
+  for (let i = 0; i < RATE_LIMIT_DEFAULTS.login.limit + 4 && !got429; i += 1) {
     const r = await hammer.post("/auth/login", { identifier: "nobody", password: "nope", next: "/" });
     if (r.status === 429) got429 = true;
     await r.arrayBuffer();
@@ -1175,7 +1175,9 @@ test("email: verification flow + posting gate, password reset, disposable domain
 });
 
 test("forum: title rename, category edit, shout delete + 3/min limit, /buy alias", async () => {
-  const { app, db } = await buildTestApp(ENV);
+  // A low RATE_LIMIT_SHOUT override keeps the throttle assertion short and
+  // independent of whatever the shipped default is tuned to.
+  const { app, db } = await buildTestApp({ ...ENV, RATE_LIMIT_SHOUT: "3" });
   const admin = makeClient(app);
   const author = makeClient(app);
   const other = makeClient(app);
@@ -1360,7 +1362,7 @@ test("download: DOWNLOAD_URL end-to-end — served when reachable, a clean 503 (
 });
 
 test("download rate limit: high default threshold, staff/admin fully exempt", async () => {
-  assert.equal(RATE_LIMIT_DEFAULTS.download.limit, 20, "download rate limit default is 20, not the old strict 3");
+  assert.equal(RATE_LIMIT_DEFAULTS.download.limit, 60, "download rate limit default is 60, not the old strict 3");
 
   // A low override keeps this test fast while proving the mechanics: a
   // regular Paid member is throttled past the configured limit, but an

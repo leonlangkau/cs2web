@@ -2,7 +2,7 @@
 
 const MANIFEST = {
   "/css/style.css": "89715bc5",
-  "/js/boot.js": "10d5ce37",
+  "/js/boot.js": "e295cf6b",
   "/js/captcha.js": "4253bc85",
   "/js/crypto-pay.js": "c03e40a0",
   "/js/fingerprint.js": "7c3dc35d",

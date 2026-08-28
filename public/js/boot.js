@@ -13,14 +13,16 @@ document.documentElement.classList.add('js');
   } catch (e) { /* localStorage blocked (private mode, etc.) — CSS still falls back to prefers-color-scheme */ }
 })();
 
-/* Admin "hide all IPs" preference, applied before paint so IPs never flash
-   visible on a reload while the toggle is on. */
+/* Admin "hide all IPs" preference — hidden by default, applied before paint
+   so IPs never flash visible on load. An explicit opt-out is remembered;
+   anything else (no preference yet, or storage blocked) stays hidden. */
+document.documentElement.setAttribute('data-hide-ips', '1');
 (function () {
   try {
-    if (localStorage.getItem('gh-hide-ips') === '1') {
-      document.documentElement.setAttribute('data-hide-ips', '1');
+    if (localStorage.getItem('gh-hide-ips') === '0') {
+      document.documentElement.removeAttribute('data-hide-ips');
     }
-  } catch (e) { /* localStorage blocked — toggle still works for the session via main.js */ }
+  } catch (e) { /* localStorage blocked — stays hidden by default for the session */ }
 })();
 
 /* Reveal watchdog. `.js .reveal { opacity: 0 }` is only safe while fx.js is

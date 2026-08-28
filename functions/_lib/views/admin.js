@@ -11,7 +11,7 @@ function head(ctx, heading) {
   const p = ctx.path;
   return `<div class="page-head">
     <div><h1 class="section-title">${esc(heading)}</h1></div>
-    <button type="button" class="btn btn-outline btn-sm ip-hide-toggle" id="ip-hide-toggle" aria-pressed="false">Hide all IPs</button>
+    <button type="button" class="btn btn-outline btn-sm ip-hide-toggle" id="ip-hide-toggle" aria-pressed="true">Show all IPs</button>
   </div>
   <nav class="admin-tabs" aria-label="Admin sections">
     ${tab('/admin', 'Dashboard', p === '/admin')}

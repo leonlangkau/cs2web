@@ -488,6 +488,25 @@ test("the support backend is invisible to everyone but staff", async () => {
   assert.equal((await staff.get("/admin/support")).status, 200);
 });
 
+test("literal admin routes are not swallowed by /admin/support/:id", async () => {
+  // The router is first-match-wins and :id compiles to ([^/]+), so a literal
+  // registered after the parameterised route becomes unreachable — and the
+  // symptom is a bewildering "no such ticket" 404, not an error. Assert the
+  // registration order directly rather than trusting it.
+  const { app } = await buildTestApp(ENV);
+  const staff = await adminClient(app);
+
+  for (const [path, marker] of [
+    ["/admin/support/macros", /Canned replies/],
+    ["/admin/support/articles", /Help centre/],
+    ["/admin/support/articles/new", /New help article/],
+  ]) {
+    const res = await staff.get(path);
+    assert.equal(res.status, 200, `${path} should render its own page`);
+    assert.match(await res.text(), marker, `${path} reached the ticket handler instead`);
+  }
+});
+
 test("a canned reply sends the message and moves the ticket in one click", async () => {
   const { app, db } = await buildTestApp(ENV);
   const { ref } = await openGuestTicket(app, ENV);

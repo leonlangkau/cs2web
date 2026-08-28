@@ -1,7 +1,7 @@
 // GENERATED FROM public/{css,js,fonts} by scripts/build-assets.cjs — do not edit by hand.
 
 const MANIFEST = {
-  "/css/style.css": "427d18b1",
+  "/css/style.css": "f6d6bf4e",
   "/js/boot.js": "e295cf6b",
   "/js/captcha.js": "cb02d481",
   "/js/crypto-pay.js": "c03e40a0",

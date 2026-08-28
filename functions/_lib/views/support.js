@@ -9,7 +9,7 @@
  * support flow that traps people is worse than a busy queue.
  */
 import { page } from "./layout.js";
-import { esc, timeAgo, map } from "./util.js";
+import { esc, timeAgo, map, emailLink } from "./util.js";
 import { renderArticle, excerpt } from "../kb.js";
 import {
   STATUS_LABELS, PRIORITY_LABELS, CATEGORIES, CATEGORY_LABELS, MAX_SUBJECT, MAX_BODY,
@@ -301,9 +301,9 @@ function newTicket(ctx, { errors = [], values = {}, suggestions = [], cfg, needs
       <input type="hidden" name="captcha_solution" value="">
       <div class="captcha-box" data-captcha data-captcha-idle="Verification required before you can send this."
            data-captcha-done="Verified. You can send your ticket now."></div>
-      <noscript><p class="form-errors">Sending a ticket without an account needs JavaScript for the
-        human-verification step. <a href="/auth/signup">Create a free account</a> to send one without it —
-        free accounts get the same support.</p></noscript>` : '';
+      <noscript><p class="form-errors">The human-verification step below needs JavaScript, and so does
+        creating an account. With scripting off, email us at ${emailLink(ctx.company.contactEmail)}
+        instead — you will get the same answer from the same people, just without the live thread.</p></noscript>` : '';
 
   const attachBlock = cfg.attachMaxCount > 0 ? `
       <label><span>Screenshot or log <small class="muted">(optional, up to
@@ -438,7 +438,7 @@ const attachmentChip = (a, keyQuery) => {
 function chatMessage(m, { attachments = [], keyQuery = '' } = {}) {
   const role = m.author_role === 'staff' ? 'staff' : (m.author_role === 'system' ? 'system' : 'user');
   const files = attachments.filter((a) => Number(a.message_id) === Number(m.id));
-  return `<div class="chat-msg chat-msg-${role}" data-id="${esc(m.id)}">
+  return `<div class="chat-msg chat-msg-${role}" data-id="${esc(m.id)}" id="msg-${esc(m.id)}">
   <div class="chat-head">
     <span class="chat-who">${esc(m.author_name)}${role === 'staff' ? ' <span class="tag tag-admin">SUPPORT</span>' : ''}</span>
     <span class="chat-time muted">${esc(timeAgo(m.created_at))}</span>

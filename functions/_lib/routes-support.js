@@ -13,7 +13,8 @@ import * as site from "./views/site.js";
 import * as limits from "./limits.js";
 import * as captcha from "./captcha.js";
 import * as ai from "./ai.js";
-import { searchArticles, terms } from "./kb.js";
+import { searchArticles, terms, categoryForSection } from "./kb.js";
+import { cleanup } from "./bootstrap.js";
 import {
   readUploads, saveUploads, attachmentResponse,
 } from "./attachments.js";
@@ -271,7 +272,10 @@ function register(app) {
 
     const articleSlug = String(url.searchParams.get('article') || '').slice(0, 80);
     const fromArticle = articleSlug
-      ? await db.get('SELECT slug, title, summary FROM help_articles WHERE slug = ? AND published = 1', articleSlug)
+      ? await db.get(
+        `SELECT a.slug, a.title, a.summary, s.slug AS section_slug
+           FROM help_articles a JOIN help_sections s ON s.id = a.section_id
+          WHERE a.slug = ? AND a.published = 1`, articleSlug)
       : null;
 
     const q = String(url.searchParams.get('q') || '').slice(0, 400);
@@ -279,7 +283,12 @@ function register(app) {
 
     return c.html(views.newTicket(c.get('view'), {
       errors: [],
-      values: { subject: q ? cleanLine(q, MAX_SUBJECT) : '', category: fromArticle ? '' : 'other' },
+      values: {
+        subject: q ? cleanLine(q, MAX_SUBJECT) : '',
+        // An article that failed to deflect files the ticket under its own
+        // topic, so nobody has to pick from a list to say the same thing.
+        category: fromArticle ? categoryForSection(fromArticle.section_slug) : 'other',
+      },
       suggestions,
       cfg,
       needsCaptcha: !user,
@@ -568,8 +577,17 @@ function register(app) {
       rememberTicketKey(c, ref, access.key, cookieOptions(c));
     }
 
+    // Cleared against what the page actually renders, so a staff reply that
+    // lands mid-request is not silently marked as seen (see the matching note
+    // in routes-admin-support.js).
     if (access.role === 'owner' && Number(ticket.user_unread) > 0) {
-      await db.run('UPDATE tickets SET user_unread = 0 WHERE id = ?', ticket.id);
+      const shown = Number((await db.get(
+        "SELECT COUNT(*) AS n FROM ticket_messages WHERE ticket_id = ? AND author_role = 'staff'", ticket.id
+      )).n);
+      await db.run(
+        'UPDATE tickets SET user_unread = MAX(0, user_unread - ?) WHERE id = ?',
+        Math.min(shown, Number(ticket.user_unread)), ticket.id
+      );
       ticket.user_unread = 0;
     }
 
@@ -604,8 +622,9 @@ function register(app) {
     const after = intParam(new URL(c.req.url).searchParams.get('after'), 0);
     const messages = await messagesFor(db, ticket.id, after);
 
-    if (access.role === 'owner' && messages.some((m) => m.author_role === 'staff')) {
-      await db.run('UPDATE tickets SET user_unread = 0 WHERE id = ?', ticket.id);
+    const readNow = messages.filter((m) => m.author_role === 'staff').length;
+    if (access.role === 'owner' && readNow > 0) {
+      await db.run('UPDATE tickets SET user_unread = MAX(0, user_unread - ?) WHERE id = ?', readNow, ticket.id);
     }
 
     const attachments = messages.length ? await attachmentsFor(db, ticket.id) : [];
@@ -818,6 +837,10 @@ function register(app) {
     for (const ticket of breached.slice(0, 5)) await alertStaff(env, cfg, 'sla_breach', ticket);
     const closed = await sweepAutoClose(db, cfg);
     const purged = await sweepAttachments(db, cfg);
+    // bootstrap.cleanup() prunes expired sessions, rate-limit windows, CAPTCHA
+    // nonces, auto IP bans and used tokens. It was written to be called from a
+    // cron and never had one; this endpoint is that cron, so it runs here too.
+    await cleanup(db);
     return c.json({ ok: true, breached: breached.length, closed, purged });
   });
 

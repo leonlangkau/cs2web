@@ -639,8 +639,18 @@ function register(app) {
     const db = c.get('db');
     const ticket = await ticketFor(c);
     if (!ticket) return notFound(c);
+    // Decrement by what this page actually renders rather than zeroing: a
+    // customer message that lands between the SELECT and the UPDATE would
+    // otherwise be marked read by a page that never showed it, and the ticket
+    // would sit in the queue looking handled.
     if (Number(ticket.staff_unread) > 0) {
-      await db.run('UPDATE tickets SET staff_unread = 0 WHERE id = ?', ticket.id);
+      const shown = Number((await db.get(
+        "SELECT COUNT(*) AS n FROM ticket_messages WHERE ticket_id = ? AND author_role = 'user'", ticket.id
+      )).n);
+      await db.run(
+        'UPDATE tickets SET staff_unread = MAX(0, staff_unread - ?) WHERE id = ?',
+        Math.min(shown, Number(ticket.staff_unread)), ticket.id
+      );
       ticket.staff_unread = 0;
     }
     return renderDetail(c, ticket);
@@ -658,7 +668,12 @@ function register(app) {
       'SELECT * FROM ticket_messages WHERE ticket_id = ? AND id > ? ORDER BY id LIMIT 60',
       ticket.id, after
     );
-    if (messages.length) await db.run('UPDATE tickets SET staff_unread = 0 WHERE id = ?', ticket.id);
+    // Only the customer messages in THIS batch count as read — see the note
+    // on the detail route above.
+    const readNow = messages.filter((m) => m.author_role === 'user').length;
+    if (readNow > 0) {
+      await db.run('UPDATE tickets SET staff_unread = MAX(0, staff_unread - ?) WHERE id = ?', readNow, ticket.id);
+    }
 
     const files = messages.length
       ? await db.all('SELECT id, message_id, filename, mime, bytes FROM ticket_attachments WHERE ticket_id = ?', ticket.id)

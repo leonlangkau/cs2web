@@ -345,6 +345,15 @@ async function seed(db, env = {}) {
     }
   }
 
+  // Guests can open support tickets, which makes the proof-of-work the only
+  // thing standing between an anonymous form and the outbound mailer. Its
+  // fallback secret is in this repository, so say so once per cold start
+  // rather than letting a deployment quietly run on it.
+  if (!env.CAPTCHA_SECRET) {
+    console.warn('CAPTCHA_SECRET is not set — the proof-of-work CAPTCHA is running on the public '
+      + 'development secret, so sign-up and guest support tickets can be forged. Set it as a secret.');
+  }
+
   // Help centre + canned replies. Both are one-shot: once a section (or a
   // macro) exists the seed never runs again, so an operator who rewrites or
   // deletes an article does not find it reinstated on the next cold start.

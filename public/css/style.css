@@ -1667,6 +1667,8 @@ tbody tr.row-banned:hover td { background: var(--tint-danger); }
   max-width: 100%;
 }
 .attach-item:hover { border-color: var(--accent); color: var(--accent); }
+.attach-image { border-style: dashed; }
+.attach-icon { font-size: .95em; line-height: 1; }
 .attach-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 14rem; }
 .attach-size { font-size: .74rem; }
 
@@ -1683,6 +1685,7 @@ tbody tr.row-banned:hover td { background: var(--tint-danger); }
   box-shadow: var(--ring-shadow), var(--shadow-sm);
 }
 .csat-label { font-weight: 600; }
+.csat-done { color: var(--text-soft); }
 .csat-stars { display: inline-flex; gap: .1rem; font-size: 1.2rem; color: var(--warn); letter-spacing: .1em; }
 .csat-star {
   background: none;
@@ -1756,6 +1759,9 @@ tbody tr.row-banned:hover td { background: var(--tint-danger); }
   margin: .6rem 0;
   font-size: .9rem;
 }
+
+.ai-drafts { margin-top: .8rem; }
+.staff-composer textarea { font-size: .93rem; }
 
 /* ---------- Ticket form ---------- */
 .ticket-form textarea { width: 100%; resize: vertical; }

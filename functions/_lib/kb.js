@@ -508,6 +508,22 @@ Please give us a reasonable window to fix it before publishing. We do not run a 
  * deleted an article never has it silently reinstated, because the whole seed
  * is skipped as soon as any section exists.
  */
+/**
+ * Which ticket topic a help section belongs to, so an article that failed to
+ * deflect opens a ticket already filed correctly. Unknown sections fall
+ * through to 'other', which is what a custom section should do.
+ */
+const SECTION_CATEGORY = {
+  'getting-started': 'install',
+  account: 'account',
+  membership: 'billing',
+  app: 'app',
+  performance: 'ingame',
+  safety: 'safety',
+};
+
+const categoryForSection = (slug) => SECTION_CATEGORY[String(slug || '')] || 'other';
+
 async function seedHelpCentre(db) {
   if (await db.get('SELECT id FROM help_sections LIMIT 1')) return false;
 
@@ -584,6 +600,6 @@ async function seedMacros(db) {
 }
 
 export {
-  renderArticle, excerpt, searchArticles, terms,
+  renderArticle, excerpt, searchArticles, terms, categoryForSection,
   seedHelpCentre, seedMacros, SECTIONS, ARTICLES, MACROS, MAX_ARTICLE_BODY,
 };

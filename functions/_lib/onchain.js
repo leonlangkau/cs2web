@@ -84,6 +84,30 @@ const MAX_TX_LOOKUPS_PER_SCAN = 12;
 /** Re-read a few blocks either side of the cursor, so a reorg can't hide a payment. */
 const ETH_CURSOR_LAG_BLOCKS = 20;
 
+/**
+ * How many already-recorded payments one scan re-ages against the current
+ * chain height.
+ *
+ * A provider only returns a transfer while it is inside the block window the
+ * scan asked for, and that window walks forward with the cursor. So a payment
+ * first seen below its confirmation threshold has only as many chances to
+ * reach it as the cursor's lag allows — and once the cursor is past, nothing
+ * looks at that transfer again. It stays `seen`, its order stays uncredited,
+ * and the money is on chain the whole time.
+ *
+ * Confirmations are therefore recomputed locally, for payments we already hold,
+ * from the height the scan has already read. It costs no extra network call and
+ * the cursor cannot outrun it.
+ */
+const MAX_PENDING_REFRESH_PER_SCAN = 10;
+
+/**
+ * How long a payment that never reaches its threshold keeps its coin in the
+ * scan rotation. A transfer orphaned by a reorg would otherwise pin an asset to
+ * be polled forever; after this it belongs to the admin queue.
+ */
+const PENDING_TRANSFER_WATCH_DAYS = 2;
+
 function positiveNumber(value, fallback, min = 0) {
   const n = Number(value);
   return Number.isFinite(n) && n >= min ? n : fallback;
@@ -498,6 +522,16 @@ async function matchTransfer(c, cfg, transfer, { now = Date.now(), source = 'sca
 const CURSOR_KEY = (assetKey) => `chain_cursor:${assetKey}`;
 const SCAN_AT_KEY = 'chain_scan_at';
 
+/**
+ * When each coin was last polled.
+ *
+ * The site-wide window paces the general rotation. This one paces a scan of a
+ * single coin asked for on a buyer's behalf, so a payment page left open
+ * doesn't become one call to the provider per refresh — and so asking about one
+ * coin never claims the site-wide window and starves the others of their turn.
+ */
+const ASSET_SCAN_AT_KEY = (assetKey) => `chain_scan_at:${assetKey}`;
+
 async function readCursor(db, assetKey) {
   try {
     const parsed = JSON.parse(await getSetting(db, CURSOR_KEY(assetKey)) || '{}');
@@ -551,6 +585,10 @@ async function scanAsset(c, cfg, asset, { now = Date.now(), source = 'scan' } = 
   const cursor = await readCursor(db, asset.key);
   const out = { asset: asset.key, seen: 0, matched: 0, credited: 0, unmatched: 0, error: null };
 
+  // Stamped before the call, not after, so a provider that is timing out is
+  // backed off from rather than retried by every request that arrives.
+  await setSetting(db, ASSET_SCAN_AT_KEY(asset.key), String(now)).catch(() => {});
+
   let result;
   try {
     if (asset.chain === 'ethereum') {
@@ -573,6 +611,13 @@ async function scanAsset(c, cfg, asset, { now = Date.now(), source = 'scan' } = 
   // the payments alone would stall it whenever a window held only unrelated
   // traffic, and re-read that same window forever.
   let highestBlock = Math.max(cursor.block, Number(result.highestBlock) || 0);
+  const handled = new Set();
+  const tally = (verdict) => {
+    if (verdict.granted) out.credited += 1;
+    else if (verdict.order) out.matched += 1;
+    else if (verdict.reason === 'unmatched' || verdict.reason === 'ambiguous') out.unmatched += 1;
+  };
+
   for (const transfer of transfers) {
     highestBlock = Math.max(highestBlock, Number(transfer.block) || 0);
     if (transfer.units <= 0n) {
@@ -582,11 +627,27 @@ async function scanAsset(c, cfg, asset, { now = Date.now(), source = 'scan' } = 
     out.seen += 1;
     const row = await recordTransfer(db, transfer);
     if (!row) continue;
-    const verdict = await matchTransfer(c, cfg, row, { now, source });
-    if (verdict.granted) out.credited += 1;
-    else if (verdict.order) out.matched += 1;
-    else if (verdict.reason === 'unmatched' || verdict.reason === 'ambiguous') out.unmatched += 1;
+    handled.add(String(row.tx_hash));
+    tally(await matchTransfer(c, cfg, row, { now, source }));
   }
+
+  // Age the payments we already hold against the height this scan just read.
+  //
+  // Everything above depends on the provider handing a transfer back, and it
+  // only does so while the transfer is inside the block window the scan asked
+  // for. That window walks forward with the cursor, so a payment first seen
+  // below its confirmation threshold has a limited number of chances to reach
+  // it — and once the cursor is past, no scan ever mentions that transfer
+  // again. The buyer's money is confirmed on chain and their order sits at
+  // `seen` forever.
+  //
+  // Recomputing confirmations here closes that off. It reads no network (the
+  // height came back with the rows above), it is bounded, and it makes
+  // crediting depend on our own record of the payment rather than on a window
+  // that has since moved.
+  out.refreshed = await refreshPending(c, cfg, asset, {
+    latestBlock: Number(result.latestBlock) || 0, skip: handled, now, source, tally,
+  });
 
   if (highestBlock > cursor.block) {
     await setSetting(db, CURSOR_KEY(asset.key), JSON.stringify({ block: highestBlock, at: now })).catch(() => {});
@@ -594,11 +655,69 @@ async function scanAsset(c, cfg, asset, { now = Date.now(), source = 'scan' } = 
   return out;
 }
 
-/** Assets with at least one order that could still be paid. */
-async function assetsWithLiveOrders(db, cfg, now) {
+/**
+ * Re-checks payments already recorded for `asset` that have not yet reached
+ * their confirmation threshold, using `latestBlock` as the chain's height.
+ *
+ * Returns how many were re-matched. A chain with no height to age against
+ * (Solana, read at `finalized`, where a visible transfer is already final) is
+ * skipped entirely — there is nothing a second look could change.
+ */
+async function refreshPending(c, cfg, asset, { latestBlock, skip = new Set(), now, source, tally }) {
+  if (!(latestBlock > 0)) return 0;
+  const db = c.get('db');
+  const needed = requiredConfirmations(cfg, asset);
+
+  // A transfer whose order has since been credited is left alone. Re-matching
+  // it would find that order already paid and re-file the transfer as a
+  // duplicate — relabelling the very payment that bought the membership.
+  const pending = await db.all(
+    `SELECT t.* FROM chain_transfers t
+       LEFT JOIN chain_orders o ON o.order_id = t.order_id
+      WHERE t.asset = ? AND t.status = 'seen' AND t.block > 0 AND t.confirmations < ?
+        AND t.created_at >= datetime('now', '-${PENDING_TRANSFER_WATCH_DAYS} days')
+        AND (t.order_id IS NULL OR o.credited_at IS NULL)
+      ORDER BY t.block ASC LIMIT ?`,
+    asset.key, needed, MAX_PENDING_REFRESH_PER_SCAN
+  );
+
+  let refreshed = 0;
+  for (const row of pending) {
+    if (skip.has(String(row.tx_hash))) continue;
+    const confirmations = Math.max(0, latestBlock - Number(row.block) + 1);
+    // Confirmations only ever climb: a height that reads lower than what we
+    // already recorded is a provider disagreeing with itself, not a payment
+    // becoming less real.
+    if (confirmations <= (Number(row.confirmations) || 0)) continue;
+    await db.run(
+      `UPDATE chain_transfers SET confirmations = ?, updated_at = datetime('now')
+       WHERE id = ? AND status <> 'credited'`,
+      confirmations, row.id
+    );
+    refreshed += 1;
+    tally(await matchTransfer(c, cfg, { ...row, confirmations }, { now, source }));
+  }
+  return refreshed;
+}
+
+/**
+ * Coins worth polling: any with an order that could still be paid, plus any
+ * holding a payment we have seen and not yet been able to credit.
+ *
+ * The second half is load-bearing. A transfer waiting on confirmations easily
+ * outlives its order's matching window, and dropping its coin out of the
+ * rotation strands the payment a block or two short of being credited — money
+ * that arrived, was recognised, and was then never looked at again.
+ */
+async function assetsToWatch(db, cfg, now) {
   const rows = await db.all(
     `SELECT DISTINCT asset FROM chain_orders
-      WHERE credited_at IS NULL AND status <> 'cancelled' AND match_until >= ?`, now
+       WHERE credited_at IS NULL AND status <> 'cancelled' AND match_until >= ?
+     UNION
+     SELECT DISTINCT asset FROM chain_transfers
+       WHERE status = 'seen'
+         AND created_at >= datetime('now', '-${PENDING_TRANSFER_WATCH_DAYS} days')`,
+    now
   );
   const keys = new Set(rows.map((r) => String(r.asset)));
   return cfg.assets.filter((a) => keys.has(a.key));
@@ -618,21 +737,31 @@ async function maybeScan(c, cfg, { force = false, now = Date.now(), only = null,
   const db = c.get('db');
 
   if (!force) {
-    const last = Number(await getSetting(db, SCAN_AT_KEY).catch(() => 0)) || 0;
+    // A scan of one named coin is paced by that coin's window, not the
+    // site-wide one. Reading the site-wide window here would let a rotation
+    // that skipped this coin entirely still block the buyer asking about it —
+    // which is the whole reason they had to ask.
+    const last = Number(await getSetting(db, only ? ASSET_SCAN_AT_KEY(only) : SCAN_AT_KEY).catch(() => 0)) || 0;
     if (now - last < cfg.scanIntervalSeconds * 1000) return { skipped: 'throttled', results: [] };
   }
-  // Normally only coins somebody is actually waiting on are polled, so a quiet
-  // site makes no upstream calls at all. `includeIdle` is the admin's override,
-  // for looking at money that no open order explains.
-  let assets = includeIdle ? cfg.assets : await assetsWithLiveOrders(db, cfg, now);
-  if (only) assets = assets.filter((a) => a.key === only);
+  // A named coin is polled because a caller has asserted somebody is waiting on
+  // it — not because the rotation picked it — so it is scanned whether or not
+  // the rotation would have chosen it. See reconcileOrder.
+  //
+  // Otherwise: only coins somebody is actually waiting on, so a quiet site makes
+  // no upstream calls at all. `includeIdle` is the admin's override, for looking
+  // at money that no open order explains.
+  let assets;
+  if (only) assets = cfg.byKey[only] ? [cfg.byKey[only]] : [];
+  else assets = includeIdle ? cfg.assets : await assetsToWatch(db, cfg, now);
   // Nothing to poll for costs nothing and must not burn the window: an order
   // opened a second later would otherwise wait a whole interval for its turn.
   if (assets.length === 0) return { skipped: 'nothing_pending', results: [] };
 
   // Claim the window before scanning, so two concurrent requests don't both
   // poll. A single-asset scan deliberately does NOT claim it: narrowing to one
-  // coin must not starve the others of their turn for a whole interval.
+  // coin must not starve the others of their turn for a whole interval. It is
+  // paced by that coin's own window instead, which scanAsset stamps.
   if (!only) await setSetting(db, SCAN_AT_KEY, String(now)).catch(() => {});
 
   const results = [];
@@ -641,9 +770,20 @@ async function maybeScan(c, cfg, { force = false, now = Date.now(), only = null,
 }
 
 /**
- * Re-checks one specific order right now, ignoring the global throttle. This is
- * what the buyer's own status poll uses, so the person actually staring at the
- * page gets the fastest answer.
+ * Re-checks one specific order right now. This is what the buyer's own payment
+ * page and status poll use, so the person actually staring at the page gets the
+ * fastest answer — and, in the case that matters most, gets one at all.
+ *
+ * The general rotation polls coins that have an order still inside its matching
+ * window, which is the right default for a site nobody is watching. But a buyer
+ * on their own payment page saying "I have paid" is precisely the case where
+ * that window has often just run out. Their amount stays reserved to them for
+ * weeks afterwards and the matcher will still credit it, so the only thing
+ * missing was somebody going and fetching the transfer. That is this.
+ *
+ * Paced by the coin's own window rather than the site-wide one, so a payment
+ * page left open all afternoon costs the provider one call per interval, and
+ * asking about one coin never starves the others of their turn.
  */
 async function reconcileOrder(c, cfg, order, { now = Date.now(), source = 'status check' } = {}) {
   if (!cfg.configured || order.credited_at) return { credited: Boolean(order.credited_at) };
@@ -658,7 +798,8 @@ async function reconcileOrder(c, cfg, order, { now = Date.now(), source = 'statu
     order.order_id
   );
 
-  const result = await scanAsset(c, cfg, asset, { now, source });
+  const scan = await maybeScan(c, cfg, { now, only: asset.key, source });
+  const result = (scan.results || [])[0] || { asset: asset.key, skipped: scan.skipped || 'throttled' };
   if (result.error && bound) {
     // Provider down, but we already know about this payment — try what we have.
     await matchTransfer(c, cfg, bound, { now, source }).catch(() => {});

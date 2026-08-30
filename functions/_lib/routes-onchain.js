@@ -29,7 +29,7 @@ import { isStaff, normalizeTier } from "./tiers.js";
 import { resolvePlan, resolvePlans } from "./plans.js";
 import { safeEqual } from "./crypto.js";
 import {
-  onchainConfig, createOrder, maybeScan, submitTransactionRef, orderView,
+  onchainConfig, createOrder, maybeScan, reconcileOrder, submitTransactionRef, orderView,
 } from "./onchain.js";
 
 /** Why an order couldn't be opened, in words a buyer can act on. */
@@ -133,10 +133,15 @@ function register(app) {
     }
 
     if (!order.credited_at && cfg.configured) {
-      await maybeScan(c, cfg, { source: 'pay page' }).catch((err) => {
+      // Their own coin, named explicitly. The general rotation only polls coins
+      // with an order still inside its matching window, and a buyer standing
+      // here is exactly the case where that has often just run out.
+      const result = await reconcileOrder(c, cfg, order, { source: 'pay page' }).catch((err) => {
         console.error('chain scan failed during pay page load:', err);
+        return null;
       });
-      order = await c.get('db').get('SELECT * FROM chain_orders WHERE id = ?', order.id);
+      order = (result && result.order)
+        || await c.get('db').get('SELECT * FROM chain_orders WHERE id = ?', order.id);
     }
 
     c.header('Cache-Control', 'no-store');
@@ -144,7 +149,7 @@ function register(app) {
   });
 
   // What the page polls. Deliberately small and cheap: the scan behind it is
-  // throttled site-wide, so a hundred open tabs still cost one poll per window.
+  // throttled per coin, so a hundred open tabs still cost one poll per window.
   app.get('/pay/:order/status', async (c) => {
     c.header('Cache-Control', 'no-store');
     const gate = requireAuth(c);
@@ -155,8 +160,10 @@ function register(app) {
 
     let scan = null;
     if (!order.credited_at && cfg.configured) {
-      scan = await maybeScan(c, cfg, { source: 'status poll' }).catch(() => null);
-      order = await c.get('db').get('SELECT * FROM chain_orders WHERE id = ?', order.id);
+      const result = await reconcileOrder(c, cfg, order, { source: 'status poll' }).catch(() => null);
+      scan = result ? result.scan : null;
+      order = (result && result.order)
+        || await c.get('db').get('SELECT * FROM chain_orders WHERE id = ?', order.id);
     }
 
     const view = orderView(cfg, order);
@@ -174,7 +181,7 @@ function register(app) {
       // Told plainly so the page can say "we couldn't reach the network" rather
       // than silently looking like nothing has arrived.
       scanned: Boolean(scan && !scan.skipped),
-      scanError: scan && scan.results ? (scan.results.find((r) => r.error) || {}).error || null : null,
+      scanError: (scan && scan.error) || null,
     });
   });
 

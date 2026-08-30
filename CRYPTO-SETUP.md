@@ -287,6 +287,39 @@ Two other things worth knowing:
 - **Overpayment credits automatically.** Paying more than the quote covers the
   order; the buyer is not penalised and you are not asked to intervene.
 
+### “It went through, but the site did nothing”
+
+The money left the buyer's wallet and their order still says waiting. In roughly
+the order it turns out to be the answer:
+
+1. **It is still confirming.** ETH and ERC-20 USDT need
+   `CRYPTO_ETH_CONFIRMATIONS` blocks — 12 by default, about two and a half
+   minutes. The pay page shows the count climbing. Solana is read at
+   `finalized`, so it has nothing to wait for. Nothing to do here.
+2. **Nothing has driven a scan.** Pages Functions have no cron, so the chains
+   are polled only when a request comes in. Without the cron from §3, a site
+   with no visitors polls nothing at all. Opening **Admin → On-chain** nudges a
+   poll; **Scan now** on that page forces one across every configured coin,
+   including coins with no open order at all.
+3. **Ask the buyer to reopen their payment link.** Their own pay page polls
+   their own coin whenever they load it — whatever else is happening on the
+   site, and including after their order's `CRYPTO_MATCH_HOURS` window has run
+   out. Their amount stays reserved to them for 30 days, so a late payment for
+   the exact quoted amount still credits itself. A late payment for a *rounded*
+   amount is deliberately parked for you instead, in the table above.
+4. **The scan cannot see that transaction.** USDT sent on Solana against an
+   Ethereum order (or the reverse), a different address, or a provider that
+   never returned the row. The buyer pasting their transaction hash into
+   “Already sent it and nothing has happened?” reads that one transaction
+   directly, which settles the question either way.
+5. **It arrived but could not be attributed.** Then it is already in the top
+   table on **Admin → On-chain**, with its hash and amount, waiting for you to
+   assign it.
+
+If the money is on chain and none of the above finds it, credit the order by
+hand from **Admin → On-chain**. That is recorded in the audit log as a manual
+action, and the buyer gets their membership immediately.
+
 ---
 
 ## 8. How the guarantees actually hold

@@ -22,7 +22,7 @@ import { buildTestApp } from "./harness.mjs";
 import { makeClient, signUp } from "./client.mjs";
 import { decodeQr } from "./qr-decoder.mjs";
 import {
-  chainConfig, isValidEthAddress, isValidSolAddress, paymentUri, explorerLink,
+  chainConfig, isValidEthAddress, isValidSolAddress, paymentUri, explorerLink, solIncoming,
 } from "../functions/_lib/chains.js";
 import { keccak256Hex } from "../functions/_lib/keccak.js";
 import { toUnits, fromUnits, fiatToUnits, ceilTo } from "../functions/_lib/units.js";
@@ -188,8 +188,10 @@ const solTx = (signature, units, { address = SOL_ADDRESS, at = nowSeconds() } = 
   },
 });
 
-/** The throttle exists to protect the upstream APIs; tests fast-forward past it. */
-const elapseScanWindow = (db) => db.run("DELETE FROM settings WHERE key = 'chain_scan_at'");
+/** The throttles exist to protect the upstream APIs — one site-wide, one per
+    coin for scans asked for on a specific buyer's behalf. Tests fast-forward
+    past both. */
+const elapseScanWindow = (db) => db.run("DELETE FROM settings WHERE key LIKE 'chain_scan_at%'");
 
 /** Pins an order's quote, so a test asserts the matching rule rather than which
     random discriminator it happened to be given. */
@@ -677,6 +679,121 @@ test("a payment that arrives after the matching window still belongs to its buye
   });
 });
 
+test("a payment confirms even after the scan window has moved past it", async () => {
+  // The provider only hands a transfer back while it is still inside the block
+  // window the scan asks for, and that window walks forward. A payment first
+  // seen with too few confirmations therefore gets a limited number of chances
+  // to reach its threshold before the cursor leaves it behind for good — and
+  // nothing else ever revisits a transfer we have already recorded.
+  //
+  // The buyer's money is on chain and confirmed. Only our bookkeeping stopped
+  // looking.
+  const env = { ...CHAIN_ENV, CRYPTO_ETH_CONFIRMATIONS: "30" };
+  const { app, db } = await buildTestApp(env);
+  const chain = { rates: { ETH: "3000" }, latestBlock: 1000, txlist: [] };
+
+  // Traffic that is not a payment to us still moves the cursor: an outgoing
+  // sweep of the wallet is the ordinary way that happens.
+  const outgoing = (hash, block) => ({
+    hash, to: "0x2222222222222222222222222222222222222222", from: ETH_ADDRESS,
+    value: "1", blockNumber: String(block), timeStamp: String(nowSeconds()),
+    isError: "0", txreceipt_status: "1",
+  });
+
+  await withChain(chain, async () => {
+    const buyer = await openOrder(app, db, env, "slow_confirmer");
+
+    // The payment lands, three blocks deep — real money, not yet final.
+    chain.txlist = [ethTx(TX_A, buyer.order.expected_units, { block: 998 })];
+    await elapseScanWindow(db);
+    await buyer.client.get(`/pay/${buyer.order.order_id}/status`);
+    assert.equal((await db.get("SELECT status FROM chain_orders WHERE id = ?", buyer.order.id)).status,
+      "seen", "the payment is seen but not yet confirmed enough to credit");
+
+    // The chain moves on and the operator sweeps the wallet, which drags the
+    // scan cursor forward while the payment is still one block short.
+    chain.latestBlock = 1025;
+    chain.txlist.push(outgoing(TX_B, 1024));
+    await elapseScanWindow(db);
+    await buyer.client.get(`/pay/${buyer.order.order_id}/status`);
+    assert.equal((await db.get("SELECT tier FROM users WHERE username = 'slow_confirmer'")).tier,
+      "user", "still one confirmation short, so nothing is granted yet");
+
+    // Another sweep, and now the cursor is past the payment entirely. The
+    // payment itself is 33 blocks deep — comfortably over the threshold.
+    chain.latestBlock = 1030;
+    chain.txlist.push(outgoing(`0x${"ef".repeat(32)}`, 1029));
+    await elapseScanWindow(db);
+    await buyer.client.get(`/pay/${buyer.order.order_id}/status`);
+
+    assert.equal((await db.get("SELECT tier FROM users WHERE username = 'slow_confirmer'")).tier,
+      "paid", "a confirmed payment is credited even once the window has walked past it");
+  });
+});
+
+test("a buyer whose order went quiet is still credited when they come back", async () => {
+  // Only coins with a still-matchable order are polled, so a quiet site makes
+  // no upstream calls. But the amount a buyer was quoted stays reserved to them
+  // for far longer than their order stays matchable, and the matcher will
+  // happily credit that late payment — if a scan ever fetches it. With nobody
+  // else waiting on that coin, no scan ever did, so the one person who could
+  // prove they had paid was the one person the site refused to look for.
+  const { app, db } = await buildTestApp(CHAIN_ENV);
+  const chain = { rates: { ETH: "3000" }, latestBlock: 1000, txlist: [] };
+
+  await withChain(chain, async () => {
+    const buyer = await openOrder(app, db, CHAIN_ENV, "quiet_payer");
+    // Their order is past the window in which it is treated as still open, and
+    // theirs is the only order on the site.
+    await db.run("UPDATE chain_orders SET match_until = ? WHERE id = ?",
+      Date.now() - 1000, buyer.order.id);
+
+    chain.txlist = [ethTx(TX_A, buyer.order.expected_units, { confs: 30 })];
+    await elapseScanWindow(db);
+
+    // The buyer comes back to their own payment page and says "I paid".
+    await buyer.client.get(`/pay/${buyer.order.order_id}`);
+
+    assert.equal((await db.get("SELECT tier FROM users WHERE username = 'quiet_payer'")).tier,
+      "paid", "the buyer's own page looks for the buyer's own payment");
+  });
+});
+
+test("a coin keeps being watched while a payment on it is still confirming", async () => {
+  // Which coins get polled is answered by "who could still pay?", but a payment
+  // waiting on confirmations easily outlives its order's matching window. Asking
+  // only the first question dropped the coin out of the rotation with the money
+  // already in the wallet and one block left to go.
+  const env = { ...CHAIN_ENV, CRYPTO_ETH_CONFIRMATIONS: "30" };
+  const { app, db } = await buildTestApp(env);
+  const chain = { rates: { ETH: "3000" }, latestBlock: 1000, txlist: [] };
+
+  await withChain(chain, async () => {
+    const buyer = await openOrder(app, db, env, "still_confirming");
+    chain.txlist = [ethTx(TX_A, buyer.order.expected_units, { block: 998 })];
+    await elapseScanWindow(db);
+    await buyer.client.get(`/pay/${buyer.order.order_id}/status`);
+    assert.equal((await db.get("SELECT status FROM chain_transfers WHERE tx_hash = ?", TX_A)).status,
+      "seen", "the payment is on record, short of its confirmation threshold");
+
+    // Their order stops counting as live, and nobody is on the site — only the
+    // cron is still running.
+    await db.run("UPDATE chain_orders SET match_until = ? WHERE id = ?",
+      Date.now() - 1000, buyer.order.id);
+    chain.latestBlock = 1040;
+    await elapseScanWindow(db);
+
+    const res = await app.fetch(
+      new Request("https://x/api/crypto/scan", { headers: { "x-crypto-scan-secret": env.CRYPTO_SCAN_SECRET } }),
+      env
+    );
+    assert.equal(res.status, 200);
+
+    assert.equal((await db.get("SELECT tier FROM users WHERE username = 'still_confirming'")).tier,
+      "paid", "money already in the wallet is followed through to confirmation");
+  });
+});
+
 test("paying twice does not buy a stranger a membership", async () => {
   const { app, db } = await buildTestApp(CHAIN_ENV);
   const chain = { rates: { ETH: "3000" }, latestBlock: 1000, txlist: [] };
@@ -860,6 +977,21 @@ test("cheap dust cannot bury a real payment", async () => {
 
     assert.equal((await db.get("SELECT tier FROM users WHERE username = 'buried'")).tier, "paid",
       "the payment is found underneath 120 later transactions");
+  });
+});
+
+test("an owner with no token account yet answers in the shape the scanner reads", async () => {
+  // An owner who has never been sent USDT has no token account, which is a
+  // legitimate empty result — but it was the one path that answered with a bare
+  // array instead of { transfers, ... }. At the call site that reads as
+  // `result.transfers === undefined`, which is exactly the "nobody paid" that
+  // this module promises never to say by accident.
+  const cfg = onchainConfig(CHAIN_ENV);
+  const asset = cfg.byKey["usdt-spl"];
+  await withChain({ tokenAccounts: [] }, async () => {
+    const result = await solIncoming(cfg, asset, {});
+    assert.ok(Array.isArray(result.transfers), "the caller always gets a transfers array");
+    assert.equal(result.transfers.length, 0, "and it is empty, rather than absent");
   });
 });
 

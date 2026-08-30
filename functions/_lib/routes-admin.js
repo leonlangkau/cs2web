@@ -426,6 +426,15 @@ function register(app) {
     };
   };
 
+  /**
+   * One coin's scan, in a line. `re-checked` counts payments already on record
+   * that were re-aged against the chain's current height rather than re-read
+   * from the provider — the pass that catches a payment the scan window has
+   * walked past, so it is worth being able to see it happen.
+   */
+  const scanLine = (r) => `${r.asset}: ${r.error ? `error — ${r.error}`
+    : `${r.seen} seen, ${r.credited} credited${r.refreshed ? `, ${r.refreshed} re-checked` : ''}`}`;
+
   app.get('/admin/crypto', async (c) => {
     const db = c.get('db');
     const cfg = onchainConfig(c.get('cfg'));
@@ -436,7 +445,7 @@ function register(app) {
     const swept = await maybeScan(c, cfg, { source: `admin ${c.get('user').username}` })
       .catch(() => null);
     const scanNote = swept && swept.results && swept.results.length
-      ? swept.results.map((r) => `${r.asset}: ${r.error ? `error — ${r.error}` : `${r.seen} seen, ${r.credited} credited`}`).join(' · ')
+      ? swept.results.map(scanLine).join(' · ')
       : '';
 
     const status = CHAIN_STATUSES.includes(url.searchParams.get('status'))
@@ -516,9 +525,7 @@ function register(app) {
     const result = await maybeScan(c, cfg, {
       force: true, includeIdle: true, source: `admin ${c.get('user').username}`,
     });
-    const summary = (result.results || [])
-      .map((r) => `${r.asset}: ${r.error ? `error — ${r.error}` : `${r.seen} seen, ${r.credited} credited`}`)
-      .join(' · ');
+    const summary = (result.results || []).map(scanLine).join(' · ');
     setFlash(c, (result.results || []).some((r) => r.error) ? 'error' : 'success',
       summary || `Nothing to scan (${result.skipped || 'no pending orders'}).`);
     return c.redirect('/admin/crypto', 302);

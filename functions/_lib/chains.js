@@ -436,7 +436,10 @@ async function ethIncoming(cfg, asset, { sinceBlock = 0 } = {}) {
     confirmations: entry.block > 0 ? Math.max(0, latest - entry.block + 1) : 0,
   })).sort((a, b) => b.block - a.block);
 
-  return { transfers, highestBlock };
+  // `latestBlock` is reported alongside the rows because the caller needs to
+  // age payments it already knows about, not only the ones this window
+  // returned — and it must not cost a second round trip to ask again.
+  return { transfers, highestBlock, latestBlock: latest };
 }
 
 const HEX64 = /^0x[0-9a-fA-F]{64}$/;
@@ -600,7 +603,10 @@ async function solIncoming(cfg, asset, { known = new Set(), limit = 12 } = {}) {
   const watched = asset.kind === 'native'
     ? [asset.address]
     : await solTokenAccounts(cfg, asset.address, cfg.sol.usdtMint);
-  if (watched.length === 0) return [];
+  // Same shape as every other exit. Returning a bare array here made
+  // `result.transfers` undefined in the caller, which reads as "the chain says
+  // nothing arrived" — the one thing this module promises never to say.
+  if (watched.length === 0) return { transfers: [], highestBlock: 0, latestBlock: 0 };
 
   const out = [];
   const seen = new Set();
@@ -643,7 +649,10 @@ async function solIncoming(cfg, asset, { known = new Set(), limit = 12 } = {}) {
     }
     if (lookups >= limit) break;
   }
-  return { transfers: out.sort((a, b) => b.block - a.block), highestBlock: 0 };
+  // Solana reads are `finalized`, so a transfer that is visible at all is
+  // already as confirmed as it will ever get — there is no height to age it
+  // against, and none is reported.
+  return { transfers: out.sort((a, b) => b.block - a.block), highestBlock: 0, latestBlock: 0 };
 }
 
 /** One specific Solana transaction, for the paste-your-signature fallback. */
@@ -670,11 +679,17 @@ async function solTransaction(cfg, asset, signature) {
  * ------------------------------------------------------------------ */
 
 /**
- * Recent incoming transfers for one asset, as { transfers, highestBlock }.
+ * Recent incoming transfers for one asset, as
+ * { transfers, highestBlock, latestBlock }.
+ *
  * `highestBlock` is where the caller's cursor should move to — tracked over
  * every row the provider returned, not only the ones that paid us, so a window
- * full of unrelated traffic still advances it. Throws if the provider is
- * unreachable: a failed lookup must never read as "nothing was paid".
+ * full of unrelated traffic still advances it. `latestBlock` is the chain's
+ * current height (0 where the chain has no such notion), so the caller can age
+ * payments it recorded earlier without paying for another round trip.
+ *
+ * Throws if the provider is unreachable: a failed lookup must never read as
+ * "nothing was paid".
  */
 function fetchIncoming(cfg, asset, cursor = {}) {
   return asset.chain === 'solana' ? solIncoming(cfg, asset, cursor) : ethIncoming(cfg, asset, cursor);

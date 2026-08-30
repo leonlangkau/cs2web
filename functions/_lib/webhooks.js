@@ -20,6 +20,7 @@ const COLORS = {
   sla_breach: 0xc01829,
   ticket_escalated: 0x8a5a00,
   ticket_spam: 0x5b6884,
+  chain_provider_down: 0xc01829,
 };
 
 const TITLES = {
@@ -28,6 +29,7 @@ const TITLES = {
   sla_breach: 'SLA breached — no first response',
   ticket_escalated: 'Ticket escalated',
   ticket_spam: 'Ticket flagged as spam',
+  chain_provider_down: 'Chain provider is not answering',
 };
 
 /** Discord rejects an empty field value, so never send one. */
@@ -47,17 +49,22 @@ async function notifySupport(env, kind, data = {}, fetcher = fetch) {
   }
 
   const title = TITLES[kind] || 'Support update';
-  const fields = [
-    field('Ticket', data.ref),
-    field('Priority', data.priority),
-    field('Category', data.category),
-    field('From', data.requester),
-  ];
+  // Ticket alerts share one set of labels; anything else says what it is. A
+  // payments outage rendered under a heading reading "Ticket" and "Priority"
+  // is worse than no alert, because it reads as somebody else's problem.
+  const fields = Array.isArray(data.fields)
+    ? data.fields.map((f) => field(f.name, f.value, f.inline !== false))
+    : [
+      field('Ticket', data.ref),
+      field('Priority', data.priority),
+      field('Category', data.category),
+      field('From', data.requester),
+    ];
   if (data.note) fields.push(field('Note', data.note, false));
 
   const payload = {
     username: 'GoyHub Support',
-    content: kind === 'sla_breach' || kind === 'ticket_urgent'
+    content: kind === 'sla_breach' || kind === 'ticket_urgent' || kind === 'chain_provider_down'
       ? `**${title}** — ${data.ref || ''}`
       : undefined,
     embeds: [{

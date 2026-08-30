@@ -48,8 +48,13 @@ const TX_ERRORS = {
   not_found: 'We couldn’t find a payment to our address in that transaction. Double-check you '
     + 'copied the right one — and note it has to be confirmed on chain before it shows up.',
   already_used: 'That transaction has already been credited to another order.',
-  lookup_failed: 'We couldn’t reach the network to check that transaction. Try again shortly — '
-    + 'your payment is safe either way, and the automatic check keeps running.',
+  // Never says "the automatic check keeps running": the automatic check reads
+  // the same provider that just failed, so during an outage that sentence is
+  // the reason a buyer waits quietly instead of telling somebody.
+  lookup_failed: 'We couldn’t reach the blockchain network just now — that’s a fault on our side, '
+    + 'not a problem with your payment. Your money is safe, and what you sent us has been logged '
+    + 'for staff. Try again in a few minutes; if it still hasn’t cleared, contact support and '
+    + 'quote your order id.',
   unknown_asset: 'That coin is no longer accepted, so this order can’t be completed.',
 };
 
@@ -203,9 +208,13 @@ function register(app) {
     const result = await submitTransactionRef(c, cfg, order, reference);
 
     if (!result.ok) {
+      // The whole reference, not a fragment: during a provider outage this
+      // audit line is the only record that this buyer told us about this
+      // transaction, and staff need to be able to go and read it themselves.
       await audit(c, 'chain_tx_submitted', {
         userId: user.id, username: user.username,
-        detail: `order ${order.order_id}: ${result.reason} for ${reference.slice(0, 24)}…`,
+        detail: `order ${order.order_id}: ${result.reason} for ${reference}`
+          + (result.detail ? ` — ${result.detail}` : ''),
       });
       setFlash(c, 'error', TX_ERRORS[result.reason] || 'That transaction could not be checked.');
       return c.redirect(`/pay/${order.order_id}`, 302);

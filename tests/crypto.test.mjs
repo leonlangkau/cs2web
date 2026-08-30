@@ -78,6 +78,14 @@ async function withChain(chain, fn) {
     const json = (body, status = 200) =>
       new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
 
+    // The staff alert webhook. Deliberately answered even when the chain is
+    // "down": a provider outage that cannot be reported because the reporting
+    // channel shares its fate would be no alert at all.
+    if (url.startsWith("https://hooks.example.test/")) {
+      (chain.alerts || (chain.alerts = [])).push(JSON.parse(String(init.body || "{}")));
+      return json({ ok: true });
+    }
+
     if (chain.down) throw new Error("simulated network outage");
 
     // --- price feed ---
@@ -1167,6 +1175,82 @@ test("the store offers exactly the coins that are configured and payable", async
   const { app: bare } = await buildTestApp(BASE_ENV);
   const bareHtml = await (await makeClient(bare, BASE_ENV).get("/buy")).text();
   assert.ok(!bareHtml.includes('action="/upgrade/crypto"'), "no addresses, no coin buttons");
+});
+
+test("a provider that stops answering is reported to staff, not just to a console", async () => {
+  // This is the one fault nothing downstream can route around: no scan can see
+  // a payment, and the buyer's paste-your-hash fallback reads the same endpoint,
+  // so it fails too. It used to leave the buyer a soothing message, a line in a
+  // console nobody tails, and an admin page that rendered as though all was
+  // well — so the operator found out from a customer who had given up.
+  const env = { ...CHAIN_ENV, SUPPORT_WEBHOOK_URL: "https://hooks.example.test/staff" };
+  const { app, db } = await buildTestApp(env);
+  const chain = { rates: { ETH: "3000" }, latestBlock: 1000, txlist: [], alerts: [] };
+
+  await withChain(chain, async () => {
+    const { client, order } = await openOrder(app, db, env, "outage_reporter");
+
+    chain.down = true;
+    await elapseScanWindow(db);
+    await client.get(`/pay/${order.order_id}/status`);
+
+    const health = JSON.parse(
+      (await db.get("SELECT value FROM settings WHERE key = 'chain_health:eth'")).value
+    );
+    assert.ok(health.error, "what the provider said is written down");
+    assert.ok(health.since > 0, "and when it started going wrong");
+
+    // Pushed, not merely filed: an operator who must already suspect a problem
+    // before going to look will hear it from a customer instead.
+    assert.equal(chain.alerts.length, 1, "staff are told once, without anyone having to look");
+    const embed = chain.alerts[0].embeds[0];
+    assert.ok(embed.title.includes("ETH"), "the alert names the coin");
+    assert.ok(embed.fields.some((f) => f.name === "Coin"),
+      "and is labelled as an outage rather than borrowing the support-ticket headings");
+
+    const admin = makeClient(app, env);
+    await admin.get("/auth/login");
+    await admin.post("/auth/login", { identifier: "admin", password: BASE_ENV.ADMIN_PASSWORD });
+    const html = await (await admin.get("/admin/crypto")).text();
+    assert.ok(html.includes("A chain provider is not answering"),
+      "and the admin panel leads with it, because every other number on the page is stale");
+    assert.equal(chain.alerts.length, 1, "a continuing outage is not an afternoon of pings");
+
+    // Recovery clears it: the record can only ever describe a live problem.
+    chain.down = false;
+    chain.txlist = [ethTx(TX_A, order.expected_units, { confs: 30 })];
+    await elapseScanWindow(db);
+    await client.get(`/pay/${order.order_id}/status`);
+    assert.equal(await db.get("SELECT value FROM settings WHERE key = 'chain_health:eth'"), undefined,
+      "a provider that is answering again is not still reported as broken");
+    assert.equal((await db.get("SELECT tier FROM users WHERE username = 'outage_reporter'")).tier,
+      "paid", "and the payment that was there all along lands");
+  });
+});
+
+test("a buyer who cannot self-serve during an outage is told the truth, and staff get the hash", async () => {
+  const { app, db } = await buildTestApp(CHAIN_ENV);
+  const chain = { rates: { ETH: "3000" }, latestBlock: 1000, txlist: [] };
+
+  await withChain(chain, async () => {
+    const { client, order } = await openOrder(app, db, CHAIN_ENV, "stuck_buyer");
+    chain.down = true;
+
+    await client.post(`/pay/${order.order_id}/tx`, { txid: TX_A });
+
+    const logged = await db.get(
+      "SELECT detail FROM ip_logs WHERE event = 'chain_tx_submitted' ORDER BY id DESC LIMIT 1"
+    );
+    assert.ok(logged.detail.includes(TX_A),
+      "the WHOLE hash is recorded — during an outage this is the only trace that the buyer told us");
+    assert.ok(logged.detail.includes("lookup_failed"), "along with why it could not be checked");
+
+    const page = await (await client.get(`/pay/${order.order_id}`)).text();
+    assert.ok(!page.includes("the automatic check keeps running"),
+      "never promises a check that reads the very provider that just failed");
+    assert.ok(page.includes("fault on our side"),
+      "and says plainly whose problem it is, so the buyer escalates instead of waiting");
+  });
 });
 
 test("admin: unattributed money is surfaced for a decision and can be assigned", async () => {

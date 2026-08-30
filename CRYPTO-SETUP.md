@@ -292,6 +292,22 @@ Two other things worth knowing:
 The money left the buyer's wallet and their order still says waiting. In roughly
 the order it turns out to be the answer:
 
+0. **The chain provider is not answering.** Check **Admin → On-chain** first:
+   if a provider is failing, a red panel at the top of that page says which
+   coin, since when, how many attempts, and what the provider actually said.
+   Staff also get one alert on `SUPPORT_WEBHOOK_URL` when it starts, and hourly
+   while it lasts. This is the one fault nothing routes around — no scan can
+   see a payment, and a buyer pasting their own transaction hash hits the same
+   endpoint, so that fails too. Usually a rate limit on the keyless default;
+   set `ETHERSCAN_API_KEY` or `SOLANA_RPC_URL` (§5) for a higher-limit
+   provider, or `ETH_EXPLORER_URL` to point elsewhere. **Nothing is lost**:
+   money already sent is picked up on the first scan that succeeds, and the
+   panel clears itself as soon as one does.
+
+   The buyer's side of this reads *“We couldn't reach the blockchain network
+   just now — that's a fault on our side.”* If someone quotes that at you, it
+   is this, and their transaction hash is in the audit log under
+   `chain_tx_submitted` whether or not it could be checked.
 1. **It is still confirming.** ETH and ERC-20 USDT need
    `CRYPTO_ETH_CONFIRMATIONS` blocks — 12 by default, about two and a half
    minutes. The pay page shows the count climbing. Solana is read at

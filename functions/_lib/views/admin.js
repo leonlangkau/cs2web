@@ -363,9 +363,34 @@ function payments(ctx, { rows, status, statuses, page: current, pages, total, li
  * So unattributed transfers sit at the top, with the order they most likely
  * belong to one click away.
  */
-function chain(ctx, { config, orders, transfers, status, statuses, page: current, pages, total, scan }) {
+function chain(ctx, { config, orders, transfers, status, statuses, page: current, pages, total, scan, health = [] }) {
   const csrf = `<input type="hidden" name="_csrf" value="${esc(ctx.csrfToken)}">`;
   const canCredit = isStaff(ctx.user);
+  const agoMs = (ms) => (ms ? timeAgo(new Date(Number(ms)).toISOString().replace('T', ' ').slice(0, 19)) : 'never');
+
+  /* A provider that is not answering is the one fault nothing downstream can
+     work around: no scan can see a payment, and the buyer's paste-your-hash
+     fallback reads the same endpoint, so it fails too. It goes at the very top,
+     because every other number on this page is stale while it is true. */
+  const healthPanel = health.length === 0 ? '' : `<div class="panel panel-spaced">
+    <p class="flash flash-error"><strong>A chain provider is not answering.</strong>
+      Payments on ${health.length === 1 ? 'this coin' : 'these coins'} cannot be seen — automatically
+      or by a buyer pasting their transaction hash — until it recovers. Money already sent is safe
+      and will be picked up once it does.</p>
+    <div class="table-wrap"><table>
+      <thead><tr><th>Coin</th><th>Failing since</th><th>Last tried</th><th>Attempts</th><th>What it said</th></tr></thead>
+      <tbody>${map(health, (h) => `<tr>
+        <td><strong>${esc(h.symbol)}</strong> <span class="muted">${esc(h.network)}</span></td>
+        <td>${esc(agoMs(h.since))}</td>
+        <td>${esc(agoMs(h.at))}</td>
+        <td>${esc(h.failures)}</td>
+        <td class="mono detail-cell" title="${esc(h.error)}">${esc(h.error)}</td></tr>`)}</tbody>
+    </table></div>
+    <p class="fineprint">Usually a rate limit or an outage at the explorer. Set
+      <code class="mono">ETHERSCAN_API_KEY</code> or <code class="mono">SOLANA_RPC_URL</code> for a
+      higher-limit provider, or <code class="mono">ETH_EXPLORER_URL</code> to point somewhere else
+      entirely — see CRYPTO-SETUP.md. Nothing is lost in the meantime.</p>
+  </div>`;
 
   const configPanel = `<div class="panel panel-spaced">
     <h3>Receiving addresses</h3>
@@ -452,6 +477,7 @@ function chain(ctx, { config, orders, transfers, status, statuses, page: current
 <div class="section admin-page">
   <div class="container">
     ${head(ctx, 'On-chain payments')}
+    ${healthPanel}
     ${configPanel}
 
     <div class="panel panel-spaced">

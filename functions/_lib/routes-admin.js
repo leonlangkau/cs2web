@@ -8,7 +8,9 @@ import { setSetting, ANNOUNCEMENT_KEY } from "./settings.js";
 import { btcpayConfig } from "./btcpay.js";
 import { verifyAndCredit, sweepOpenPayments } from "./fulfil.js";
 import { grantMembership } from "./membership.js";
-import { onchainConfig, maybeScan, creditOrder, matchTransfer, orderView, isLiveOrder } from "./onchain.js";
+import {
+  onchainConfig, maybeScan, creditOrder, matchTransfer, orderView, isLiveOrder, chainHealth,
+} from "./onchain.js";
 import { requiredConfirmations, explorerLink } from "./chains.js";
 import { fromUnits, parseUnits } from "./units.js";
 import { storePlans, planDuration } from "./plans.js";
@@ -509,6 +511,9 @@ function register(app) {
         scanSecret: Boolean(cfg.scanSecret),
       },
       orders: rows.map((r) => decorateOrder(cfg, r)),
+      // Coins whose provider is currently failing. This is the one fault the
+      // matcher cannot work around, so it is shown above everything else.
+      health: await chainHealth(db, cfg),
       transfers,
       status, statuses: CHAIN_STATUSES,
       page, pages, total,

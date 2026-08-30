@@ -41,6 +41,7 @@ import { getSetting, setSetting } from "./settings.js";
 import { audit } from "./middleware.js";
 import { newToken, randomBytes } from "./crypto.js";
 import { storeCurrency } from "./plans.js";
+import { notifySupport } from "./webhooks.js";
 
 /** How many distinct amounts a single price band is split into. */
 const TAG_SLOTS = 1000;
@@ -532,6 +533,105 @@ const SCAN_AT_KEY = 'chain_scan_at';
  */
 const ASSET_SCAN_AT_KEY = (assetKey) => `chain_scan_at:${assetKey}`;
 
+/**
+ * The last thing a chain provider said when it failed, per coin.
+ *
+ * A provider that is down is the one failure this whole module cannot work
+ * around: no scan can see a payment, and the buyer's paste-your-hash fallback
+ * reads the same endpoint, so it fails too. It is also the failure the operator
+ * was least likely to hear about — the buyer got a soothing message, the error
+ * went to a console nobody tails, and the next page load rendered as though
+ * nothing had ever gone wrong.
+ *
+ * So it is written down: what failed, since when, and how many times running.
+ * Cleared by the first scan that succeeds, so it can only ever describe a
+ * problem that is still happening.
+ */
+const HEALTH_KEY = (assetKey) => `chain_health:${assetKey}`;
+
+/** Read one coin's provider-failure record, or null while it is healthy. */
+async function readHealth(db, assetKey) {
+  try {
+    const parsed = JSON.parse(await getSetting(db, HEALTH_KEY(assetKey)) || 'null');
+    if (!parsed || !parsed.error) return null;
+    return {
+      asset: assetKey,
+      error: String(parsed.error),
+      since: Number(parsed.since) || 0,
+      at: Number(parsed.at) || 0,
+      failures: Number(parsed.failures) || 1,
+      alertedAt: Number(parsed.alertedAt) || 0,
+    };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * How often a continuing provider outage is worth pushing to staff. The admin
+ * panel carries the detail; this is only the tap on the shoulder, and an
+ * outage that lasts all afternoon should not become an afternoon of pings.
+ */
+const PROVIDER_ALERT_EVERY_MS = 3_600_000;
+
+/**
+ * Records that a provider call for `asset` failed, and pushes an alert the
+ * first time and hourly thereafter.
+ *
+ * Keeps the FIRST failure's timestamp, so the admin panel can say how long this
+ * has been going on rather than only that it happened again just now.
+ *
+ * The alert is the point. An operator who has to already suspect something is
+ * wrong before they go and look will find out from a buyer, days later — which
+ * is exactly how a payments outage turns into a refund and a lost customer.
+ */
+async function recordFailure(c, asset, error, now = Date.now()) {
+  const db = c.get('db');
+  const previous = await readHealth(db, asset.key);
+  const due = !previous || !previous.alertedAt || now - previous.alertedAt >= PROVIDER_ALERT_EVERY_MS;
+
+  const record = {
+    error: String(error || 'unknown').slice(0, 160),
+    since: previous ? previous.since || now : now,
+    at: now,
+    failures: previous ? previous.failures + 1 : 1,
+    alertedAt: due ? now : (previous && previous.alertedAt) || 0,
+  };
+  await setSetting(db, HEALTH_KEY(asset.key), JSON.stringify(record)).catch(() => {});
+
+  if (due) {
+    // Best effort and never awaited for correctness: an unreachable Discord
+    // must not turn a payments problem into a failed request as well.
+    await notifySupport(c.get('cfg'), 'chain_provider_down', {
+      ref: `${asset.symbol} · ${asset.network}`,
+      subject: `${asset.symbol} payments cannot be read`,
+      fields: [
+        { name: 'Coin', value: `${asset.symbol} (${asset.network})` },
+        { name: 'Failing since', value: new Date(record.since).toISOString().replace('T', ' ').slice(0, 19) },
+        { name: 'Attempts', value: String(record.failures) },
+        { name: 'Provider said', value: record.error, inline: false },
+      ],
+      note: 'Payments on this coin cannot be seen automatically, and buyers pasting their own '
+        + 'transaction hash will fail too. Money already sent is safe and will be picked up once '
+        + 'the provider recovers. See Admin → On-chain.',
+    }).catch(() => {});
+  }
+  return record;
+}
+
+/** A provider is answering again — forget it ever wasn't. */
+const clearFailure = (db, assetKey) => setSetting(db, HEALTH_KEY(assetKey), '').catch(() => {});
+
+/** Every coin currently failing, for the admin panel. */
+async function chainHealth(db, cfg) {
+  const out = [];
+  for (const asset of cfg.assets) {
+    const record = await readHealth(db, asset.key);
+    if (record) out.push({ ...record, symbol: asset.symbol, network: asset.network });
+  }
+  return out;
+}
+
 async function readCursor(db, assetKey) {
   try {
     const parsed = JSON.parse(await getSetting(db, CURSOR_KEY(assetKey)) || '{}');
@@ -600,11 +700,16 @@ async function scanAsset(c, cfg, asset, { now = Date.now(), source = 'scan' } = 
       result = await fetchIncoming(cfg, asset, { known, limit: MAX_TX_LOOKUPS_PER_SCAN });
     }
   } catch (err) {
-    // A provider that is down must never look like "nothing has been paid".
+    // A provider that is down must never look like "nothing has been paid" —
+    // and must not be invisible either. Written down so the admin panel can say
+    // what is broken and since when, rather than the operator finding out from
+    // a buyer who gave up.
     out.error = String(err && err.message || err).slice(0, 200);
+    out.health = await recordFailure(c, asset, out.error, now);
     console.error(`chain scan failed for ${asset.key}:`, out.error);
     return out;
   }
+  await clearFailure(db, asset.key);
 
   const transfers = result.transfers || [];
   // The provider reports where its own reading got to. Taking the cursor from
@@ -836,9 +941,16 @@ async function submitTransactionRef(c, cfg, order, reference, { now = Date.now()
   try {
     transfer = await fetchTransaction(cfg, asset, ref);
   } catch (err) {
-    console.error('on-chain transaction lookup failed:', err);
-    return { ok: false, reason: 'lookup_failed' };
+    // The buyer just probed the provider on our behalf and it failed. That is
+    // the same outage the scan would hit, so it counts the same way — this is
+    // often the FIRST hard evidence the operator gets, because a buyer who
+    // cannot self-serve is a buyer who is about to write in.
+    const detail = String(err && err.message || err).slice(0, 200);
+    const health = await recordFailure(c, asset, detail);
+    console.error('on-chain transaction lookup failed:', detail);
+    return { ok: false, reason: 'lookup_failed', detail, health };
   }
+  await clearFailure(db, asset.key);
   if (!transfer) return { ok: false, reason: 'not_found' };
 
   const row = await recordTransfer(db, transfer);
@@ -917,6 +1029,7 @@ async function quoteAll(db, env, cfg, plan) {
 
 export {
   onchainConfig, createOrder, RESOLVED_TRANSFER_STATUSES, isLiveOrder, quoteAsset, quoteAll, uniqueExpected, minimumFor,
+  chainHealth, readHealth, recordFailure, clearFailure,
   matchTransfer, creditOrder, scanAsset, maybeScan, reconcileOrder, reconcileForUser,
   submitTransactionRef, recordTransfer, orderView, LIVE_ORDERS_SQL, TAG_SLOTS,
 };

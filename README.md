@@ -44,6 +44,22 @@ Copy `.dev.vars.example` to `.dev.vars` and set `CAPTCHA_SECRET` and
 ## Features
 
 ### Website
+- **Liquid glass throughout.** Every surface — the floating nav capsule, cards,
+  panels, dialogs, tables, buttons, form fields — is one material: a translucent
+  pane over a live field of drifting coloured light, with a specular edge that
+  runs the whole rim, a sheen that tracks the pointer, and gel physics on press.
+  The recipe lives in tokens at the top of `public/css/style.css`, so re-skinning
+  is a token edit rather than a component-by-component rewrite
+- The `backdrop-filter` pass is spent only where refraction is visible: the nav
+  capsule (content scrolls under it), the hero HUD (it floats over the live
+  particle canvas) and the dialog. Measured against rendered pixels, a pane over
+  the ambient field is within 1–5/255 of the same pane with no pass at all — the
+  field is a smooth gradient, and blurring a gradient returns the gradient — so
+  ordinary pages scroll at the same frame times as a page with no blur at all
+- The material degrades on purpose: `prefers-reduced-transparency` and browsers
+  without `backdrop-filter` get opaque panes with identical geometry, and
+  `prefers-reduced-motion` stills the field. Text contrast is verified against
+  rendered pixels, not against the token values, in both themes
 - Animated hero: particle canvas, gradient headline, floating HUD cards, scroll reveals
 - Spinning Star of David brand mark, white + `#0137B7`
 - Download is **members only** — the button is hidden when logged out *and* the

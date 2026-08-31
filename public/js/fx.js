@@ -230,35 +230,70 @@
   }
   });
 
-  /* ---------- SpotlightCard ----------
-     A radial highlight follows the pointer across any .spotlight-card.
-     One delegated listener, coordinates handed to CSS via custom properties. */
+  /* ---------- Specular tracking (SpotlightCard, generalised) ----------
+     Glass gets its "wet" look from a highlight that moves as you move.
+     Every pane on the site takes one: the pointer position is handed to
+     CSS as --spot-x/--spot-y and the pane's ::before film parks a radial
+     smear there. With no pointer the smear rests off the top edge, which
+     is where a fixed overhead light would put it.
+
+     One delegated listener for the whole document, and the closest()
+     walk happens INSIDE the animation frame rather than on every
+     pointermove — the selector list is long, and a mouse can fire it a
+     few hundred times a second. */
+  var GLASS_PANES = [
+    '.spotlight-card', '.lg-pane', '.nav-inner', '.panel', '.feature-card',
+    '.recent-thread', '.category-card', '.thread-row', '.post', '.reply-box',
+    '.auth-card', '.forum-sidebar', '.hud-card', '.download-box', '.faq-item',
+    '.plan-card', '.stat-card', '.support-step', '.csat', '.status-hero',
+    '.status-components', '.incident', '.status-note', '.legal-toc',
+    '.legal-contact', '.legal-summary', '.try-first', '.terms-gate-card',
+    '.code-block', '.empty-state', '.switch-note', '.upgrade-note',
+    '.admin-tabs', '.component-picker', '.pay-details', '.help-card'
+  ].join(',');
+
   safe(function () {
   if (hoverCapable && !reducedMotion) {
     var spotRaf = null;
     var spotPending = null;
+    var lit = null;
+
+    function unlight() {
+      if (!lit) return;
+      lit.classList.remove('spotlight-on');
+      lit.style.removeProperty('--spot-x');
+      lit.style.removeProperty('--spot-y');
+      lit = null;
+    }
+
     document.addEventListener('pointermove', function (e) {
-      var card = e.target && e.target.closest && e.target.closest('.spotlight-card');
-      if (!card) return;
-      spotPending = { card: card, x: e.clientX, y: e.clientY };
+      spotPending = { target: e.target, x: e.clientX, y: e.clientY };
       if (spotRaf) return;
       spotRaf = requestAnimationFrame(function () {
         spotRaf = null;
         var p = spotPending;
+        spotPending = null;
         if (!p) return;
-        var rect = p.card.getBoundingClientRect();
-        p.card.style.setProperty('--spot-x', (p.x - rect.left) + 'px');
-        p.card.style.setProperty('--spot-y', (p.y - rect.top) + 'px');
-        p.card.classList.add('spotlight-on');
+        var pane = p.target && p.target.closest ? p.target.closest(GLASS_PANES) : null;
+        if (pane !== lit) unlight();
+        if (!pane) return;
+        var rect = pane.getBoundingClientRect();
+        pane.style.setProperty('--spot-x', (p.x - rect.left).toFixed(1) + 'px');
+        pane.style.setProperty('--spot-y', (p.y - rect.top).toFixed(1) + 'px');
+        pane.classList.add('spotlight-on');
+        lit = pane;
       });
     }, { passive: true });
-    document.addEventListener('pointerout', function (e) {
-      var card = e.target && e.target.closest && e.target.closest('.spotlight-card');
-      if (card && !(e.relatedTarget && card.contains(e.relatedTarget))) {
-        card.classList.remove('spotlight-on');
-        // Drop any queued update so a pending frame can't re-light the card.
-        spotPending = null;
-      }
+
+    // Pointer left the window (or was cancelled by a gesture): park the
+    // highlight back at rest rather than leaving it stranded mid-pane.
+    document.addEventListener('pointerleave', function () {
+      spotPending = null;
+      unlight();
+    }, { passive: true });
+    document.addEventListener('pointercancel', function () {
+      spotPending = null;
+      unlight();
     }, { passive: true });
   }
   });

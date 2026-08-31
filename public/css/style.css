@@ -48,11 +48,19 @@
       pointer (fx.js feeds --spot-x/--spot-y), swells on hover and
       compresses under a press.
 
-   Shape system — glass wants curvature, so the radii are generous:
-   - controls (inputs, selects, tags) ...... 14px
-   - buttons / pills ....................... fully round
-   - surfaces (cards, panels, dialogs) ..... 24px
-   - hero surfaces (nav capsule, dialogs) .. 30px
+   Shape system — Apple's, near enough. iOS radii are tighter than a
+   glass-first instinct suggests, and they nest concentrically (an inner
+   radius is the outer one minus the gap between them):
+   - fields, cells, tabs, small controls ... 10px  (grouped table cell)
+   - buttons ............................... 12px  (large bordered button)
+   - cards, panels, rows ................... 14px  (alert)
+   - floating panels, sheets, dialogs ...... 20px
+   - badges and pips ....................... capsule / circle
+
+   Value is only half of it: an iOS corner is a CONTINUOUS curve, not a
+   circular arc, which is why the same number reads softer there than in
+   a browser. `corner-shape: squircle` gets that curve — see the block at
+   the end of this file.
    ============================================================ */
 
 :root {
@@ -106,11 +114,11 @@
   --tier-dev-tint: rgba(106, 63, 181, 0.14);
   --announcement-bg: linear-gradient(90deg, var(--accent-deep), var(--accent));
 
-  --radius-ctl: 14px;
-  --radius-card: 24px;
-  --radius-xl: 30px;
+  --radius-ctl: 10px;
+  --radius-btn: 12px;
+  --radius-card: 14px;
+  --radius-xl: 20px;
   --radius-tag: 999px;
-  --radius-pill: 999px;
 
   /* ---- The material ---- */
   /* Blur strengths. Only three surfaces spend a backdrop pass (see "Where
@@ -671,7 +679,7 @@ img, svg { max-width: 100%; }
   isolation: isolate;
   display: inline-flex; align-items: center; justify-content: center; gap: 0.5rem;
   font-family: var(--font-display); font-size: 1rem; font-weight: 500; cursor: pointer;
-  padding: 0.62rem 1.45rem; border-radius: var(--radius-pill);
+  padding: 0.62rem 1.4rem; border-radius: var(--radius-btn);
   border: 1px solid transparent;
   transition: color 0.2s ease, background 0.2s ease, border-color 0.2s ease,
     box-shadow 0.3s cubic-bezier(0.22, 1, 0.36, 1),
@@ -742,9 +750,11 @@ img, svg { max-width: 100%; }
   box-shadow: inset 0 1px 0 var(--glass-ring);
 }
 .btn-warn:hover { background: var(--tint-danger-soft); color: var(--warn); box-shadow: inset 0 1px 0 var(--glass-hi), var(--shadow-sm); }
-.btn-sm { padding: 0.38rem 1rem; font-size: 0.9rem; }
-.btn-xs { padding: 0.18rem 0.7rem; font-size: 0.78rem; }
-.btn-lg { padding: 0.9rem 2rem; font-size: 1.05rem; }
+/* Smaller buttons take a smaller radius rather than a scaled one: a 12px
+   corner on a 26px-tall control reads as a lozenge. */
+.btn-sm { padding: 0.38rem 1rem; font-size: 0.9rem; border-radius: 10px; }
+.btn-xs { padding: 0.2rem 0.7rem; font-size: 0.78rem; border-radius: 8px; }
+.btn-lg { padding: 0.9rem 1.9rem; font-size: 1.05rem; border-radius: 14px; }
 .btn-block { width: 100%; }
 .btn:disabled { opacity: 0.55; cursor: not-allowed; transform: none; box-shadow: none; }
 .btn:disabled::before { opacity: 0.4; }
@@ -841,7 +851,7 @@ img, svg { max-width: 100%; }
    the 2px padding is the "thickness" the moving glow shines through. */
 .star-border {
   position: relative; display: inline-block;
-  border-radius: calc(var(--radius-ctl) + 2px);
+  border-radius: calc(var(--radius-btn) + 2px);
   padding: 2px; overflow: hidden; vertical-align: middle;
   background: var(--accent-soft);
 }
@@ -899,7 +909,7 @@ img, svg { max-width: 100%; }
 .nav-links a {
   position: relative;
   color: var(--muted); font-family: var(--font-display); font-weight: 500; font-size: 0.95rem;
-  padding: 0.32rem 0.85rem; border-radius: var(--radius-pill);
+  padding: 0.32rem 0.8rem; border-radius: var(--radius-ctl);
   border: 1px solid transparent;
   transition: color 0.18s ease, background 0.18s ease, box-shadow 0.24s ease;
 }
@@ -1606,7 +1616,7 @@ textarea { resize: vertical; min-height: 90px; }
 .pagination { display: flex; gap: 0.4rem; margin-top: 1.6rem; flex-wrap: wrap; }
 .pagination .page {
   display: inline-flex; min-width: 2.3rem; height: 2.3rem; align-items: center; justify-content: center;
-  padding: 0 0.6rem; border-radius: var(--radius-pill); border: 1px solid var(--border);
+  padding: 0 0.6rem; border-radius: var(--radius-ctl); border: 1px solid var(--border);
   color: var(--muted); font-weight: 600; background: var(--panel);
   transition: color 0.18s ease, border-color 0.18s ease, box-shadow 0.24s ease, transform 0.24s ease;
 }
@@ -1694,12 +1704,14 @@ textarea { resize: vertical; min-height: 90px; }
    pill (the shadcn-craft tabs pattern) */
 .admin-tabs {
   display: inline-flex; gap: 3px; margin-bottom: 1.8rem; flex-wrap: wrap;
-  background: var(--panel-2); border-radius: var(--radius-pill); padding: 4px;
+  background: var(--panel-2); border-radius: var(--radius-ctl); padding: 3px;
   box-shadow: inset 0 2px 6px -2px rgba(10, 20, 48, 0.16), inset 0 -1px 0 var(--glass-ring);
 }
 .admin-tabs a {
-  padding: 0.45rem 1.15rem; color: var(--muted); font-family: var(--font-display); font-weight: 500;
-  border-radius: var(--radius-pill); border: 1px solid transparent;
+  padding: 0.45rem 1.1rem; color: var(--muted); font-family: var(--font-display); font-weight: 500;
+  /* Concentric with the 3px well around it, the way UISegmentedControl
+     nests 7pt inside 9pt. */
+  border-radius: 7px; border: 1px solid transparent;
   transition: color 0.18s ease, background 0.18s ease, box-shadow 0.24s ease;
 }
 .admin-tabs a:hover { color: var(--text); }
@@ -2242,7 +2254,7 @@ tbody tr.row-banned:hover td { background: var(--tint-danger); }
   gap: .4rem;
   padding: .3rem .7rem;
   border: 1px solid var(--border);
-  border-radius: var(--radius-pill);
+  border-radius: var(--radius-ctl);
   background: var(--panel-2);
   font-size: .82rem;
   color: var(--text);
@@ -2626,6 +2638,42 @@ tbody tr.row-banned:hover td { background: var(--tint-danger); }
 .csat-star:focus-within { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
 .ai-consent { margin: .2rem 0 .4rem; }
 .ticket-subject { font-weight: 600; }
+
+/* ============================================================
+   CONTINUOUS CORNERS
+   ------------------------------------------------------------
+   An iOS corner is not a quarter-circle. It is a superellipse: the
+   curvature ramps in and out instead of starting abruptly where the
+   straight edge ends, which is why 14pt on iOS reads softer and less
+   "bubbly" than 14px in a browser. `corner-shape: squircle` is exactly
+   that curve — superellipse(4) — and it is the half of "iOS radius"
+   that no amount of tuning the number can substitute for.
+
+   Applied to everything: on an element with no border-radius a squircle
+   corner of zero is still a square corner, so this is a no-op except
+   where a radius is actually set.
+
+   The exceptions are the shapes that are meant to be true arcs. A
+   circle put through a superellipse stops being a circle, so avatars,
+   pips, spinners and capsule badges opt back out.
+   ============================================================ */
+@supports (corner-shape: squircle) {
+  * { corner-shape: squircle; }
+
+  .avatar,
+  .theme-toggle,
+  .tag,
+  .uid-badge,
+  .support-step-n,
+  .beacon-dot,
+  .beacon-ring,
+  .pay-spinner,
+  .incident-update::before,
+  .star-border::after,
+  .hero-aurora::before,
+  .hero-aurora::after,
+  .hero-aurora .aurora-blob { corner-shape: round; }
+}
 
 /* ============================================================
    MATERIAL FALLBACKS

@@ -44,14 +44,18 @@ Copy `.dev.vars.example` to `.dev.vars` and set `CAPTCHA_SECRET` and
 ## Features
 
 ### Website
-- **Liquid glass throughout.** Every surface — the floating nav capsule, cards,
+- **Liquid glass throughout.** Every surface — the floating nav bar, cards,
   panels, dialogs, tables, buttons, form fields — is one material: a translucent
   pane over a live field of drifting coloured light, with a specular edge that
   runs the whole rim, a sheen that tracks the pointer, and gel physics on press.
   The recipe lives in tokens at the top of `public/css/style.css`, so re-skinning
   is a token edit rather than a component-by-component rewrite
+- Shapes follow Apple's scale — 10px fields, 12px buttons, 14px cards, 20px
+  floating panels, nesting concentrically — and take a **continuous** corner via
+  `corner-shape: squircle` where it is supported, which is the half of "iOS
+  radius" that no amount of tuning the number can substitute for
 - The `backdrop-filter` pass is spent only where refraction is visible: the nav
-  capsule (content scrolls under it), the hero HUD (it floats over the live
+  bar (content scrolls under it), the hero HUD (it floats over the live
   particle canvas) and the dialog. Measured against rendered pixels, a pane over
   the ambient field is within 1–5/255 of the same pane with no pass at all — the
   field is a smooth gradient, and blurring a gradient returns the gradient — so

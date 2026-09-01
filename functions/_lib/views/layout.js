@@ -127,6 +127,7 @@ function page(ctx, { title, body, bodyClass = '', scripts = [] } = {}) {
 </head>
 <body class="${esc(bodyClass)}">
 <a class="skip-link" href="#main">Skip to content</a>
+<canvas id="rain-canvas" aria-hidden="true"></canvas>
 ${nav(ctx)}
 ${announcement}
 ${flash}

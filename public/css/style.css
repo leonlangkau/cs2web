@@ -185,6 +185,14 @@
   --fx-aurora-a: #a8c0f2;
   --fx-aurora-b: #7fa4f0;
   --aurora-opacity: 0.55;
+  /* Kill-feed rain. Ink-dark on light so the marks read as a watermark
+     rather than as glowing type, and faint enough that body copy sitting
+     over them keeps its contrast. */
+  --fx-rain: #2b3f68;
+  --fx-rain-head: #0137b7;
+  --fx-rain-hot: #8d2f36;
+  --fx-rain-hot-head: #c3352f;
+  --rain-opacity: 0.2;
   --spot-color: rgba(1, 55, 183, 0.09);
   --glass: rgba(255, 255, 255, 0.55);
 
@@ -267,6 +275,11 @@
   --fx-aurora-a: #1d3fa8;
   --fx-aurora-b: #5c8cff;
   --aurora-opacity: 0.85;
+  --fx-rain: #4f7ae8;
+  --fx-rain-head: #dbe7ff;
+  --fx-rain-hot: #ff6b7a;
+  --fx-rain-hot-head: #ffd8d2;
+  --rain-opacity: 0.3;
   --spot-color: rgba(140, 175, 255, 0.12);
   --glass: rgba(8, 13, 30, 0.66);
   --band: rgba(4, 7, 16, 0.42);
@@ -332,6 +345,11 @@
     --fx-aurora-a: #1d3fa8;
     --fx-aurora-b: #5c8cff;
     --aurora-opacity: 0.85;
+    --fx-rain: #4f7ae8;
+    --fx-rain-head: #dbe7ff;
+    --fx-rain-hot: #ff6b7a;
+    --fx-rain-hot-head: #ffd8d2;
+    --rain-opacity: 0.3;
     --spot-color: rgba(140, 175, 255, 0.12);
     --glass: rgba(8, 13, 30, 0.66);
     --band: rgba(4, 7, 16, 0.42);
@@ -383,6 +401,21 @@ body::before {
   opacity: var(--field-opacity);
   animation: lg-drift 46s ease-in-out infinite alternate;
   will-change: transform;
+}
+
+/* Kill-feed rain — a matrix-style fall of CS2 marks (crosshairs, headshots,
+   flashbangs, grenades, rounds) drawn by fx.js. It shares the z-index:-1 band
+   with the ambient field, and painting order inside that band is tree order:
+   body::before (the field) first, then this canvas, then body::after (the
+   grain) over the top. Empty and invisible without JS. */
+#rain-canvas {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  z-index: -1;
+  pointer-events: none;
+  opacity: var(--rain-opacity);
 }
 
 /* Grain. A perfectly smooth gradient reads as a screen; a grained one
@@ -2706,6 +2739,7 @@ tbody tr.row-banned:hover td { background: var(--tint-danger); }
     --band: #eef2fb;
     --field-opacity: 0.35;
     --grain-opacity: 0;
+    --rain-opacity: 0.07;
   }
   :root[data-theme="dark"] {
     --panel: #101728;
@@ -2713,6 +2747,7 @@ tbody tr.row-banned:hover td { background: var(--tint-danger); }
     --glass: #0d1424;
     --band: #080d18;
     --field-opacity: 0.3;
+    --rain-opacity: 0.16;
   }
   @media (prefers-color-scheme: dark) {
     :root:not([data-theme="light"]):not([data-theme="dark"]) {
@@ -2721,6 +2756,7 @@ tbody tr.row-banned:hover td { background: var(--tint-danger); }
       --glass: #0d1424;
       --band: #080d18;
       --field-opacity: 0.3;
+      --rain-opacity: 0.16;
     }
   }
   /* The one place !important earns its keep: the request is "no see-through

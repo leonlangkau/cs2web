@@ -27,7 +27,7 @@ import {
 import { keccak256Hex } from "../functions/_lib/keccak.js";
 import { toUnits, fromUnits, fiatToUnits, ceilTo } from "../functions/_lib/units.js";
 import { qrMatrix, qrSvg } from "../functions/_lib/qr.js";
-import { onchainConfig } from "../functions/_lib/onchain.js";
+import { onchainConfig, paymentFloor } from "../functions/_lib/onchain.js";
 
 /* Real addresses in shape only — these are the well-known EIP-55 test vectors
    and the USDT mint, never anyone's actual wallet. */
@@ -315,9 +315,14 @@ test("checkout quotes the plan in the coin, and gives every live order its own a
     assert.notEqual(a.order.expected_units, b.order.expected_units,
       "two live orders never share an amount — that uniqueness IS the attribution");
 
-    // The tolerance floor is derived here, never sent by the client.
-    assert.ok(BigInt(a.order.min_units) < BigInt(a.order.expected_units));
-    assert.ok(BigInt(a.order.min_units) >= (BigInt(a.order.expected_units) * 99n) / 100n);
+    // The floor is derived here, never sent by the client: the quote less the
+    // wider of the 1% tolerance and the coin's withdrawal-fee allowance (0.001
+    // ETH by default — far wider than 1% on a $10 quote), never below half.
+    const expectedA = BigInt(a.order.expected_units);
+    assert.ok(BigInt(a.order.min_units) < expectedA);
+    assert.equal(BigInt(a.order.min_units), expectedA - 1000000000000000n,
+      "the fee allowance sets the floor when it is wider than the percentage");
+    assert.ok(BigInt(a.order.min_units) >= expectedA / 2n);
   });
 });
 
@@ -496,13 +501,13 @@ test("an underpayment inside tolerance credits; well under it does not", async (
     const { client, order } = await openOrder(app, db, CHAIN_ENV, "short_buyer");
     const expected = BigInt(order.expected_units);
 
-    // 10% short — far below the 1% floor.
-    chain.txlist = [ethTx(TX_A, (expected * 90n) / 100n, { confs: 30 })];
+    // 40% short — more than any withdrawal fee, and past the 0.001 ETH allowance.
+    chain.txlist = [ethTx(TX_A, (expected * 60n) / 100n, { confs: 30 })];
     await elapseScanWindow(db);
     await client.get(`/pay/${order.order_id}/status`);
 
     assert.equal((await db.get("SELECT tier FROM users WHERE username = 'short_buyer'")).tier, "user",
-      "a 10% underpayment does not buy a membership");
+      "a 40% underpayment does not buy a membership");
     assert.equal((await db.get("SELECT status FROM chain_transfers ORDER BY id DESC LIMIT 1")).status,
       "unmatched", "but the money is on record for staff");
 
@@ -513,6 +518,161 @@ test("an underpayment inside tolerance credits; well under it does not", async (
 
     assert.equal((await db.get("SELECT tier FROM users WHERE username = 'short_buyer'")).tier, "paid",
       "0.5% short is within tolerance and credits");
+  });
+});
+
+test("an exchange's withdrawal fee comes out of the amount, and the payment still credits", async () => {
+  // The common case that used to park in the admin queue: the buyer withdraws
+  // exactly the quoted figure from an exchange, which takes its fee OUT of it.
+  const { app, db } = await buildTestApp(CHAIN_ENV);
+  const chain = { rates: { ETH: "3000" }, latestBlock: 1000, txlist: [] };
+
+  await withChain(chain, async () => {
+    const { client, order } = await openOrder(app, db, CHAIN_ENV, "exchange_buyer");
+    const expected = BigInt(order.expected_units);
+    const FEE = 5n * 10n ** 14n; // 0.0005 ETH — about 15% of a $10 quote
+    chain.txlist = [ethTx(TX_A, expected - FEE, { confs: 30 })];
+    await elapseScanWindow(db);
+    const status = await (await client.get(`/pay/${order.order_id}/status`)).json();
+
+    assert.equal((await db.get("SELECT tier FROM users WHERE username = 'exchange_buyer'")).tier, "paid",
+      "a fee-sized shortfall is allowed for");
+    assert.equal(status.credited, true);
+    assert.equal(status.received, fromUnits(expected - FEE, 18), "and the page shows what actually arrived");
+    assert.ok(status.shortfall, "including that it was short");
+    const granted = await db.get(
+      "SELECT detail FROM ip_logs WHERE event = 'membership_granted' ORDER BY id DESC LIMIT 1");
+    assert.ok(/short by 0\.0005/.test(granted.detail), "the shortfall is written to the audit log");
+  });
+});
+
+test("a fee-shaved payment lands on its own order, not on another buyer's opened at the same time", async () => {
+  // Two people buy the same plan within a minute; their quotes differ only in
+  // the last three digits. One pays through an exchange that takes 0.0005 ETH
+  // off the top. That payment is now about equally far from BOTH quotes — but
+  // a round fee leaves the last digits intact, and those name exactly one order.
+  const { app, db } = await buildTestApp(CHAIN_ENV);
+  const chain = { rates: { ETH: "3000" }, latestBlock: 1000, txlist: [] };
+
+  await withChain(chain, async () => {
+    const a = await openOrder(app, db, CHAIN_ENV, "fee_a");
+    const b = await openOrder(app, db, CHAIN_ENV, "fee_b");
+    const STEP = 10n ** 10n;
+    const band = ceilTo(fiatToUnits("10.00", "3000", 18), STEP * 1000n);
+    const aAmount = band + STEP * 100n;
+    const bAmount = band + STEP * 160n;
+    await setQuote(db, a.order.id, aAmount);
+    await setQuote(db, b.order.id, bAmount);
+
+    const FEE = 5n * 10n ** 14n;
+    const paid = bAmount - FEE;
+    // Sanity: "nearest" really would pick the wrong order here.
+    assert.ok(aAmount - paid < bAmount - paid, "the shaved amount is nearer A's quote than B's");
+
+    chain.txlist = [ethTx(TX_A, paid, { confs: 30 })];
+    await elapseScanWindow(db);
+    await a.client.get(`/pay/${a.order.order_id}/status`);
+
+    assert.equal((await db.get("SELECT tier FROM users WHERE username = 'fee_b'")).tier, "paid",
+      "B, whose last digits the payment carries, is credited");
+    assert.equal((await db.get("SELECT tier FROM users WHERE username = 'fee_a'")).tier, "user",
+      "A, whose quote merely happens to be nearer, is not");
+    const transfer = await db.get("SELECT * FROM chain_transfers WHERE tx_hash = ?", TX_A);
+    assert.equal(transfer.status, "credited");
+    assert.equal(transfer.order_id, b.order.order_id);
+  });
+});
+
+test("a fee that wipes the last digits, with two orders open, goes to a human — offered to the buyer who claimed it", async () => {
+  const { app, db } = await buildTestApp(CHAIN_ENV);
+  const chain = { rates: { ETH: "3000" }, latestBlock: 1000, txlist: [], receipts: {}, txs: {} };
+
+  await withChain(chain, async () => {
+    const a = await openOrder(app, db, CHAIN_ENV, "odd_a");
+    const b = await openOrder(app, db, CHAIN_ENV, "odd_b");
+    const STEP = 10n ** 10n;
+    const band = ceilTo(fiatToUnits("10.00", "3000", 18), STEP * 1000n);
+    const aAmount = band + STEP * 100n;
+    const bAmount = band + STEP * 160n;
+    await setQuote(db, a.order.id, aAmount);
+    await setQuote(db, b.order.id, bAmount);
+
+    // 0.00049999 ETH: not a round fee, so the discriminator is gone.
+    const ODD_FEE = 499990000000000n;
+    const paid = bAmount - ODD_FEE;
+    chain.txlist = [ethTx(TX_A, paid, { confs: 30 })];
+    await elapseScanWindow(db);
+    await b.client.get(`/pay/${b.order.order_id}/status`);
+
+    for (const name of ["odd_a", "odd_b"]) {
+      assert.equal((await db.get("SELECT tier FROM users WHERE username = ?", name)).tier, "user",
+        `${name} is not upgraded on a coin toss`);
+    }
+    let transfer = await db.get("SELECT * FROM chain_transfers WHERE tx_hash = ?", TX_A);
+    assert.equal(transfer.status, "ambiguous");
+    assert.equal(transfer.claimed_order_id, null, "nobody has claimed it yet");
+
+    // B pastes the transaction on their own pay page. That is a hint, not
+    // evidence — the verdict stands — but the claim is kept for staff.
+    chain.receipts[TX_A] = { status: "0x1", blockNumber: "0x3d5", logs: [] };
+    chain.txs[TX_A] = { to: ETH_ADDRESS, value: `0x${paid.toString(16)}` };
+    const res = await b.client.post(`/pay/${b.order.order_id}/tx`, { txid: TX_A });
+    assert.equal(res.status, 302);
+    assert.equal((await db.get("SELECT tier FROM users WHERE username = 'odd_b'")).tier, "user",
+      "a claim alone grants nothing");
+    transfer = await db.get("SELECT * FROM chain_transfers WHERE tx_hash = ?", TX_A);
+    assert.equal(transfer.status, "ambiguous");
+    assert.equal(transfer.claimed_order_id, b.order.order_id, "but it is recorded");
+
+    // In the admin queue the claimed order is named and preselected.
+    const admin = makeClient(app, CHAIN_ENV);
+    await admin.get("/auth/login");
+    await admin.post("/auth/login", { identifier: "admin", password: BASE_ENV.ADMIN_PASSWORD });
+    const html = await (await admin.get("/admin/crypto")).text();
+    assert.ok(html.includes(`value="${b.order.order_id}" selected`), "the claimant's order is preselected");
+    assert.ok(html.includes("claimed by buyer"), "and labelled as claimed");
+    assert.ok(html.includes("Claimed by <strong>odd_b</strong>"), "with the claimant named on the row");
+
+    await admin.post(`/admin/crypto/transfers/${transfer.id}/assign`, { order: b.order.order_id });
+    assert.equal((await db.get("SELECT tier FROM users WHERE username = 'odd_b'")).tier, "paid",
+      "one click credits it");
+  });
+});
+
+test("staff re-checking the chains re-runs matching over payments that were held", async () => {
+  // A payment parked under narrower rules (simulated by parking it directly)
+  // must credit once the rules are widened, without staff assigning it by hand.
+  const { app, db } = await buildTestApp(CHAIN_ENV);
+  const chain = { rates: { ETH: "3000" }, latestBlock: 1000, txlist: [] };
+
+  await withChain(chain, async () => {
+    const { client, order } = await openOrder(app, db, CHAIN_ENV, "held_buyer");
+    const paid = BigInt(order.expected_units) - 5n * 10n ** 14n;
+    await db.run(
+      `INSERT INTO chain_transfers (asset, tx_hash, address, units, block, block_time, confirmations, status, note)
+       VALUES ('eth', ?, ?, ?, 981, ?, 30, 'unmatched', 'no order was quoted this amount')`,
+      TX_A, ETH_ADDRESS, String(paid), nowSeconds()
+    );
+
+    // The ordinary scan leaves a held row exactly where it is.
+    chain.txlist = [ethTx(TX_A, paid, { confs: 30 })];
+    await elapseScanWindow(db);
+    await client.get(`/pay/${order.order_id}/status`);
+    assert.equal((await db.get("SELECT status FROM chain_transfers WHERE tx_hash = ?", TX_A)).status,
+      "unmatched", "a scan never reopens a held verdict on its own");
+    assert.equal((await db.get("SELECT tier FROM users WHERE username = 'held_buyer'")).tier, "user");
+
+    // Staff's "scan now" does.
+    const admin = makeClient(app, CHAIN_ENV);
+    await admin.get("/auth/login");
+    await admin.post("/auth/login", { identifier: "admin", password: BASE_ENV.ADMIN_PASSWORD });
+    await admin.post("/admin/crypto/scan", {});
+    assert.equal((await db.get("SELECT tier FROM users WHERE username = 'held_buyer'")).tier, "paid",
+      "the held payment credits under today's rules");
+    assert.equal((await db.get("SELECT status FROM chain_transfers WHERE tx_hash = ?", TX_A)).status,
+      "credited");
+    const html = await (await admin.get("/admin/crypto")).text();
+    assert.ok(html.includes("1 held payment re-checked, 1 credited"), "and staff are told");
   });
 });
 
@@ -1142,4 +1302,35 @@ test("payment settings come from env, with safe defaults", () => {
   const junk = onchainConfig({ ETH_ADDRESS, CRYPTO_ETH_CONFIRMATIONS: "-5", CRYPTO_UNDERPAY_TOLERANCE_PCT: "999" });
   assert.ok(junk.eth.confirmations >= 1, "confirmations never drop below one");
   assert.ok(junk.toleranceBp <= 2000, "tolerance is capped at 20%");
+
+  // The withdrawal-fee allowance, per coin, in base units.
+  assert.equal(d.feeAllowance.eth, 1000000000000000n, "0.001 ETH by default");
+  assert.equal(d.feeAllowance["usdt-erc20"], 5000000n, "5 USDT on Ethereum, where the fee is gas");
+  assert.equal(d.feeAllowance.sol, 10000000n, "0.01 SOL");
+  assert.equal(d.feeAllowance["usdt-spl"], 2000000n, "2 USDT on Solana");
+  assert.equal(d.feeShareBp, 5000, "and it may cover at most half a quote");
+
+  const fees = onchainConfig({
+    ETH_ADDRESS, SOL_ADDRESS,
+    CRYPTO_FEE_ALLOWANCE: "eth:0.0005, SOL:junk ,doge:1,usdt-spl:1.5",
+    CRYPTO_FEE_ALLOWANCE_MAX_PCT: "25",
+  });
+  assert.equal(fees.feeAllowance.eth, 500000000000000n, "a coin can be overridden");
+  assert.equal(fees.feeAllowance.sol, 10000000n, "an entry that does not parse keeps its default, not zero");
+  assert.equal(fees.feeAllowance["usdt-spl"], 1500000n);
+  assert.equal(fees.feeShareBp, 2500);
+
+  // And what they add up to: the floor is the quote less the WIDER allowance,
+  // with the fee capped at its share of the quote.
+  const eth = fees.byKey.eth;
+  const tenDollars = 3333333333333334n;
+  assert.equal(paymentFloor(fees, eth, tenDollars), tenDollars - 500000000000000n,
+    "the fee sets the floor when it is wider than the percentage");
+  assert.equal(paymentFloor(fees, eth, 1000000000000000n), 750000000000000n,
+    "but never more than the cap: 25% of a 0.001 ETH quote");
+  assert.equal(paymentFloor(fees, eth, 1000000000000000000n), 990000000000000000n,
+    "on a big quote the 1% is wider than the fee, and applies instead");
+  const off = onchainConfig({ ETH_ADDRESS, CRYPTO_FEE_ALLOWANCE_MAX_PCT: "0" });
+  assert.equal(paymentFloor(off, off.byKey.eth, tenDollars), tenDollars - tenDollars / 100n,
+    "with the allowance switched off the percentage is all there is");
 });

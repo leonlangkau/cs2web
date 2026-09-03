@@ -371,12 +371,13 @@ function chain(ctx, { config, orders, transfers, status, statuses, page: current
     <h3>Receiving addresses</h3>
     ${config.assets.length > 0
       ? `<div class="table-wrap"><table>
-          <thead><tr><th>Coin</th><th>Network</th><th>Address</th><th>Confirmations</th></tr></thead>
+          <thead><tr><th>Coin</th><th>Network</th><th>Address</th><th>Confirmations</th><th>Fee allowance</th></tr></thead>
           <tbody>${map(config.assets, (a) => `<tr>
             <td><strong>${esc(a.symbol)}</strong></td>
             <td class="muted">${esc(a.network)}</td>
             <td class="mono detail-cell" title="${esc(a.address)}">${esc(a.address)}</td>
-            <td>${esc(a.confirmations)}</td></tr>`)}</tbody>
+            <td>${esc(a.confirmations)}</td>
+            <td class="nowrap">${esc(a.feeAllowance)} ${esc(a.symbol)}</td></tr>`)}</tbody>
         </table></div>`
       : `<p class="muted">No receiving addresses are configured, so no coins are on sale.
           Set the <code class="mono">ETH_ADDRESS</code> and <code class="mono">SOL_ADDRESS</code>
@@ -386,7 +387,9 @@ function chain(ctx, { config, orders, transfers, status, statuses, page: current
           `<span class="mono">${esc(i.key)}</span> — ${esc(i.reason)}. `)}
           These coins are <strong>not</strong> offered until the secret is corrected.</p>`
       : ''}
-    <p class="fineprint">Underpayment tolerance ${esc(config.tolerancePct)}% ·
+    <p class="fineprint">Underpayment tolerance ${esc(config.tolerancePct)}%, or the fee allowance
+      above when that is wider (an exchange takes its withdrawal fee out of what it sends), capped at
+      ${esc(config.feeSharePct)}% of the quote ·
       quote held ${esc(config.payWindowMinutes)} min ·
       late payments matched for ${esc(config.matchHours)}h ·
       scan no more than every ${esc(config.scanIntervalSeconds)}s.
@@ -436,12 +439,13 @@ function chain(ctx, { config, orders, transfers, status, statuses, page: current
       ? `<a href="${esc(t.explorer)}" rel="noopener nofollow" target="_blank">${esc(String(t.tx_hash).slice(0, 16))}…</a>`
       : esc(String(t.tx_hash).slice(0, 16))}</td>
     <td><span class="tag tag-pay tag-pay-${esc(t.status)}">${esc(t.status)}</span>
-      ${t.note ? `<div class="muted">${esc(t.note)}</div>` : ''}</td>
+      ${t.note ? `<div class="muted">${esc(t.note)}</div>` : ''}
+      ${t.claimedBy ? `<div class="muted">Claimed by <strong>${esc(t.claimedBy)}</strong> from their pay page</div>` : ''}</td>
     <td class="muted nowrap">${esc(timeAgo(t.created_at))}</td>
     <td class="actions-cell">
       ${canCredit && t.candidates.length > 0 ? `<form method="post" action="/admin/crypto/transfers/${esc(t.id)}/assign" class="inline-form">${csrf}
         <select name="order" aria-label="Credit this payment to">
-          ${map(t.candidates, (o) => `<option value="${esc(o.order_id)}">${esc(o.username)} — ${esc(o.expectedAmount)} ${esc(o.symbol)} (${esc(o.plan_name || 'membership')})${o.closed ? ' · closed' : ''}</option>`)}
+          ${map(t.candidates, (o) => `<option value="${esc(o.order_id)}"${o.claimed ? ' selected' : ''}>${esc(o.username)} — ${esc(o.expectedAmount)} ${esc(o.symbol)} (${esc(o.plan_name || 'membership')})${o.claimed ? ' · claimed by buyer' : ''}${o.closed ? ' · closed' : ''}</option>`)}
         </select>
         <button class="btn btn-warn btn-xs" type="submit">Credit to</button></form>` : ''}
       ${t.status !== 'ignored' ? `<form method="post" action="/admin/crypto/transfers/${esc(t.id)}/ignore" class="inline-form">${csrf}

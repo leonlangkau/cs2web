@@ -212,11 +212,15 @@ function register(app) {
     } else if (reason === 'already') {
       setFlash(c, 'success', 'That payment has already been credited.');
     } else if (reason === 'ambiguous') {
-      setFlash(c, 'error', 'We found that payment but it doesn’t match one specific order, so a '
-        + 'human needs to look at it. Nothing is lost — contact us and we’ll sort it out.');
+      setFlash(c, 'error', 'We found that payment, but the amount could belong to more than one '
+        + 'order, so a person needs to look at it. We’ve noted that you say it’s yours — nothing is '
+        + 'lost, and staff can credit it in one click. Contact us if it isn’t sorted within a day.');
+    } else if (reason === 'ignored') {
+      setFlash(c, 'error', 'That transaction has already been reviewed by staff and set aside. '
+        + 'If you believe it paid for this order, please contact us.');
     } else {
       setFlash(c, 'error', 'We found that transaction, but the amount doesn’t match this order. '
-        + 'It has been recorded and staff can credit it manually.');
+        + 'It has been recorded with your claim on it, and staff can credit it manually.');
     }
     return c.redirect(`/pay/${order.order_id}`, 302);
   });

@@ -156,8 +156,10 @@ function payPage(ctx, { order }) {
       <p class="fineprint">The amount is unique to this order — it is how we know the payment is
         yours, so please send it exactly. A little over or under is fine; anything further out is
         held for a person to check rather than applied to the wrong account, so it may take a
-        little longer. Network fees are paid by your wallet on top of this amount, not deducted
-        from it.</p>
+        little longer. From your own wallet the network fee is paid on top and nothing is deducted.
+        <strong>Sending from an exchange?</strong> Its withdrawal fee usually comes <em>out</em> of
+        what arrives. A normal fee is allowed for and still credits — but if the form lets you, add
+        the fee on top so the full amount lands.</p>
     </div>
 
     ${submitTx}

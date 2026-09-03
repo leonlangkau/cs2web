@@ -174,7 +174,9 @@ Add to `wrangler.toml` under `[vars]`:
 | `CRYPTO_ASSETS` | all configured | Allowlist, e.g. `"eth,sol"` — offer fewer coins than your addresses cover |
 | `CRYPTO_ETH_CONFIRMATIONS` | `12` | Blocks before ETH/USDT-ERC20 money counts (~2.5 min). Lower is faster and less safe |
 | `CRYPTO_SOL_CONFIRMATIONS` | `1` | Solana is read at `finalized`, which is already irreversible |
-| `CRYPTO_UNDERPAY_TOLERANCE_PCT` | `1` | How far under the quote still counts as paid — covers exchange withdrawal rounding. Capped at 20%. Raising it widens what is accepted without making misattribution more likely, since a payment still has to be clearly nearest to one quote |
+| `CRYPTO_UNDERPAY_TOLERANCE_PCT` | `1` | How far under the quote still counts as paid — covers rounding and rate drift. Capped at 20%. Raising it widens what is accepted without making misattribution more likely, since a payment still has to be clearly nearest to one quote |
+| `CRYPTO_FEE_ALLOWANCE` | `eth:0.001,usdt-erc20:5,sol:0.01,usdt-spl:2` | The withdrawal fee an exchange may have taken **out** of a payment before it stops counting as paid in full, per coin and in the coin. Whichever of this and the percentage is wider applies. Override any coin: `"eth:0.0005,usdt-erc20:3"`; an entry that doesn't parse keeps its default |
+| `CRYPTO_FEE_ALLOWANCE_MAX_PCT` | `50` | The most of a quote the fee allowance may cover (at most `90`), so a fee worth more than the cheapest plan can never make dust count as payment. `0` switches the allowance off and leaves only the percentage |
 | `CRYPTO_OVERPAY_TOLERANCE_PCT` | `100` | How far over still reads as this order's payment. Beyond it (a misplaced decimal point, say) a person decides, rather than fifty times the price silently buying one month |
 | `CRYPTO_PAY_WINDOW_MINUTES` | `60` | How long a quote is honoured |
 | `CRYPTO_MATCH_HOURS` | `48` | How long a **late** payment is still matched back to its order |
@@ -185,24 +187,63 @@ Add to `wrangler.toml` under `[vars]`:
 
 ### How much slack to allow
 
-`CRYPTO_UNDERPAY_TOLERANCE_PCT` (default `1`) and `CRYPTO_OVERPAY_TOLERANCE_PCT`
-(default `100`) set the window around a quote in which a payment still counts.
-On a $10 plan the defaults accept anything from $9.90 to $20.
+Three settings decide the window around a quote in which a payment still counts.
 
-Widening the window is cheap. It does **not** make it likelier that money lands
-on the wrong account, because the window only decides what is *considered* — the
-payment is then attributed to whichever quote it is nearest, by a clear margin
-or not at all. What widening actually buys is fewer trips to the admin queue
-when a buyer's exchange rounds aggressively:
+**Below the quote**, a payment may fall short by the *wider* of two allowances:
+
+- `CRYPTO_UNDERPAY_TOLERANCE_PCT` (default `1`) — a percentage, for rounding
+  and rate drift.
+- `CRYPTO_FEE_ALLOWANCE` (default `eth:0.001,usdt-erc20:5,sol:0.01,usdt-spl:2`)
+  — a fixed amount per coin, for the **withdrawal fee an exchange takes out of
+  what it sends**. This is the one that matters. A buyer who withdraws exactly
+  the quoted figure from Binance, Coinbase or Kraken arrives a fee short — a
+  few tenths of a milli-ETH, a few USDT on Ethereum, a hundredth of a SOL — and
+  on a $3 or $10 plan that is far more than any sane percentage. Without it,
+  every exchange payment landed in the admin queue.
+
+  The allowance is capped at `CRYPTO_FEE_ALLOWANCE_MAX_PCT` (default `50`) of
+  the quote, so a fee worth more than the cheapest plan can never make dust
+  count as payment in full. Set it to `0` to switch the allowance off.
+
+**Above the quote**, `CRYPTO_OVERPAY_TOLERANCE_PCT` (default `100`) says how far
+over still reads as this order's payment.
+
+On a $10 plan paid in ETH the defaults accept roughly $7 to $20; paid in USDT
+on Ethereum, $5 to $20. Widening the window does **not** make it likelier that
+money lands on the wrong account, because the window only decides what is
+*considered* — attribution is a separate step (see below). What widening buys
+is fewer trips to the admin queue. What it costs is revenue per short payment,
+and room for someone to probe for the cheapest amount that still upgrades
+them: with the defaults, a buyer sending from their own wallet (where nothing
+is deducted) can pay up to a fee's worth under the price. Set it to what you
+would rather not argue with a customer about:
 
 ```toml
-CRYPTO_UNDERPAY_TOLERANCE_PCT = "3"     # accept down to $9.70 on a $10 plan
+CRYPTO_FEE_ALLOWANCE          = "eth:0.0005,usdt-erc20:3,sol:0.005,usdt-spl:1"
+CRYPTO_FEE_ALLOWANCE_MAX_PCT  = "30"    # never more than 30% off any plan
 CRYPTO_OVERPAY_TOLERANCE_PCT  = "50"    # hold anything above $15 for a human
 ```
 
-What it costs is revenue per short payment, and a little room for someone to
-probe for the cheapest amount that still upgrades them — at 3% on a $10 plan,
-thirty cents. Set it to what you would rather not argue with a customer about.
+Changing any of these applies to orders already open, not only new ones — and
+**Admin → On-chain → Scan the chains now** re-checks every payment that was
+held for a decision under the new settings, so money that parked before you
+widened the window credits without you assigning it by hand.
+
+### How a shaved payment finds its owner
+
+Every open order for a coin is quoted a different amount — the last three
+payable digits vary (see §8). A fixed withdrawal fee is a rounder number than
+those digits, so when it comes off the amount the digits survive: a payment of
+`0.0033416 − 0.0005 = 0.0028416` ETH still ends in `416`, and only one order
+was quoted an amount ending in `416`. That is what attributes it, ahead of
+"nearest quote", which with two buyers on the same plan and a dollar-sized fee
+would be a coin toss.
+
+A fee that is *not* a round number (some exchanges charge a percentage) wipes
+the digits. With only one order open for the coin, such a payment still credits
+by being the only candidate. With several open, it is held for a person — and
+if the buyer pastes their transaction on their pay page, their order is offered
+first in the queue, so crediting it is one click.
 
 ### Different addresses per token
 
@@ -254,12 +295,19 @@ attributed to exactly one order.** There are two ways to get there:
 - **The amount matches nothing** — someone underpaid heavily, or sent money to
   the address without starting a checkout at all.
 - **The amount could be either of two orders** — it clears both of their
-  minimums and exactly matches neither. The site deliberately credits
-  **neither**: crediting the wrong account is worse than waiting.
+  minimums, exactly matches neither, and carries neither one's last digits. The
+  site deliberately credits **neither**: crediting the wrong account is worse
+  than waiting.
 
 Each row shows the coin, amount, transaction and a dropdown of the live orders
-it could belong to. Pick one and click **Credit to**. That grants the membership
-and closes the order, and is written to the audit log as a manual action.
+it could belong to. If the buyer pasted the transaction on their own pay page,
+their order is marked *claimed by buyer* and preselected. Pick one and click
+**Credit to**. That grants the membership and closes the order, and is written
+to the audit log as a manual action.
+
+**Scan the chains now** also re-runs matching over everything in this table, so
+after widening `CRYPTO_FEE_ALLOWANCE` (or any of the other windows) one click
+credits the payments that were only held because the old window was narrower.
 
 Three other things land here rather than crediting automatically, all
 deliberately:

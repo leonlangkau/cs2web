@@ -296,6 +296,10 @@ CREATE TABLE IF NOT EXISTS chain_transfers (
   block_time    INTEGER NOT NULL DEFAULT 0,
   confirmations INTEGER NOT NULL DEFAULT 0,
   order_id      TEXT,
+  -- The order whose buyer pasted this transaction on their own pay page, kept
+  -- when the amount alone could not decide: the likeliest owner, offered first
+  -- in the admin queue. Never grants anything by itself.
+  claimed_order_id TEXT,
   status        TEXT NOT NULL DEFAULT 'seen' CHECK (status IN ('seen','credited','unmatched','ambiguous','ignored')),
   note          TEXT,
   created_at    TEXT NOT NULL DEFAULT (datetime('now')),

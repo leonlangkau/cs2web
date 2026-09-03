@@ -100,6 +100,13 @@ SIGNUP_SURGE_LIMIT = "100"
 #   CRYPTO_SOL_CONFIRMATIONS      Solana is read at `finalized` already (default 1)
 #   CRYPTO_UNDERPAY_TOLERANCE_PCT how far under the quote still counts as paid,
 #                                 covering exchange withdrawal rounding (default 1)
+#   CRYPTO_FEE_ALLOWANCE          the withdrawal fee an exchange may have taken OUT
+#                                 of a payment, per coin — the wider of this and the
+#                                 percentage is what a payment may fall short by
+#                                 (default "eth:0.001,usdt-erc20:5,sol:0.01,usdt-spl:2")
+#   CRYPTO_FEE_ALLOWANCE_MAX_PCT  the most of a quote that allowance may cover, so a
+#                                 fee bigger than the cheapest plan can never make
+#                                 dust pay for it (default 50; "0" turns it off)
 #   CRYPTO_OVERPAY_TOLERANCE_PCT  how far OVER still reads as that order's payment
 #                                 (default 100); past it a human decides, so a
 #                                 misplaced decimal point never quietly buys one
@@ -117,6 +124,8 @@ SIGNUP_SURGE_LIMIT = "100"
 # CRYPTO_ASSETS = "eth,sol,usdt-erc20,usdt-spl"
 # CRYPTO_ETH_CONFIRMATIONS = "12"
 # CRYPTO_UNDERPAY_TOLERANCE_PCT = "1"
+# CRYPTO_FEE_ALLOWANCE = "eth:0.001,usdt-erc20:5,sol:0.01,usdt-spl:2"
+# CRYPTO_FEE_ALLOWANCE_MAX_PCT = "50"
 # CRYPTO_PAY_WINDOW_MINUTES = "60"
 # CRYPTO_MATCH_HOURS = "48"
 #

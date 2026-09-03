@@ -198,6 +198,15 @@ async function ensurePaymentPlanColumns(db) {
   }
 }
 
+/** chain_transfers.claimed_order_id shipped after the on-chain checkout did. */
+async function ensureChainClaimColumn(db) {
+  const columns = await db.all('PRAGMA table_info(chain_transfers)');
+  if (columns.length === 0) return; // table not created yet; schema.sql covers it
+  if (!columns.some((c) => c.name === 'claimed_order_id')) {
+    await db.run('ALTER TABLE chain_transfers ADD COLUMN claimed_order_id TEXT');
+  }
+}
+
 /**
  * Marker holding a hash of the DDL that was last applied successfully.
  *
@@ -239,6 +248,7 @@ function ensureSchema(db) {
       await ensurePaidUntilColumn(db);
       await ensurePaymentPlanColumns(db);
       await ensureTicketKeyColumns(db);
+      await ensureChainClaimColumn(db);
 
       // Written last: a crash part-way through leaves no marker, so the next
       // cold start does the whole thing again rather than trusting a

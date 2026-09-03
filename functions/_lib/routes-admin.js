@@ -8,7 +8,9 @@ import { setSetting, ANNOUNCEMENT_KEY } from "./settings.js";
 import { btcpayConfig } from "./btcpay.js";
 import { verifyAndCredit, sweepOpenPayments } from "./fulfil.js";
 import { grantMembership } from "./membership.js";
-import { onchainConfig, maybeScan, creditOrder, matchTransfer, orderView, isLiveOrder } from "./onchain.js";
+import {
+  onchainConfig, maybeScan, rematchHeld, creditOrder, matchTransfer, orderView, isLiveOrder,
+} from "./onchain.js";
 import { requiredConfirmations, explorerLink } from "./chains.js";
 import { fromUnits, parseUnits } from "./units.js";
 import { storePlans, planDuration } from "./plans.js";
@@ -477,12 +479,30 @@ function register(app) {
       }).sort((a, b) => (a.distance > b.distance ? 1 : a.distance < b.distance ? -1 : 0))
         .slice(0, 25)
         .map((entry) => ({ ...decorateOrder(cfg, entry.row), closed: !isLiveOrder(entry.row, now) }));
+
+      // The buyer who pasted this transaction on their own pay page is the
+      // likeliest owner: their order is offered first and preselected, and
+      // offered even when its amount put it outside the nearest few.
+      const claimedId = t.claimed_order_id ? String(t.claimed_order_id) : '';
+      if (claimedId && !candidates.some((o) => o.order_id === claimedId)) {
+        const claimedRow = await db.get(
+          'SELECT * FROM chain_orders WHERE order_id = ? AND asset = ?', claimedId, t.asset
+        );
+        if (claimedRow && !claimedRow.credited_at) {
+          candidates.unshift({ ...decorateOrder(cfg, claimedRow), closed: !isLiveOrder(claimedRow, now) });
+        }
+      }
+      for (const o of candidates) o.claimed = claimedId !== '' && o.order_id === claimedId;
+      candidates.sort((a, b) => Number(b.claimed) - Number(a.claimed));
+      const claimant = candidates.find((o) => o.claimed);
+
       transfers.push({
         ...t,
         symbol: asset ? asset.symbol : String(t.asset).toUpperCase(),
         amount: asset ? `${fromUnits(parseUnits(t.units) ?? 0n, asset.decimals)} ${asset.symbol}` : String(t.units),
         explorer: asset ? explorerLink(asset, t.tx_hash) : '',
         candidates,
+        claimedBy: claimant ? claimant.username : '',
       });
     }
 
@@ -491,9 +511,11 @@ function register(app) {
         assets: cfg.assets.map((a) => ({
           symbol: a.symbol, network: a.network, address: a.address,
           confirmations: requiredConfirmations(cfg, a),
+          feeAllowance: fromUnits(cfg.feeAllowance[a.key] ?? 0n, a.decimals),
         })),
         invalid: cfg.invalid,
         tolerancePct: cfg.toleranceBp / 100,
+        feeSharePct: cfg.feeShareBp / 100,
         payWindowMinutes: cfg.payWindowMinutes,
         matchHours: cfg.matchHours,
         scanIntervalSeconds: cfg.scanIntervalSeconds,
@@ -513,13 +535,21 @@ function register(app) {
       setFlash(c, 'error', 'No receiving addresses are configured, so there is nothing to scan.');
       return c.redirect('/admin/crypto', 302);
     }
-    const result = await maybeScan(c, cfg, {
-      force: true, includeIdle: true, source: `admin ${c.get('user').username}`,
+    const source = `admin ${c.get('user').username}`;
+    const result = await maybeScan(c, cfg, { force: true, includeIdle: true, source });
+    // Payments held for a decision get another look under today's rules, so a
+    // widened allowance reaches money that arrived before it was widened.
+    const held = await rematchHeld(c, cfg, { source }).catch((err) => {
+      console.error('re-check of held payments failed:', err);
+      return { checked: 0, credited: 0, matched: 0, errors: 1 };
     });
     const summary = (result.results || [])
       .map((r) => `${r.asset}: ${r.error ? `error — ${r.error}` : `${r.seen} seen, ${r.credited} credited`}`)
+      .concat(held.checked > 0
+        ? [`${held.checked} held payment${held.checked === 1 ? '' : 's'} re-checked, ${held.credited} credited`]
+        : [])
       .join(' · ');
-    setFlash(c, (result.results || []).some((r) => r.error) ? 'error' : 'success',
+    setFlash(c, (result.results || []).some((r) => r.error) || held.errors > 0 ? 'error' : 'success',
       summary || `Nothing to scan (${result.skipped || 'no pending orders'}).`);
     return c.redirect('/admin/crypto', 302);
   });

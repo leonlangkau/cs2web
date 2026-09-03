@@ -13,10 +13,13 @@
  *      varying its last three payable decimals. The spread is worth about a
  *      cent, and it is what makes an anonymous transfer identifiable.
  *   3. A scan reads recent transfers to the address and matches each one to at
- *      most one order. An exact amount always wins. Failing that, a transfer is
- *      only auto-attributed when exactly ONE live order could account for it —
- *      if two could, the money is real but the owner is a guess, so it goes to
- *      the admin queue instead of to whichever account happened to sort first.
+ *      most one order. An exact amount always wins. Failing that, a payment
+ *      that an exchange's withdrawal fee has shaved usually still carries its
+ *      quote's last three digits — a fixed fee is coarser than they are — and
+ *      is attributed by them. Otherwise a transfer is only auto-attributed
+ *      when it is clearly nearest to ONE order that could account for it; if
+ *      two could equally, the money is real but the owner is a guess, so it
+ *      goes to the admin queue instead of to whichever account sorted first.
  *   4. Once the transfer has enough confirmations, the membership is granted.
  *
  * Every step is idempotent. `chain_orders.credited_at` is claimed atomically and
@@ -31,11 +34,11 @@
  * the chain and still has to match an amount we quoted.
  */
 import {
-  chainConfig, fetchIncoming, fetchTransaction, requiredConfirmations,
+  ASSETS, chainConfig, fetchIncoming, fetchTransaction, requiredConfirmations,
   paymentUri, explorerLink, isTransactionRef,
 } from "./chains.js";
 import { getRate } from "./rates.js";
-import { fiatToUnits, ceilTo, fromUnits, parseUnits, pow10, unitsToFiat } from "./units.js";
+import { fiatToUnits, ceilTo, fromUnits, parseUnits, pow10, toUnits, unitsToFiat } from "./units.js";
 import { grantMembership } from "./membership.js";
 import { getSetting, setSetting } from "./settings.js";
 import { audit } from "./middleware.js";
@@ -90,6 +93,46 @@ function positiveNumber(value, fallback, min = 0) {
 }
 
 /**
+ * How much of a withdrawal fee may have come out of a payment before it stops
+ * reading as paying its order, per coin — in the coin, because that is how
+ * exchanges charge it. These are the defaults; CRYPTO_FEE_ALLOWANCE overrides
+ * any of them.
+ *
+ * The figures are what the big exchanges have charged to withdraw to mainnet:
+ * a few tenths of a milli-ETH, a few USDT on Ethereum (where the fee is really
+ * gas), a hundredth of a SOL, a dollar or two of USDT on Solana. A percentage
+ * cannot express this — a fee is worth the same on a three-dollar plan as on
+ * an eighty-dollar one, and on the cheap plan it is a large share of the price.
+ */
+const DEFAULT_FEE_ALLOWANCE = {
+  eth: '0.001',
+  'usdt-erc20': '5',
+  sol: '0.01',
+  'usdt-spl': '2',
+};
+
+/**
+ * Parses CRYPTO_FEE_ALLOWANCE ("eth:0.0005,usdt-erc20:3,…") over the defaults.
+ * An entry that does not parse keeps the default rather than becoming zero:
+ * a typo in a tuning knob must not start parking every exchange payment.
+ */
+function feeAllowanceConfig(raw) {
+  const out = {};
+  for (const key of Object.keys(ASSETS)) {
+    out[key] = toUnits(DEFAULT_FEE_ALLOWANCE[key] ?? '0', ASSETS[key].decimals) ?? 0n;
+  }
+  for (const entry of String(raw ?? '').split(',')) {
+    const colon = entry.indexOf(':');
+    if (colon < 0) continue;
+    const key = entry.slice(0, colon).trim().toLowerCase();
+    if (!ASSETS[key]) continue;
+    const units = toUnits(entry.slice(colon + 1).trim(), ASSETS[key].decimals);
+    if (units !== null) out[key] = units;
+  }
+  return out;
+}
+
+/**
  * Everything the on-chain payment path needs, read from env/secrets.
  *
  *   CRYPTO_PAY_WINDOW_MINUTES     how long a quote is honoured (default 60)
@@ -98,6 +141,16 @@ function positiveNumber(value, fallback, min = 0) {
  *   CRYPTO_UNDERPAY_TOLERANCE_PCT how far under the quote still counts as paid
  *                                 (default 1%) — covers exchange withdrawal
  *                                 rounding and rate drift
+ *   CRYPTO_FEE_ALLOWANCE          per-coin withdrawal fee that may have come
+ *                                 out of the amount, "eth:0.001,usdt-erc20:5,
+ *                                 sol:0.01,usdt-spl:2" (those are the
+ *                                 defaults). Whichever of this and the
+ *                                 percentage is wider is what a payment may
+ *                                 fall short by
+ *   CRYPTO_FEE_ALLOWANCE_MAX_PCT  the most of a quote the fee allowance may
+ *                                 eat (default 50) — so a fee worth more than
+ *                                 the cheapest plan can never make dust pay
+ *                                 for it. "0" switches the allowance off
  *   CRYPTO_OVERPAY_TOLERANCE_PCT  how far over still reads as that order's
  *                                 payment (default 100%); beyond it, a human
  *                                 decides rather than one membership silently
@@ -114,6 +167,9 @@ function onchainConfig(env = {}) {
     matchHours: Math.max(1, positiveNumber(env.CRYPTO_MATCH_HOURS, 48, 1)),
     // Basis points, so the comparison stays integer-exact.
     toleranceBp: Math.min(2000, Math.round(positiveNumber(env.CRYPTO_UNDERPAY_TOLERANCE_PCT, 1, 0) * 100)),
+    // Base units of each coin that a withdrawal fee may have taken.
+    feeAllowance: feeAllowanceConfig(env.CRYPTO_FEE_ALLOWANCE),
+    feeShareBp: Math.min(9000, Math.round(positiveNumber(env.CRYPTO_FEE_ALLOWANCE_MAX_PCT, 50, 0) * 100)),
     // How far OVER the quote still reads as paying that order. Overpaying a
     // little is ordinary; a large multiple is a mistake, and silently turning
     // it into one membership would be the wrong favour.
@@ -127,10 +183,22 @@ function onchainConfig(env = {}) {
  * Quoting
  * ------------------------------------------------------------------ */
 
-/** The smallest amount that still counts as paying an order in full. */
-function minimumFor(units, toleranceBp) {
-  if (toleranceBp <= 0) return units;
-  return units - (units * BigInt(toleranceBp)) / 10_000n;
+/**
+ * The smallest amount that still counts as paying `expected` in full.
+ *
+ * Two allowances, and the wider one applies: a percentage, for rounding and
+ * rate drift, and a fixed per-coin fee, for the withdrawal fee an exchange
+ * takes OUT of the figure the buyer typed. The fee allowance is capped at a
+ * share of the quote so that on a plan cheaper than the fee itself, dust can
+ * never read as payment in full.
+ */
+function paymentFloor(cfg, asset, expected) {
+  if (expected <= 0n) return expected;
+  const percent = (expected * BigInt(cfg.toleranceBp || 0)) / 10_000n;
+  const cap = (expected * BigInt(cfg.feeShareBp || 0)) / 10_000n;
+  let fee = (cfg.feeAllowance && cfg.feeAllowance[asset.key]) || 0n;
+  if (fee > cap) fee = cap;
+  return expected - (percent > fee ? percent : fee);
 }
 
 /** Random tag in [0, TAG_SLOTS). Uses the CSPRNG so amounts aren't guessable. */
@@ -226,7 +294,7 @@ async function createOrder(c, cfg, { user, plan, assetKey, now = Date.now() }) {
         period_days, plan_id, plan_name, status, expires_at, match_until)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'new', ?, ?)`,
     orderId, user.id, user.username, asset.key, asset.chain, asset.address, asset.decimals,
-    expected.toString(), minimumFor(expected, cfg.toleranceBp).toString(),
+    expected.toString(), paymentFloor(cfg, asset, expected).toString(),
     plan.amount, cfg.currency, quote.rate,
     plan.periodDays === null || plan.periodDays === undefined ? null : Math.floor(Number(plan.periodDays)),
     plan.id, plan.name, expiresAt, matchUntil
@@ -328,7 +396,7 @@ async function quoteStillCovers(db, env, cfg, order, units) {
   if (!quote) return { ok: true };
   const needed = fiatToUnits(order.fiat_amount, quote.rate, asset.decimals);
   if (needed === null || needed <= 0n) return { ok: true };
-  const floor = minimumFor(needed, cfg.toleranceBp);
+  const floor = paymentFloor(cfg, asset, needed);
   if (units >= floor) return { ok: true };
   return { ok: false, shortBy: fromUnits(floor - units, asset.decimals) };
 }
@@ -341,22 +409,40 @@ async function quoteStillCovers(db, env, cfg, order, units) {
  * construction and always wins. Anything else is only attributed when a single
  * live order could account for it; two candidates means somebody's money would
  * be credited to somebody else's account, so it is parked for an admin instead.
+ *
+ * `claim` is the order whose buyer pasted this transaction on their own pay
+ * page. It is a hint, not evidence: the rules below decide exactly as they
+ * would for a scan, and if they cannot, the claim is recorded on the transfer
+ * so the admin queue offers that order first. `retry` re-opens a transfer that
+ * an earlier pass held for a human — see rematchHeld.
  */
-async function matchTransfer(c, cfg, transfer, { now = Date.now(), source = 'scan' } = {}) {
+async function matchTransfer(c, cfg, transfer, {
+  now = Date.now(), source = 'scan', claim = null, retry = false,
+} = {}) {
   const db = c.get('db');
   const asset = cfg.byKey[transfer.asset];
   if (!asset) return { reason: 'unknown_asset' };
   if (transfer.status === 'credited') return { reason: 'already' };
 
-  // A transfer that has already been ruled unattributable stays that way. Order
-  // amounts are assigned randomly, so a later order "matching" an older stray
-  // deposit is coincidence, never truth — and auto-crediting on that coincidence
-  // would hand one person's money to whoever happened to check out next. Those
-  // rows belong to the admin queue until a human says otherwise.
-  if (RESOLVED_TRANSFER_STATUSES.has(transfer.status)) return { reason: transfer.status };
+  // A transfer that has already been ruled unattributable stays that way for
+  // the automatic scan. Order amounts are assigned randomly, so a later order
+  // "matching" an older stray deposit is coincidence, never truth — and
+  // auto-crediting on that coincidence would hand one person's money to
+  // whoever happened to check out next. Those rows belong to the admin queue
+  // until a human says otherwise — or until the buyer names the transaction
+  // from their own order, or staff ask for a re-check, both of which still go
+  // through every rule below. One a human has already dismissed is never
+  // reopened by either: "ignored" is a decision, not a verdict.
+  if (RESOLVED_TRANSFER_STATUSES.has(transfer.status)) {
+    const reopen = (claim || retry) && transfer.status !== 'ignored';
+    if (!reopen) return { reason: transfer.status };
+  }
 
   const units = parseUnits(transfer.units);
   if (units === null || units <= 0n) return { reason: 'empty' };
+
+  // The width of one discriminator band: the last three payable digits.
+  const band = pow10(asset.decimals - asset.payDecimals) * BigInt(TAG_SLOTS);
 
   // An order cannot have been paid by money that arrived before it existed: the
   // buyer gets the amount FROM the order. The grace window absorbs clock skew
@@ -399,36 +485,60 @@ async function matchTransfer(c, cfg, transfer, { now = Date.now(), source = 'sca
     verdict = 'ambiguous';
     note = `${exact.length} orders were quoted this exact amount — needs a human`;
   } else {
-    // --- 2. No exact amount: the nearest quote, when it is clearly nearest ----
+    // --- 2. No exact amount: which orders could this have paid for? ----------
     //
-    // Wallets send exactly what you paste, but exchange withdrawal forms round,
-    // and a buyer who retypes the figure drops a digit. Those payments are
-    // still obviously somebody's: they sit a hair away from ONE quote and far
-    // from every other, because quotes are spaced deliberately.
-    //
-    // So rather than refusing whenever a second order is technically in range —
-    // which it always is, since the tolerance is far wider than that spacing —
-    // this takes the nearest quote, and only gives up when the runner-up is
-    // close enough that "nearest" would be a coin toss.
+    // Wallets send exactly what you paste, but an exchange takes its withdrawal
+    // fee OUT of the figure the buyer typed, withdrawal forms round, and a
+    // buyer who retypes the amount drops a digit. All of those payments are
+    // still somebody's. What each order accepts is bounded on BOTH sides: the
+    // floor is the tolerance or the fee allowance below the quote (see
+    // paymentFloor), and above it a little over is ordinary and credits while
+    // a large multiple is a mistake worth a human, not a silent membership at
+    // fifty times the price.
     const scored = recent.map((o) => {
-      const min = parseUnits(o.min_units);
       const expected = parseUnits(o.expected_units);
-      if (min === null || expected === null) return null;
-      // Bounded on BOTH sides. Overpaying a little is ordinary and credits;
-      // paying a large multiple is a mistake worth a human, not a silent
-      // membership at fifty times the price.
+      if (expected === null || expected <= 0n) return null;
+      // The floor comes from the CURRENT settings, not the one snapshotted at
+      // checkout, so widening the allowance reaches orders already in flight.
+      const floor = paymentFloor(cfg, asset, expected);
       const ceiling = expected + (expected * BigInt(cfg.overpayBp)) / 10_000n;
-      if (units < min || units > ceiling) return null;
-      return { order: o, distance: units > expected ? units - expected : expected - units };
+      if (units < floor || units > ceiling) return null;
+      return {
+        order: o,
+        distance: units > expected ? units - expected : expected - units,
+        // The quote's last three payable digits are its discriminator. A fixed
+        // withdrawal fee — 0.0005 ETH, 1 USDT — is coarser than those digits,
+        // so it comes off the amount and leaves them intact: the shaved payment
+        // still names its quote, and only its quote.
+        sameTag: units % band === expected % band,
+      };
     }).filter(Boolean).sort((a, b) => (a.distance > b.distance ? 1 : a.distance < b.distance ? -1 : 0));
 
-    const best = scored[0];
-    const runnerUp = scored[1];
+    // --- 2a. The discriminator survived: attribute by it ---------------------
+    //
+    // Checked before "nearest" on purpose. Quotes for one plan sit within a
+    // cent or two of each other and a fee is worth dollars, so a shaved
+    // payment lands about equally far from every one of them — "nearest" is a
+    // coin toss exactly when the digits are decisive. Two orders sharing the
+    // digits (different bands, one-in-a-thousand) is a tie, and goes to a human.
+    const tagged = scored.filter((s) => s.sameTag);
+
+    // --- 2b. Otherwise the nearest quote, when it is clearly nearest ---------
+    //
+    // Rather than refusing whenever a second order is technically in range —
+    // which it always is, since the window is far wider than the spacing —
+    // this takes the nearest quote, and only gives up when the runner-up is
+    // close enough that "nearest" would be a coin toss.
+    const best = tagged.length === 1 ? tagged[0] : scored[0];
+    const runnerUp = tagged.length === 1 ? null : scored[1];
     // "Clearly nearest" means the next candidate is several times further away.
     const clear = best && (!runnerUp
       || runnerUp.distance >= best.distance * BigInt(NEAREST_QUOTE_MARGIN));
 
-    if (!best) {
+    if (tagged.length > 1) {
+      verdict = 'ambiguous';
+      note = `${tagged.length} orders share this amount's last digits — needs a human`;
+    } else if (!best) {
       verdict = 'unmatched';
     } else if (!clear) {
       verdict = 'ambiguous';
@@ -461,10 +571,14 @@ async function matchTransfer(c, cfg, transfer, { now = Date.now(), source = 'sca
   }
 
   if (!order) {
+    // A buyer's claim is kept even though it did not decide anything: it is
+    // the likeliest answer, and the admin queue offers it first.
     await db.run(
-      `UPDATE chain_transfers SET status = ?, note = ?, updated_at = datetime('now')
-       WHERE id = ? AND status <> 'credited'`,
-      verdict, note, transfer.id
+      `UPDATE chain_transfers
+          SET status = ?, note = ?, claimed_order_id = COALESCE(?, claimed_order_id),
+              updated_at = datetime('now')
+        WHERE id = ? AND status <> 'credited'`,
+      verdict, note, claim ? String(claim.order_id) : null, transfer.id
     );
     return { reason: verdict };
   }
@@ -702,8 +816,57 @@ async function submitTransactionRef(c, cfg, order, reference, { now = Date.now()
 
   const row = await recordTransfer(db, transfer);
   if (!row) return { ok: false, reason: 'lookup_failed' };
-  const verdict = await matchTransfer(c, cfg, row, { now, source: 'buyer-submitted transaction' });
+  const verdict = await matchTransfer(c, cfg, row, {
+    now, source: 'buyer-submitted transaction', claim: order,
+  });
   return { ok: true, verdict, transfer: row };
+}
+
+/**
+ * Re-runs matching over payments that were held for a human.
+ *
+ * A held verdict is final for the automatic scan: order amounts are random, so
+ * a later order "matching" an older stray deposit is coincidence, and acting on
+ * it would hand one person's money to whoever checked out next. But the rules
+ * and the settings can change underneath a held payment — the fee allowance is
+ * widened, say — and then the money should land without staff assigning every
+ * row by hand. This is what the admin's "scan now" runs.
+ *
+ * Only transfers with a known block time are eligible: the "no order can be
+ * paid by money that arrived before it existed" rule needs one, and without it
+ * the re-check would bring back exactly the coincidence the held statuses exist
+ * to prevent. A row recorded before its transaction was confirmed enough is
+ * re-read from the chain first, so the count it is judged on is current.
+ */
+async function rematchHeld(c, cfg, { now = Date.now(), source = 'admin re-check' } = {}) {
+  const db = c.get('db');
+  const out = { checked: 0, credited: 0, matched: 0, errors: 0 };
+  if (!cfg.configured) return out;
+  const rows = await db.all(
+    `SELECT * FROM chain_transfers
+      WHERE status IN ('unmatched', 'ambiguous') AND block_time > 0
+        AND created_at >= datetime('now', '-${AMOUNT_RESERVE_DAYS} days')
+      ORDER BY id ASC LIMIT 100`
+  );
+  for (let row of rows) {
+    const asset = cfg.byKey[row.asset];
+    if (!asset) continue;
+    out.checked += 1;
+    if ((Number(row.confirmations) || 0) < requiredConfirmations(cfg, asset)) {
+      try {
+        const fresh = await fetchTransaction(cfg, asset, row.tx_hash);
+        if (fresh) row = (await recordTransfer(db, fresh)) || row;
+      } catch (err) {
+        console.error(`re-check of ${row.asset} ${row.tx_hash} failed:`, err);
+        out.errors += 1;
+        continue;
+      }
+    }
+    const verdict = await matchTransfer(c, cfg, row, { now, source, retry: true });
+    if (verdict.granted) out.credited += 1;
+    else if (verdict.order) out.matched += 1;
+  }
+  return out;
 }
 
 /**
@@ -775,7 +938,8 @@ async function quoteAll(db, env, cfg, plan) {
 }
 
 export {
-  onchainConfig, createOrder, RESOLVED_TRANSFER_STATUSES, isLiveOrder, quoteAsset, quoteAll, uniqueExpected, minimumFor,
-  matchTransfer, creditOrder, scanAsset, maybeScan, reconcileOrder, reconcileForUser,
+  onchainConfig, createOrder, RESOLVED_TRANSFER_STATUSES, isLiveOrder, quoteAsset, quoteAll, uniqueExpected,
+  paymentFloor, DEFAULT_FEE_ALLOWANCE,
+  matchTransfer, creditOrder, scanAsset, maybeScan, reconcileOrder, reconcileForUser, rematchHeld,
   submitTransactionRef, recordTransfer, orderView, LIVE_ORDERS_SQL, TAG_SLOTS,
 };

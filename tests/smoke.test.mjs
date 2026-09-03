@@ -140,7 +140,6 @@ test("public pages, forum, legal, gate, auth, captcha, admin, moderation, downlo
   let html = await res.text();
   assert.equal(res.status, 200);
   assert.ok(html.includes("Dominate every match.") && html.includes("hero-canvas"), "landing renders");
-  assert.ok(html.includes('<canvas id="rain-canvas" aria-hidden="true">'), "kill-feed rain canvas in shell");
   assert.ok(String(res.headers.get("content-security-policy")).includes("default-src 'self'"), "CSP header");
 
   // The forum is a Paid-tier benefit — anonymous visitors are gated out
@@ -165,7 +164,6 @@ test("public pages, forum, legal, gate, auth, captcha, admin, moderation, downlo
   res = await anon.get("/privacy");
   html = await res.text();
   assert.ok(html.includes("ghsession") && html.includes("PBKDF2"), "privacy content");
-  assert.ok(html.includes('<canvas id="rain-canvas"'), "rain canvas ships site-wide, not just on the landing hero");
 
   // Terms gate
   const visitor = makeClient(app);

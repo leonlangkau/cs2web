@@ -14,7 +14,7 @@ const TERMS_COOKIE = 'ghterms';
 const SESSION_DAYS = 7;
 
 /** Bump when the Terms change materially — everyone is asked to accept again. */
-const TERMS_VERSION = '2026-08-21';
+const TERMS_VERSION = '2026-08-28';
 const TERMS_GATE_EXEMPT = new Set(['/terms', '/privacy', '/legal/accept']);
 
 /** btoa()/atob() only accept Latin1, but flash messages carry arbitrary text
@@ -66,6 +66,38 @@ function clientIp(c) {
 function userAgent(c) {
   return String(c.req.header('user-agent') || '').slice(0, 300);
 }
+
+/**
+ * Canonical host redirect: send www.<domain> to the bare apex with a permanent
+ * 301, preserving path and query. Runs first so every response — pages, forms,
+ * the sitemap — is served from a single canonical host (better for SEO, cookies
+ * and CSP). Hosts without a leading "www." (localhost, the apex itself, custom
+ * subdomains like downloader.) pass straight through, so local dev is unaffected.
+ * Set CANONICAL_WWW = "1" to invert it and make www the canonical host instead.
+ */
+const wwwRedirect = async (c, next) => {
+  const host = String(c.req.header('host') || '');
+  if (!host) return next();
+
+  const cfg = c.get('cfg') || {};
+  const preferWww = String(cfg.CANONICAL_WWW || '') === '1';
+  const hasWww = /^www\./i.test(host);
+
+  let targetHost = null;
+  if (preferWww && !hasWww) {
+    // Don't prepend www to a deeper subdomain (e.g. downloader.goyhub.st).
+    if (host.split(':')[0].split('.').length <= 2) targetHost = 'www.' + host;
+  } else if (!preferWww && hasWww) {
+    targetHost = host.replace(/^www\./i, '');
+  }
+
+  if (!targetHost) return next();
+
+  const url = new URL(c.req.url);
+  const proto = c.req.header('x-forwarded-proto') || url.protocol.replace(':', '');
+  const location = `${proto}://${targetHost}${url.pathname}${url.search}`;
+  return c.redirect(location, 301);
+};
 
 const securityHeaders = async (c, next) => {
   await next();
@@ -148,8 +180,10 @@ const loadContext = async (c, next) => {
   c.set('view', view);
 
   // Site-wide announcement banner (admin-set). Only fetched for page GETs —
-  // API calls and form posts never render it.
-  if (c.req.method === 'GET' && !url.pathname.startsWith('/api/')) {
+  // API calls, form posts and the JSON polls behind the live chat and the
+  // status page never render it, and those are the requests that repeat.
+  const isPoll = c.req.header('x-requested-with') === 'fetch' || url.pathname.endsWith('.json');
+  if (c.req.method === 'GET' && !url.pathname.startsWith('/api/') && !isPoll) {
     view.announcement = await getSetting(db, ANNOUNCEMENT_KEY);
   }
 
@@ -229,7 +263,7 @@ const ipBanGate = async (c, next) => {
 /**
  * Application-layer flood control, applied to every dynamic route:
  *
- *  - a per-IP burst cap (RATE_LIMIT_BURST requests/minute, default 240 —
+ *  - a per-IP burst cap (RATE_LIMIT_BURST requests/minute, default 600 —
  *    far above human browsing, well below a scripted flood) answered with 429;
  *  - repeated breaches (RATE_LIMIT_FLOOD per 10 min) escalate to a temporary
  *    automatic IP ban (AUTO_IP_BAN_MINUTES, default 60) so the offender stops
@@ -275,7 +309,10 @@ const floodProtection = async (c, next) => {
 
 /** Sets a one-shot flash message for the next request. */
 function setFlash(c, type, message) {
-  const encoded = toBase64Url(JSON.stringify({ type, message }));
+  // Capped on the way IN as well as on the way out: a caller that concatenates
+  // one error per rejected upload would otherwise write a Set-Cookie header
+  // measured in megabytes.
+  const encoded = toBase64Url(JSON.stringify({ type, message: String(message ?? '').slice(0, 500) }));
   setCookie(c, FLASH_COOKIE, encoded, cookieOptions(c, { maxAge: 60 }));
 }
 
@@ -352,6 +389,21 @@ function acceptTerms(c) {
   }));
 }
 
+/**
+ * Runs a side-effect (an email, a webhook, an AI call) without making the
+ * visitor wait for it. On Cloudflare that is the Pages `waitUntil`; the Node
+ * test harness has none, so it is simply awaited — which also keeps the tests
+ * deterministic. Never rejects: a failed notification must not fail the
+ * request that triggered it.
+ */
+async function defer(c, promise) {
+  const waitUntil = c.get('waitUntil');
+  const guarded = Promise.resolve(promise)
+    .catch((err) => console.warn('deferred task failed:', err && err.message));
+  if (typeof waitUntil === 'function') { waitUntil(guarded); return; }
+  await guarded;
+}
+
 /** Retrieves the parsed form body (csrfProtection already parsed it on writes). */
 async function formBody(c) {
   const cached = c.get('body');
@@ -424,8 +476,8 @@ function requireTier(c, minTier) {
 
 export {
   SESSION_COOKIE, CSRF_COOKIE, FLASH_COOKIE, TERMS_COOKIE, TERMS_VERSION,
-  securityHeaders, loadContext, csrfProtection, termsGate, ipBanGate, floodProtection,
+  wwwRedirect, securityHeaders, loadContext, csrfProtection, termsGate, ipBanGate, floodProtection,
   createSession, destroySession, destroyUserSessions,
-  acceptTerms, setFlash, formBody, requireAuth, requireAdmin, requireStaff, requireTier,
+  acceptTerms, setFlash, formBody, defer, requireAuth, requireAdmin, requireStaff, requireTier,
   requireVerifiedEmail, clientIp, userAgent, audit, cookieOptions,
 };

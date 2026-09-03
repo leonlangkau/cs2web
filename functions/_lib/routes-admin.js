@@ -1,17 +1,33 @@
 import * as views from "./views/admin.js";
 import * as site from "./views/site.js";
-import { DELETED_USERNAME, deletedUserId, relocateUserId, RESERVED_UID_MAX } from "./bootstrap.js";
+import { DELETED_USERNAME, deletedUserId, relocateUserId, scrubSupportIdentity, RESERVED_UID_MAX } from "./bootstrap.js";
 import { requireAdmin, requireStaff, destroyUserSessions, audit, formBody, setFlash, clientIp } from "./middleware.js";
-import { TIERS, TIER_LABELS, STAFF_TIERS } from "./tiers.js";
+import { TIERS, TIER_LABELS, STAFF_TIERS, isFullAdmin } from "./tiers.js";
 import { hashPassword } from "./crypto.js";
 import { setSetting, ANNOUNCEMENT_KEY } from "./settings.js";
+import { btcpayConfig } from "./btcpay.js";
+import { verifyAndCredit, sweepOpenPayments } from "./fulfil.js";
+import { grantMembership } from "./membership.js";
+import {
+  onchainConfig, maybeScan, rematchHeld, creditOrder, matchTransfer, orderView, isLiveOrder,
+} from "./onchain.js";
+import { requiredConfirmations, explorerLink } from "./chains.js";
+import { fromUnits, parseUnits } from "./units.js";
+import { storePlans, planDuration } from "./plans.js";
 
 const LOGS_PER_PAGE = 50;
 const USERS_PER_PAGE = 25;
+const PAYMENTS_PER_PAGE = 40;
+const PAYMENT_STATUSES = ['new', 'processing', 'settled', 'expired', 'invalid'];
+const CHAIN_ORDERS_PER_PAGE = 40;
+const CHAIN_STATUSES = ['new', 'seen', 'underpaid', 'settled', 'expired', 'cancelled'];
+const FINGERPRINTS_PER_PAGE = 25;
 const LOG_EVENTS = ['signup', 'login', 'login_failed', 'login_blocked', 'logout', 'download',
   'admin_action', 'captcha_failed', 'terms_accepted', 'password_changed', 'loader_auth', 'loader_auth_failed',
   'ip_autoban', 'signup_surge_blocked', 'post_reported', 'email_changed', 'account_deleted',
-  'password_reset_requested', 'password_reset', 'email_verified', 'shout_deleted'];
+  'password_reset_requested', 'password_reset', 'email_verified', 'shout_deleted',
+  'chain_order_created', 'chain_order_failed', 'chain_tx_submitted', 'chain_payment_rejected',
+  'ticket_opened', 'ticket_key_reissued', 'ticket_adopted'];
 
 // High-volume, low-signal events — routine traffic rather than something an
 // admin needs to review. Excluded by the "Important only" log filter so a
@@ -19,7 +35,7 @@ const LOG_EVENTS = ['signup', 'login', 'login_failed', 'login_blocked', 'logout'
 // moderation/security events. An allowlist would rot silently as new event
 // types are added; this blacklist fails safe — anything new stays visible.
 const NOISY_EVENTS = new Set(['login', 'logout', 'download', 'captcha_failed', 'terms_accepted',
-  'loader_auth', 'shout_deleted']);
+  'loader_auth', 'shout_deleted', 'ticket_opened']);
 
 const IP_HIDDEN = '(hidden)';
 
@@ -37,6 +53,9 @@ async function adminIpMask(c) {
   const adminIds = new Set(admins.map((a) => a.id));
   const adminNames = new Set(admins.map((a) => String(a.username).toLowerCase()));
 
+  const isAdminRow = (row) => (row.user_id !== null && row.user_id !== undefined && adminIds.has(row.user_id))
+    || (row.username && adminNames.has(String(row.username).toLowerCase()));
+
   const maskUser = (u) => {
     if (STAFF_TIERS.has(u.tier) && u.id !== viewer.id) {
       return { ...u, signup_ip: IP_HIDDEN, last_login_ip: IP_HIDDEN, ipHidden: true };
@@ -44,14 +63,21 @@ async function adminIpMask(c) {
     return u;
   };
   const maskLog = (l) => {
-    const isAdminRow = (l.user_id !== null && adminIds.has(l.user_id))
-      || (l.username && adminNames.has(String(l.username).toLowerCase()));
-    if (isAdminRow && l.user_id !== viewer.id) {
+    if (isAdminRow(l) && l.user_id !== viewer.id) {
       return { ...l, ip: IP_HIDDEN, user_agent: IP_HIDDEN, ipHidden: true };
     }
     return l;
   };
-  return { maskUser, maskLog };
+  // Fingerprint rows carry the same PII shape as ip_logs plus a canvas
+  // signature — masked under the same rule so one staff member's device
+  // isn't exposed to another.
+  const maskFingerprint = (f) => {
+    if (isAdminRow(f) && f.user_id !== viewer.id) {
+      return { ...f, ip: IP_HIDDEN, user_agent: IP_HIDDEN, canvas_hash: IP_HIDDEN, ipHidden: true };
+    }
+    return f;
+  };
+  return { maskUser, maskLog, maskFingerprint };
 }
 
 function intParam(value, fallback = 1) {
@@ -107,6 +133,9 @@ function register(app) {
       failedLogins24h: await one("SELECT COUNT(*) AS n FROM ip_logs WHERE event = 'login_failed' AND created_at > datetime('now', '-1 day')"),
       ipBans: await one('SELECT COUNT(*) AS n FROM ip_bans'),
       openReports: await one("SELECT COUNT(*) AS n FROM reports WHERE status = 'open'"),
+      fingerprints: await one('SELECT COUNT(DISTINCT fp_hash) AS n FROM fingerprints'),
+      openTickets: await one("SELECT COUNT(*) AS n FROM tickets WHERE status IN ('open','pending') AND spam = 0 AND merged_into IS NULL"),
+      breachedTickets: await one('SELECT COUNT(*) AS n FROM tickets WHERE sla_breached = 1 AND first_response_at IS NULL'),
     };
     const { maskUser, maskLog } = await adminIpMask(c);
     const recentLogs = (await db.all('SELECT * FROM ip_logs ORDER BY id DESC LIMIT 12')).map(maskLog);
@@ -147,12 +176,489 @@ function register(app) {
     return c.html(views.users(c.get('view'), { users, q, page, pages, total, tiers: TIERS, tierLabels: TIER_LABELS }));
   });
 
+  // --- Shop products -------------------------------------------------------
+
+  const PRICE_RE = /^\d{1,7}(\.\d{1,2})?$/;
+
+  /**
+   * Slug from a product name, uniqued against what is already there. The slug
+   * is what a buy form submits, so it must be stable and URL-safe — but the
+   * admin never has to think about it.
+   */
+  async function uniqueSlug(db, name) {
+    const base = String(name).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 20)
+      || 'plan';
+    let slug = base;
+    for (let n = 2; await db.get('SELECT id FROM products WHERE slug = ?', slug); n += 1) {
+      slug = `${base}-${n}`;
+    }
+    return slug;
+  }
+
+  /**
+   * Reads the length from the form: the custom days box wins over the preset
+   * list when it holds a number, and 0 (either way) means lifetime.
+   */
+  function readPeriodDays(body) {
+    const custom = String(body.custom_days || '').trim();
+    const raw = custom !== '' ? Number(custom) : Number(body.period_days);
+    if (!Number.isInteger(raw) || raw < 0 || raw > 3650) return { error: 'Length must be a whole number of days, 0–3650 (0 = lifetime).' };
+    return { days: raw === 0 ? null : raw };
+  }
+
+  function readProductForm(body) {
+    const name = String(body.name || '').trim().slice(0, 40);
+    if (!name) return { error: 'Give the product a name.' };
+    const amount = String(body.amount || '').trim();
+    if (!PRICE_RE.test(amount) || Number(amount) <= 0) {
+      return { error: 'Price must be a positive number with at most two decimals, e.g. 9.99.' };
+    }
+    const period = readPeriodDays(body);
+    if (period.error) return period;
+    const positionRaw = Number(String(body.position || '').trim());
+    return {
+      name, amount, days: period.days,
+      description: String(body.description || '').trim().slice(0, 120),
+      position: Number.isInteger(positionRaw) ? positionRaw : null,
+    };
+  }
+
+  app.get('/admin/shop', async (c) => {
+    const gate = requireAdmin(c);
+    if (gate) return gate;
+    const db = c.get('db');
+    const env = c.get('cfg');
+    const products = await db.all('SELECT * FROM products ORDER BY position ASC, id ASC');
+    return c.html(views.shop(c.get('view'), {
+      products,
+      currency: btcpayConfig(env).currency,
+      live: btcpayConfig(env).configured,
+      usingEnvFallback: products.filter((p) => p.active).length === 0,
+      envPlans: storePlans(env),
+    }));
+  });
+
+  app.post('/admin/shop/new', async (c) => {
+    const gate = requireAdmin(c);
+    if (gate) return gate;
+    const db = c.get('db');
+    const form = readProductForm(await formBody(c));
+    if (form.error) {
+      setFlash(c, 'error', form.error);
+      return c.redirect('/admin/shop', 302);
+    }
+    // New products land at the end unless a position was given.
+    const last = Number((await db.get('SELECT MAX(position) AS n FROM products'))?.n || 0);
+    const slug = await uniqueSlug(db, form.name);
+    await db.run(
+      `INSERT INTO products (slug, name, description, amount, period_days, position)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+      slug, form.name, form.description, form.amount, form.days,
+      form.position === null ? last + 1 : form.position
+    );
+    await adminAudit(c, `added product ${slug} (${form.name}, ${form.amount}, `
+      + `${planDuration(form.days)})`);
+    setFlash(c, 'success', `Added "${form.name}" — it is on sale at /buy now.`);
+    return c.redirect('/admin/shop', 302);
+  });
+
+  const findProduct = async (c) => {
+    const id = intParam(c.req.param('id'), -1);
+    return id > 0 ? c.get('db').get('SELECT * FROM products WHERE id = ?', id) : null;
+  };
+
+  app.post('/admin/shop/:id/edit', async (c) => {
+    const gate = requireAdmin(c);
+    if (gate) return gate;
+    const product = await findProduct(c);
+    if (!product) return notFound(c, 'No such product.');
+    const form = readProductForm(await formBody(c));
+    if (form.error) {
+      setFlash(c, 'error', form.error);
+      return c.redirect('/admin/shop', 302);
+    }
+    await c.get('db').run(
+      `UPDATE products SET name = ?, description = ?, amount = ?, period_days = ?, position = ?,
+         updated_at = datetime('now') WHERE id = ?`,
+      form.name, form.description, form.amount, form.days,
+      form.position === null ? product.position : form.position, product.id
+    );
+    await adminAudit(c, `edited product ${product.slug}: ${form.name}, ${form.amount}, ${planDuration(form.days)}`);
+    setFlash(c, 'success', `Updated "${form.name}". Orders already placed keep their original price.`);
+    return c.redirect('/admin/shop', 302);
+  });
+
+  app.post('/admin/shop/:id/toggle', async (c) => {
+    const gate = requireAdmin(c);
+    if (gate) return gate;
+    const product = await findProduct(c);
+    if (!product) return notFound(c, 'No such product.');
+    const next = product.active ? 0 : 1;
+    await c.get('db').run(
+      "UPDATE products SET active = ?, updated_at = datetime('now') WHERE id = ?", next, product.id
+    );
+    await adminAudit(c, `${next ? 'showed' : 'hid'} product ${product.slug}`);
+    setFlash(c, 'success', `"${product.name}" is ${next ? 'back on sale' : 'hidden from the shop'}.`);
+    return c.redirect('/admin/shop', 302);
+  });
+
+  app.post('/admin/shop/:id/delete', async (c) => {
+    const gate = requireAdmin(c);
+    if (gate) return gate;
+    const product = await findProduct(c);
+    if (!product) return notFound(c, 'No such product.');
+    // Payments snapshot their own price and plan name, so removing a product
+    // never disturbs an order that was placed against it.
+    await c.get('db').run('DELETE FROM products WHERE id = ?', product.id);
+    await adminAudit(c, `deleted product ${product.slug} (${product.name})`);
+    setFlash(c, 'success', `Deleted "${product.name}". Past orders are unaffected.`);
+    return c.redirect('/admin/shop', 302);
+  });
+
+  // --- Crypto payments -----------------------------------------------------
+
+  const findPayment = async (c) => {
+    const id = intParam(c.req.param('id'), -1);
+    return id > 0 ? c.get('db').get('SELECT * FROM payments WHERE id = ?', id) : null;
+  };
+
+  app.get('/admin/payments', async (c) => {
+    const db = c.get('db');
+    const cfg = btcpayConfig(c.get('cfg'));
+    const url = new URL(c.req.url);
+
+    // Opportunistic safety net: Pages Functions have no cron, so the sweep of
+    // payments whose buyer never came back rides along with this page load.
+    // Bounded (a handful of rows) so opening the queue is never a thundering
+    // herd against the payment server.
+    const swept = (await sweepOpenPayments(c, cfg)).length;
+
+    const status = PAYMENT_STATUSES.includes(url.searchParams.get('status'))
+      ? url.searchParams.get('status') : '';
+    const where = status ? 'WHERE status = ?' : '';
+    const params = status ? [status] : [];
+    const total = Number((await db.get(`SELECT COUNT(*) AS n FROM payments ${where}`, ...params)).n);
+    const pages = Math.max(1, Math.ceil(total / PAYMENTS_PER_PAGE));
+    const page = Math.max(1, Math.min(pages, intParam(url.searchParams.get('page'))));
+    const rows = await db.all(
+      `SELECT * FROM payments ${where} ORDER BY id DESC LIMIT ? OFFSET ?`,
+      ...params, PAYMENTS_PER_PAGE, (page - 1) * PAYMENTS_PER_PAGE
+    );
+
+    return c.html(views.payments(c.get('view'), {
+      rows, status, statuses: PAYMENT_STATUSES, page, pages, total,
+      live: cfg.configured, swept,
+    }));
+  });
+
+  // Ask BTCPay again about one payment and apply whatever it says. Staff-level:
+  // it can only ever act on the store's own verdict.
+  app.post('/admin/payments/:id/recheck', async (c) => {
+    const payment = await findPayment(c);
+    if (!payment) return notFound(c, 'No such payment.');
+    const cfg = btcpayConfig(c.get('cfg'));
+    if (!cfg.configured) {
+      setFlash(c, 'error', 'BTCPay is not configured — nothing to re-check against.');
+      return c.redirect(backTo(c, '/admin/payments'), 302);
+    }
+    const verdict = await verifyAndCredit(c, cfg, payment, `re-check by ${c.get('user').username}`);
+    setFlash(c, verdict.granted ? 'success' : 'error', verdict.granted
+      ? `Order ${payment.order_id}: settled — membership granted.`
+      : `Order ${payment.order_id}: ${verdict.reason === 'already' ? 'already credited'
+        : verdict.reason === 'not_settled' ? `not paid yet (${verdict.status || 'unknown'})`
+        : verdict.reason}.`);
+    return c.redirect(backTo(c, '/admin/payments'), 302);
+  });
+
+  // Grant a membership by hand — for money that arrived out of band, or an
+  // invoice BTCPay has lost. Staff-level, and always audited as manual.
+  app.post('/admin/payments/:id/credit', async (c) => {
+    const gate = requireStaff(c);
+    if (gate) return gate;
+    const db = c.get('db');
+    const payment = await findPayment(c);
+    if (!payment) return notFound(c, 'No such payment.');
+    if (payment.credited_at) {
+      setFlash(c, 'error', `Order ${payment.order_id} was already credited.`);
+      return c.redirect(backTo(c, '/admin/payments'), 302);
+    }
+
+    const target = await db.get('SELECT id, tier, paid_until FROM users WHERE id = ?', payment.user_id);
+    if (!target) {
+      setFlash(c, 'error', `Order ${payment.order_id}: that account no longer exists.`);
+      return c.redirect(backTo(c, '/admin/payments'), 302);
+    }
+    const claim = await db.run(
+      "UPDATE payments SET status = 'settled', credited_at = ?, updated_at = datetime('now') WHERE id = ? AND credited_at IS NULL",
+      Date.now(), payment.id
+    );
+    if (claim.changes === 0) {
+      setFlash(c, 'error', `Order ${payment.order_id} was credited by something else just now.`);
+      return c.redirect(backTo(c, '/admin/payments'), 302);
+    }
+
+    await grantMembership(db, target, payment.period_days);
+    await adminAudit(c, `manually credited payment ${payment.order_id} for ${payment.username} `
+      + `(${payment.amount} ${payment.currency}${payment.period_days ? `, ${payment.period_days}d` : ', lifetime'})`);
+    setFlash(c, 'success', `Order ${payment.order_id} credited — ${payment.username} is now Paid.`);
+    return c.redirect(backTo(c, '/admin/payments'), 302);
+  });
+
+  // --- Direct-to-wallet payments (ETH / SOL / USDT) -----------------------
+  //
+  // The automatic path needs no admin at all. What lands here is the residue:
+  // an order somebody paid oddly, or a transfer that arrived with no single
+  // order to attach it to. Both mean money is already in the wallet, so every
+  // action below is about attribution, never about taking payment.
+
+  /** Decorates an order row with the formatted values the view renders. */
+  const decorateOrder = (cfg, row) => {
+    const asset = cfg.byKey[row.asset];
+    const expected = parseUnits(row.expected_units) ?? 0n;
+    const received = parseUnits(row.received_units);
+    return {
+      ...row,
+      symbol: asset ? asset.symbol : String(row.asset).toUpperCase(),
+      expectedAmount: fromUnits(expected, Number(row.decimals)),
+      receivedAmount: received === null ? null : fromUnits(received, Number(row.decimals)),
+      shortfall: received !== null && received < expected
+        ? `${fromUnits(expected - received, Number(row.decimals))} ${asset ? asset.symbol : ''}` : null,
+      needed: asset ? requiredConfirmations(cfg, asset) : 0,
+      explorer: asset && row.tx_hash ? explorerLink(asset, row.tx_hash) : '',
+    };
+  };
+
+  app.get('/admin/crypto', async (c) => {
+    const db = c.get('db');
+    const cfg = onchainConfig(c.get('cfg'));
+    const url = new URL(c.req.url);
+    const now = Date.now();
+
+    // Pages Functions have no cron, so opening this page also nudges the scan.
+    const swept = await maybeScan(c, cfg, { source: `admin ${c.get('user').username}` })
+      .catch(() => null);
+    const scanNote = swept && swept.results && swept.results.length
+      ? swept.results.map((r) => `${r.asset}: ${r.error ? `error — ${r.error}` : `${r.seen} seen, ${r.credited} credited`}`).join(' · ')
+      : '';
+
+    const status = CHAIN_STATUSES.includes(url.searchParams.get('status'))
+      ? url.searchParams.get('status') : '';
+    const where = status ? 'WHERE status = ?' : '';
+    const params = status ? [status] : [];
+    const total = Number((await db.get(`SELECT COUNT(*) AS n FROM chain_orders ${where}`, ...params)).n);
+    const pages = Math.max(1, Math.ceil(total / CHAIN_ORDERS_PER_PAGE));
+    const page = Math.max(1, Math.min(pages, intParam(url.searchParams.get('page'))));
+    const rows = await db.all(
+      `SELECT * FROM chain_orders ${where} ORDER BY id DESC LIMIT ? OFFSET ?`,
+      ...params, CHAIN_ORDERS_PER_PAGE, (page - 1) * CHAIN_ORDERS_PER_PAGE
+    );
+
+    // Money in the wallet that nothing claimed. Each one is offered the live
+    // orders for its coin, cheapest mismatch first, so assigning it is one click.
+    const stranded = await db.all(
+      `SELECT * FROM chain_transfers
+        WHERE status IN ('unmatched', 'ambiguous') ORDER BY id DESC LIMIT 25`
+    );
+    const transfers = [];
+    for (const t of stranded) {
+      const asset = cfg.byKey[t.asset];
+      // Every uncredited order for the coin, not just the open ones. The
+      // transfer is often parked precisely BECAUSE its owner's order was
+      // cancelled or expired — offering only live orders would list everyone
+      // except the person whose money this is. Nearest quote first, so the
+      // likely owner is the default choice rather than something to hunt for.
+      const paid = parseUnits(t.units) ?? 0n;
+      const candidates = (await db.all(
+        `SELECT * FROM chain_orders
+          WHERE asset = ? AND credited_at IS NULL
+            AND created_at >= datetime('now', '-30 days')
+          ORDER BY id DESC LIMIT 60`, t.asset
+      )).map((o) => {
+        const expected = parseUnits(o.expected_units) ?? 0n;
+        return { row: o, distance: paid > expected ? paid - expected : expected - paid };
+      }).sort((a, b) => (a.distance > b.distance ? 1 : a.distance < b.distance ? -1 : 0))
+        .slice(0, 25)
+        .map((entry) => ({ ...decorateOrder(cfg, entry.row), closed: !isLiveOrder(entry.row, now) }));
+
+      // The buyer who pasted this transaction on their own pay page is the
+      // likeliest owner: their order is offered first and preselected, and
+      // offered even when its amount put it outside the nearest few.
+      const claimedId = t.claimed_order_id ? String(t.claimed_order_id) : '';
+      if (claimedId && !candidates.some((o) => o.order_id === claimedId)) {
+        const claimedRow = await db.get(
+          'SELECT * FROM chain_orders WHERE order_id = ? AND asset = ?', claimedId, t.asset
+        );
+        if (claimedRow && !claimedRow.credited_at) {
+          candidates.unshift({ ...decorateOrder(cfg, claimedRow), closed: !isLiveOrder(claimedRow, now) });
+        }
+      }
+      for (const o of candidates) o.claimed = claimedId !== '' && o.order_id === claimedId;
+      candidates.sort((a, b) => Number(b.claimed) - Number(a.claimed));
+      const claimant = candidates.find((o) => o.claimed);
+
+      transfers.push({
+        ...t,
+        symbol: asset ? asset.symbol : String(t.asset).toUpperCase(),
+        amount: asset ? `${fromUnits(parseUnits(t.units) ?? 0n, asset.decimals)} ${asset.symbol}` : String(t.units),
+        explorer: asset ? explorerLink(asset, t.tx_hash) : '',
+        candidates,
+        claimedBy: claimant ? claimant.username : '',
+      });
+    }
+
+    return c.html(views.chain(c.get('view'), {
+      config: {
+        assets: cfg.assets.map((a) => ({
+          symbol: a.symbol, network: a.network, address: a.address,
+          confirmations: requiredConfirmations(cfg, a),
+          feeAllowance: fromUnits(cfg.feeAllowance[a.key] ?? 0n, a.decimals),
+        })),
+        invalid: cfg.invalid,
+        tolerancePct: cfg.toleranceBp / 100,
+        feeSharePct: cfg.feeShareBp / 100,
+        payWindowMinutes: cfg.payWindowMinutes,
+        matchHours: cfg.matchHours,
+        scanIntervalSeconds: cfg.scanIntervalSeconds,
+        scanSecret: Boolean(cfg.scanSecret),
+      },
+      orders: rows.map((r) => decorateOrder(cfg, r)),
+      transfers,
+      status, statuses: CHAIN_STATUSES,
+      page, pages, total,
+      scan: scanNote,
+    }));
+  });
+
+  app.post('/admin/crypto/scan', async (c) => {
+    const cfg = onchainConfig(c.get('cfg'));
+    if (!cfg.configured) {
+      setFlash(c, 'error', 'No receiving addresses are configured, so there is nothing to scan.');
+      return c.redirect('/admin/crypto', 302);
+    }
+    const source = `admin ${c.get('user').username}`;
+    const result = await maybeScan(c, cfg, { force: true, includeIdle: true, source });
+    // Payments held for a decision get another look under today's rules, so a
+    // widened allowance reaches money that arrived before it was widened.
+    const held = await rematchHeld(c, cfg, { source }).catch((err) => {
+      console.error('re-check of held payments failed:', err);
+      return { checked: 0, credited: 0, matched: 0, errors: 1 };
+    });
+    const summary = (result.results || [])
+      .map((r) => `${r.asset}: ${r.error ? `error — ${r.error}` : `${r.seen} seen, ${r.credited} credited`}`)
+      .concat(held.checked > 0
+        ? [`${held.checked} held payment${held.checked === 1 ? '' : 's'} re-checked, ${held.credited} credited`]
+        : [])
+      .join(' · ');
+    setFlash(c, (result.results || []).some((r) => r.error) || held.errors > 0 ? 'error' : 'success',
+      summary || `Nothing to scan (${result.skipped || 'no pending orders'}).`);
+    return c.redirect('/admin/crypto', 302);
+  });
+
+  const findChainOrder = async (c) => {
+    const id = intParam(c.req.param('id'), -1);
+    return id > 0 ? c.get('db').get('SELECT * FROM chain_orders WHERE id = ?', id) : null;
+  };
+
+  // Grant a membership for an order with no confirmed on-chain match — money
+  // that arrived some other way, or a chain the APIs cannot see right now.
+  // Staff-level, and always audited as manual.
+  app.post('/admin/crypto/orders/:id/credit', async (c) => {
+    const gate = requireStaff(c);
+    if (gate) return gate;
+    const order = await findChainOrder(c);
+    if (!order) return notFound(c, 'No such order.');
+    if (order.credited_at) {
+      setFlash(c, 'error', `Order ${order.order_id} was already credited.`);
+      return c.redirect('/admin/crypto', 302);
+    }
+    const cfg = onchainConfig(c.get('cfg'));
+    const verdict = await creditOrder(c, cfg, order, null, `manual credit by ${c.get('user').username}`);
+    if (verdict.granted) {
+      await adminAudit(c, `manually credited on-chain order ${order.order_id} for ${order.username}`);
+      setFlash(c, 'success', `Order ${order.order_id} credited — ${order.username} is now Paid.`);
+    } else {
+      setFlash(c, 'error', `Order ${order.order_id}: ${verdict.reason}.`);
+    }
+    return c.redirect('/admin/crypto', 302);
+  });
+
+  app.post('/admin/crypto/orders/:id/cancel', async (c) => {
+    const order = await findChainOrder(c);
+    if (!order) return notFound(c, 'No such order.');
+    const claim = await c.get('db').run(
+      `UPDATE chain_orders SET status = 'cancelled', updated_at = datetime('now')
+       WHERE id = ? AND credited_at IS NULL`, order.id
+    );
+    if (claim.changes > 0) await adminAudit(c, `cancelled on-chain order ${order.order_id}`);
+    setFlash(c, claim.changes > 0 ? 'success' : 'error', claim.changes > 0
+      ? `Order ${order.order_id} cancelled.`
+      : `Order ${order.order_id} is already credited and cannot be cancelled.`);
+    return c.redirect('/admin/crypto', 302);
+  });
+
+  // Attribute a stranded payment to the order it actually paid for. This is the
+  // action that resolves the queue above.
+  app.post('/admin/crypto/transfers/:id/assign', async (c) => {
+    const gate = requireStaff(c);
+    if (gate) return gate;
+    const db = c.get('db');
+    const id = intParam(c.req.param('id'), -1);
+    const transfer = id > 0 ? await db.get('SELECT * FROM chain_transfers WHERE id = ?', id) : null;
+    if (!transfer) return notFound(c, 'No such payment.');
+    if (transfer.status === 'credited') {
+      setFlash(c, 'error', 'That payment has already been credited.');
+      return c.redirect('/admin/crypto', 302);
+    }
+
+    const body = await formBody(c);
+    const orderId = String(body.order || '').trim().slice(0, 64);
+    const order = await db.get(
+      'SELECT * FROM chain_orders WHERE order_id = ? AND asset = ?', orderId, transfer.asset
+    );
+    if (!order) {
+      setFlash(c, 'error', 'That order no longer exists, or is for a different coin.');
+      return c.redirect('/admin/crypto', 302);
+    }
+    if (order.credited_at) {
+      setFlash(c, 'error', `Order ${order.order_id} was already credited.`);
+      return c.redirect('/admin/crypto', 302);
+    }
+
+    const cfg = onchainConfig(c.get('cfg'));
+    const verdict = await creditOrder(c, cfg, order, transfer, `assigned by ${c.get('user').username}`);
+    if (verdict.granted) {
+      await adminAudit(c, `assigned ${transfer.asset} payment ${String(transfer.tx_hash).slice(0, 20)} `
+        + `to order ${order.order_id} for ${order.username}`);
+      setFlash(c, 'success', `Credited to ${order.username}.`);
+    } else {
+      setFlash(c, 'error', `Could not credit that: ${verdict.reason}.`);
+    }
+    return c.redirect('/admin/crypto', 302);
+  });
+
+  app.post('/admin/crypto/transfers/:id/ignore', async (c) => {
+    const id = intParam(c.req.param('id'), -1);
+    const claim = await c.get('db').run(
+      `UPDATE chain_transfers SET status = 'ignored', updated_at = datetime('now')
+       WHERE id = ? AND status <> 'credited'`, id
+    );
+    if (claim.changes > 0) await adminAudit(c, `dismissed unattributed chain payment #${id}`);
+    setFlash(c, claim.changes > 0 ? 'success' : 'error', claim.changes > 0
+      ? 'Dismissed. It stays on record and can still be assigned later from the database.'
+      : 'That payment has already been credited.');
+    return c.redirect('/admin/crypto', 302);
+  });
+
   app.post('/admin/users/:id/ban', async (c) => {
     const db = c.get('db');
     const user = await findUser(c);
     if (!user) return notFound(c, 'No such user.');
     if (user.id === c.get('user').id) {
       setFlash(c, 'error', 'You cannot ban yourself.');
+      return c.redirect(backTo(c, '/admin/users'), 302);
+    }
+    if (isFullAdmin(user)) {
+      setFlash(c, 'error', 'Admins cannot be banned from here.');
       return c.redirect(backTo(c, '/admin/users'), 302);
     }
     await db.run('UPDATE users SET banned = 1 WHERE id = ?', user.id);
@@ -211,17 +717,17 @@ function register(app) {
     return c.redirect(backTo(c, '/admin/users'), 302);
   });
 
-  // Adjust one Paid member's remaining days (full admin). Positive extends,
+  // Adjust one Paid member's remaining days (staff-level). Positive extends,
   // negative shortens; time is added on top of what's left (or from now if
   // already expired). Works on lifetime subs too — they become dated.
   app.post('/admin/users/:id/paid-days', async (c) => {
-    const gate = requireAdmin(c);
+    const gate = requireStaff(c);
     if (gate) return gate;
     const db = c.get('db');
     const user = await findUser(c);
     if (!user) return notFound(c, 'No such user.');
     if (user.tier !== 'paid') {
-      setFlash(c, 'error', `${user.username} is not on the Paid tier — set their tier first.`);
+      setFlash(c, 'error', `${user.username} is not on the Paid tier; set their tier first.`);
       return c.redirect(backTo(c, '/admin/users'), 302);
     }
     const body = await formBody(c);
@@ -237,15 +743,15 @@ function register(app) {
     const next = Math.max(now, base + Math.round(delta) * 86_400_000);
     await db.run('UPDATE users SET paid_until = ? WHERE id = ?', next, user.id);
     const left = Math.max(0, Math.round((next - now) / 86_400_000));
-    await adminAudit(c, `adjusted #${user.id} (${user.username}) subscription by ${delta}d — ${left}d left`);
-    setFlash(c, 'success', `${user.username}: ${delta > 0 ? '+' : ''}${Math.round(delta)} days — ${left} day${left === 1 ? '' : 's'} remaining.`);
+    await adminAudit(c, `adjusted #${user.id} (${user.username}) subscription by ${delta}d; ${left}d left`);
+    setFlash(c, 'success', `${user.username}: ${delta > 0 ? '+' : ''}${Math.round(delta)} days; ${left} day${left === 1 ? '' : 's'} remaining.`);
     return c.redirect(backTo(c, '/admin/users'), 302);
   });
 
   // Mass adjustment: every DATED Paid subscription shifts by N days (e.g.
   // "+3 to everyone" after downtime). Lifetime subscriptions are untouched.
   app.post('/admin/subscriptions/adjust', async (c) => {
-    const gate = requireAdmin(c);
+    const gate = requireStaff(c);
     if (gate) return gate;
     const db = c.get('db');
     const body = await formBody(c);
@@ -350,6 +856,7 @@ function register(app) {
     const placeholder = await deletedUserId(db);
     const threads = await db.run('UPDATE threads SET user_id = ? WHERE user_id = ?', placeholder, user.id);
     const posts = await db.run('UPDATE posts SET user_id = ? WHERE user_id = ?', placeholder, user.id);
+    await scrubSupportIdentity(db, user.id, DELETED_USERNAME);
     await db.run('DELETE FROM users WHERE id = ?', user.id);
     await adminAudit(c, `deleted user #${user.id} (${user.username}); reassigned ${threads.changes} threads and ${posts.changes} posts to ${DELETED_USERNAME}`);
     setFlash(c, 'success', `${user.username} has been deleted. Their posts remain, attributed to ${DELETED_USERNAME}.`);
@@ -414,6 +921,57 @@ function register(app) {
     await adminAudit(c, `banned IP ${ip}${reason ? ` (${reason})` : ''}`);
     setFlash(c, 'success', `${ip} has been banned.`);
     return c.redirect(backTo(c, '/admin/logs'), 302);
+  });
+
+  // Fingerprint log: one row per distinct device (fp_hash), latest sighting
+  // first. Each fingerprint has its own drill-down log at /admin/fingerprints/:hash.
+  app.get('/admin/fingerprints', async (c) => {
+    const db = c.get('db');
+    const url = new URL(c.req.url);
+    const q = String(url.searchParams.get('q') || '').trim().slice(0, 100);
+
+    const clauses = [];
+    const params = [];
+    if (q) {
+      clauses.push('(fp_hash LIKE ? OR ip LIKE ? OR username LIKE ? OR email LIKE ? OR device LIKE ? OR browser LIKE ? OR os LIKE ?)');
+      params.push(...Array(7).fill(`%${q}%`));
+    }
+    const where = clauses.length ? `WHERE ${clauses.join(' AND ')}` : '';
+
+    const total = Number((await db.get(
+      `SELECT COUNT(*) AS n FROM (SELECT fp_hash FROM fingerprints ${where} GROUP BY fp_hash)`, ...params
+    )).n);
+    const pages = Math.max(1, Math.ceil(total / FINGERPRINTS_PER_PAGE));
+    const page = Math.max(1, Math.min(pages, intParam(url.searchParams.get('page'))));
+
+    const { maskFingerprint } = await adminIpMask(c);
+    const rows = (await db.all(
+      `SELECT f.*, g.sightings, g.first_seen, g.last_seen, g.user_count
+       FROM fingerprints f
+       JOIN (
+         SELECT fp_hash, MAX(id) AS latest_id, COUNT(*) AS sightings,
+                MIN(created_at) AS first_seen, MAX(created_at) AS last_seen,
+                COUNT(DISTINCT CASE WHEN user_id IS NOT NULL THEN user_id END) AS user_count
+         FROM fingerprints ${where}
+         GROUP BY fp_hash
+       ) g ON g.latest_id = f.id
+       ORDER BY g.last_seen DESC LIMIT ? OFFSET ?`,
+      ...params, FINGERPRINTS_PER_PAGE, (page - 1) * FINGERPRINTS_PER_PAGE
+    )).map(maskFingerprint);
+
+    return c.html(views.fingerprints(c.get('view'), { rows, q, page, pages, total }));
+  });
+
+  // Full sighting history for one device fingerprint — the "own log" per fingerprint.
+  app.get('/admin/fingerprints/:hash', async (c) => {
+    const db = c.get('db');
+    const hash = String(c.req.param('hash') || '');
+    const { maskFingerprint } = await adminIpMask(c);
+    const sightings = (await db.all(
+      'SELECT * FROM fingerprints WHERE fp_hash = ? ORDER BY id DESC LIMIT 300', hash
+    )).map(maskFingerprint);
+    if (!sightings.length) return notFound(c, 'No such fingerprint.');
+    return c.html(views.fingerprintDetail(c.get('view'), { hash, sightings }));
   });
 
   app.post('/admin/ip-bans/:ip/unban', async (c) => {
@@ -593,7 +1151,7 @@ function register(app) {
     }
     const first = await db.get('SELECT MIN(id) AS m FROM posts WHERE thread_id = ?', post.thread_id);
     if (Number(first.m) === post.id) {
-      setFlash(c, 'error', 'That is the opening post — delete the whole thread instead.');
+      setFlash(c, 'error', 'That is the opening post; delete the whole thread instead.');
       return c.redirect(backTo(c, `/forum/t/${post.thread_id}`), 302);
     }
     await db.run('DELETE FROM posts WHERE id = ?', id);
@@ -603,4 +1161,4 @@ function register(app) {
   });
 }
 
-export { register, LOG_EVENTS };
+export { register, LOG_EVENTS, adminIpMask };

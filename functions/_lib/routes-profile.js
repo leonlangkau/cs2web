@@ -10,7 +10,10 @@ import { EMAIL_RE, sendVerificationEmail, isDisposableEmail } from "./routes-aut
 import { isEmailConfigured } from "./email.js";
 import * as limits from "./limits.js";
 import { tooMany } from "./routes-main.js";
-import { DELETED_USERNAME, deletedUserId } from "./bootstrap.js";
+import { btcpayConfig } from "./btcpay.js";
+import { onchainConfig, reconcileForUser as reconcileChainForUser } from "./onchain.js";
+import { reconcileForUser } from "./fulfil.js";
+import { DELETED_USERNAME, deletedUserId, scrubSupportIdentity } from "./bootstrap.js";
 
 function register(app) {
   app.get('/profile', async (c) => {
@@ -18,6 +21,13 @@ function register(app) {
     if (gate) return gate;
     const db = c.get('db');
     const user = c.get('user');
+
+    // Someone who just paid comes here to check their tier. Settle anything the
+    // chain (or BTCPay) now says is paid before the page is rendered, so the
+    // tier they see is the tier they bought.
+    await reconcileForUser(c, btcpayConfig(c.get('cfg')), user.id);
+    await reconcileChainForUser(c, onchainConfig(c.get('cfg')), user.id)
+      .catch((err) => console.error('chain reconcile failed on profile:', err));
 
     const one = async (sql, ...args) => Number((await db.get(sql, ...args))?.n || 0);
     const stats = {
@@ -37,9 +47,16 @@ function register(app) {
     // The license is shown to every signed-in member — the loader needs a
     // verifiable "this account is Free" just as much as "this is Paid".
     const license = await issueLicense(user, c.get('cfg'));
+    // Recent crypto payments (if any), newest first, so a member can see an
+    // in-flight or past purchase and its status.
+    const payments = await db.all(
+      `SELECT amount, currency, period_days, status, credited_at, created_at
+       FROM payments WHERE user_id = ? ORDER BY id DESC LIMIT 5`,
+      user.id
+    );
     return c.html(views.profile(c.get('view'), {
       account, stats, license, isPaid: meetsTier(user, 'paid'),
-      sessions, currentSessionId: c.get('sessionId'),
+      sessions, currentSessionId: c.get('sessionId'), payments,
       isAdminAccount: isFullAdmin(user),
       emailConfigured: isEmailConfigured(c.get('cfg')),
     }));
@@ -85,7 +102,7 @@ function register(app) {
       return c.redirect('/profile', 302);
     }
     if (isDisposableEmail(email, c.get('cfg'))) {
-      setFlash(c, 'error', 'Disposable email addresses cannot be used — use a real inbox.');
+      setFlash(c, 'error', 'Disposable email addresses cannot be used; use a real inbox.');
       return c.redirect('/profile', 302);
     }
     const taken = await db.get('SELECT id FROM users WHERE email = ? AND id != ?', email, user.id);
@@ -123,7 +140,7 @@ function register(app) {
       await destroySession(c);
       return c.redirect('/auth/login', 302);
     }
-    setFlash(c, 'success', 'Session revoked — that device is signed out.');
+    setFlash(c, 'success', 'Session revoked. That device is signed out.');
     return c.redirect('/profile', 302);
   });
 
@@ -157,6 +174,7 @@ function register(app) {
     await db.run('UPDATE threads SET user_id = ? WHERE user_id = ?', placeholder, user.id);
     await db.run('UPDATE posts SET user_id = ? WHERE user_id = ?', placeholder, user.id);
     await db.run('DELETE FROM shouts WHERE user_id = ?', user.id);
+    await scrubSupportIdentity(db, user.id, DELETED_USERNAME);
     await destroyUserSessions(db, user.id);
     await db.run('DELETE FROM users WHERE id = ?', user.id);
     await destroySession(c); // clears the cookie; the session row is already gone

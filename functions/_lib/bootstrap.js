@@ -1,4 +1,6 @@
-import { hashPassword, verifyPassword, newToken } from "./crypto.js";
+import { hashPassword, verifyPassword, newToken, sha256hex } from "./crypto.js";
+import { seedHelpCentre, seedMacros } from "./kb.js";
+import { seedStatus } from "./status.js";
 
 /**
  * Reserved account that inherits the threads and posts of a deleted user, so
@@ -75,6 +77,13 @@ const USER_REF_COLUMNS = [
   ['threads', 'user_id'], ['posts', 'user_id'], ['shouts', 'user_id'],
   ['sessions', 'user_id'], ['auth_tokens', 'user_id'],
   ['ip_logs', 'user_id'], ['reports', 'reporter_id'],
+  // Support. user_notes.user_id cascades on delete, so a UID move that did not
+  // repoint it would silently destroy a member's staff notes.
+  ['tickets', 'user_id'], ['tickets', 'assignee_id'],
+  ['ticket_messages', 'author_id'], ['ticket_notes', 'author_id'],
+  ['ticket_attachments', 'uploader_id'],
+  ['user_notes', 'user_id'], ['user_notes', 'author_id'],
+  ['support_views', 'owner_id'],
 ];
 
 /**
@@ -162,18 +171,93 @@ async function ensureVanityUids(db) {
   }
 }
 
-/** Runs the DDL once per process/isolate. */
+/**
+ * And for tickets.key_hash_prev / key_rotated_at — the grace window that stops
+ * a re-issued guest link instantly breaking the one the owner had saved.
+ */
+async function ensureTicketKeyColumns(db) {
+  const columns = await db.all('PRAGMA table_info(tickets)');
+  if (columns.length === 0) return; // table not created yet; schema.sql covers it
+  if (!columns.some((c) => c.name === 'key_hash_prev')) {
+    await db.run('ALTER TABLE tickets ADD COLUMN key_hash_prev TEXT');
+  }
+  if (!columns.some((c) => c.name === 'key_rotated_at')) {
+    await db.run('ALTER TABLE tickets ADD COLUMN key_rotated_at INTEGER');
+  }
+}
+
+/** And for payments.plan_id / plan_name (the catalogue shipped after checkout did). */
+async function ensurePaymentPlanColumns(db) {
+  const columns = await db.all('PRAGMA table_info(payments)');
+  if (columns.length === 0) return; // table not created yet; schema.sql covers it
+  if (!columns.some((c) => c.name === 'plan_id')) {
+    await db.run('ALTER TABLE payments ADD COLUMN plan_id TEXT');
+  }
+  if (!columns.some((c) => c.name === 'plan_name')) {
+    await db.run('ALTER TABLE payments ADD COLUMN plan_name TEXT');
+  }
+}
+
+/** chain_transfers.claimed_order_id shipped after the on-chain checkout did. */
+async function ensureChainClaimColumn(db) {
+  const columns = await db.all('PRAGMA table_info(chain_transfers)');
+  if (columns.length === 0) return; // table not created yet; schema.sql covers it
+  if (!columns.some((c) => c.name === 'claimed_order_id')) {
+    await db.run('ALTER TABLE chain_transfers ADD COLUMN claimed_order_id TEXT');
+  }
+}
+
+/**
+ * Marker holding a hash of the DDL that was last applied successfully.
+ *
+ * D1 has no multi-statement exec, so the adapter replays schema.sql one
+ * statement at a time — every CREATE TABLE IF NOT EXISTS and CREATE INDEX IF
+ * NOT EXISTS is its own round-trip. On a schema this size that is ~70 calls on
+ * every isolate cold start, all of them no-ops against a database that already
+ * has the tables. Recording a fingerprint of the DDL turns that into a single
+ * SELECT, while still re-running everything (including the guarded ALTERs) the
+ * moment schema.sql actually changes — so it cannot become the "CREATE TABLE
+ * IF NOT EXISTS silently did nothing" trap in a new costume.
+ */
+const SCHEMA_MARKER = 'schema_fingerprint';
+
+async function schemaFingerprint(db) {
+  try {
+    const row = await db.get('SELECT value FROM settings WHERE key = ?', SCHEMA_MARKER);
+    return row ? row.value : null;
+  } catch {
+    // `settings` itself does not exist yet — a brand-new database.
+    return null;
+  }
+}
+
+/** Runs the DDL once per process/isolate, and only when it has changed. */
 const schemaReady = new WeakMap();
 
 function ensureSchema(db) {
   if (!schemaReady.has(db)) {
     schemaReady.set(db, (async () => {
+      const fingerprint = await sha256hex(SCHEMA);
+      if (await schemaFingerprint(db) === fingerprint) return;
+
       await db.exec(SCHEMA);
       await ensureTierColumn(db);
       await ensureIpBanExpiryColumn(db);
       await ensurePostEditColumns(db);
       await ensureEmailVerifiedColumn(db);
       await ensurePaidUntilColumn(db);
+      await ensurePaymentPlanColumns(db);
+      await ensureTicketKeyColumns(db);
+      await ensureChainClaimColumn(db);
+
+      // Written last: a crash part-way through leaves no marker, so the next
+      // cold start does the whole thing again rather than trusting a
+      // half-applied schema.
+      await db.run(
+        `INSERT INTO settings (key, value, updated_at) VALUES (?, ?, datetime('now'))
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`,
+        SCHEMA_MARKER, fingerprint
+      );
     })());
   }
   return schemaReady.get(db);
@@ -288,7 +372,69 @@ async function seed(db, env = {}) {
     }
   }
 
+  // Guests can open support tickets, which makes the proof-of-work the only
+  // thing standing between an anonymous form and the outbound mailer. Its
+  // fallback secret is in this repository, so say so once per cold start
+  // rather than letting a deployment quietly run on it.
+  if (!env.CAPTCHA_SECRET) {
+    console.warn('CAPTCHA_SECRET is not set — the proof-of-work CAPTCHA is running on the public '
+      + 'development secret, so sign-up and guest support tickets can be forged. Set it as a secret.');
+  }
+
+  // Help centre + canned replies. Both are one-shot: once a section (or a
+  // macro) exists the seed never runs again, so an operator who rewrites or
+  // deletes an article does not find it reinstated on the next cold start.
+  await seedHelpCentre(db);
+  await seedMacros(db);
+  await seedStatus(db);
+
   return { generatedPassword };
+}
+
+/**
+ * Removes the identifying copies a support ticket keeps outside the users
+ * table. `tickets.user_id` is ON DELETE SET NULL so the conversation itself
+ * survives the account (a payment dispute has to outlive a rage-quit), but
+ * `ticket_messages.author_name`, the guest address and the staff notes about
+ * the person are denormalised copies that a foreign key will not touch.
+ */
+async function scrubSupportIdentity(db, userId, placeholderName) {
+  const row = await db.get('SELECT username FROM users WHERE id = ?', userId);
+  const username = row ? row.username : null;
+
+  await db.run(
+    'UPDATE ticket_messages SET author_name = ? WHERE author_id = ?', placeholderName, userId
+  );
+  await db.run(
+    'UPDATE ticket_attachments SET uploader_name = ? WHERE uploader_id = ?', placeholderName, userId
+  );
+  await db.run(
+    'UPDATE ticket_notes SET author_name = ? WHERE author_id = ?', placeholderName, userId
+  );
+  await db.run(
+    'UPDATE user_notes SET author_name = ? WHERE author_id = ?', placeholderName, userId
+  );
+  await db.run(
+    'UPDATE tickets SET assignee_name = ? WHERE assignee_id = ?', placeholderName, userId
+  );
+  // These columns hold a NAME with no id beside it, so they can only be found
+  // by the name — which is exactly why they are easy to forget.
+  if (username) {
+    await db.run('UPDATE tickets SET closed_by = ? WHERE closed_by = ?', placeholderName, username);
+    await db.run('UPDATE ticket_events SET actor_name = ? WHERE actor_name = ?', placeholderName, username);
+    await db.run(
+      'UPDATE status_incidents SET created_by = ? WHERE created_by = ?', placeholderName, username
+    ).catch(() => {});
+    await db.run(
+      'UPDATE status_updates SET author_name = ? WHERE author_name = ?', placeholderName, username
+    ).catch(() => {});
+  }
+  await db.run(
+    'UPDATE tickets SET guest_email = NULL, guest_name = NULL, key_hash = NULL, ip = NULL, user_agent = NULL WHERE user_id = ?',
+    userId
+  );
+  await db.run('DELETE FROM user_notes WHERE user_id = ?', userId);
+  await db.run('DELETE FROM support_views WHERE owner_id = ?', userId);
 }
 
 /** Housekeeping: expired sessions, rate-limit windows, CAPTCHA nonces and auto IP bans. */
@@ -299,9 +445,25 @@ async function cleanup(db) {
   await db.run('DELETE FROM captcha_used WHERE expires_at <= ?', now);
   await db.run('DELETE FROM ip_bans WHERE expires_at IS NOT NULL AND expires_at <= ?', now);
   await db.run('DELETE FROM auth_tokens WHERE expires_at <= ? OR used = 1', now);
+
+  // On-chain orders nobody ever paid, past the window in which a late payment
+  // could still be matched to them. Deliberately only 'new' rows: a 'seen'
+  // order has money against it and is never quietly written off. Nothing is
+  // deleted — the row stays for the admin queue and the audit trail.
+  await db.run(
+    `UPDATE chain_orders SET status = 'expired', updated_at = datetime('now')
+      WHERE status = 'new' AND credited_at IS NULL AND match_until < ?`, now
+  ).catch(() => {});
+  // Transactions that touched our wallet but paid us nothing (someone else's
+  // activity on the same address). Kept a month so a scan doesn't re-fetch
+  // them, then dropped. Rows carrying real money are never pruned.
+  await db.run(
+    `DELETE FROM chain_transfers
+      WHERE status = 'ignored' AND created_at < datetime('now', '-30 days')`
+  ).catch(() => {});
 }
 
 export {
-  ensureSchema, seed, cleanup, deletedUserId, relocateUserId,
+  ensureSchema, seed, cleanup, deletedUserId, relocateUserId, scrubSupportIdentity,
   DELETED_USERNAME, RESERVED_UID_MAX,
 };

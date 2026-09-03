@@ -12,6 +12,11 @@ database_name = "goyhub"
 database_id = "1f2fd246-9cf1-46d0-a88a-629ad12f4243"
 
 [vars]
+# Host canonicalization. By default www.<domain> is 301-redirected to the
+# bare apex (goyhub.st). Set CANONICAL_WWW = "1" to make www the canonical
+# host instead (apex → www). Attach BOTH hostnames as Custom domains in the
+# Pages dashboard so the redirect target resolves.
+# CANONICAL_WWW = "0"
 # Registered entity shown on the legal pages. Replace before publishing —
 # until these are real, both legal pages show a "Setup required" banner.
 COMPANY_LEGAL_NAME = "goyhub"
@@ -27,13 +32,13 @@ COMPANY_LEGAL_EMAIL = "legal@goyhub.st"
 CAPTCHA_DIFFICULTY = "16"
 PBKDF2_ITERATIONS = "100000"
 
-# Rate limits: attempts per window (10 min / hour / minute / hour / minute).
-RATE_LIMIT_LOGIN = "10"
-RATE_LIMIT_SIGNUP = "5"
-RATE_LIMIT_POST = "6"
-RATE_LIMIT_DOWNLOAD = "3"
-RATE_LIMIT_SHOUT = "3"
-RATE_LIMIT_REPORT = "5"
+# Rate limits: attempts per window (10 min / hour / minute / 3 hours / minute).
+RATE_LIMIT_LOGIN = "20"
+RATE_LIMIT_SIGNUP = "10"
+RATE_LIMIT_POST = "15"
+RATE_LIMIT_DOWNLOAD = "60"  # per IP per 3h; staff/admin are exempt entirely (see routes-main.js)
+RATE_LIMIT_SHOUT = "10"
+RATE_LIMIT_REPORT = "15"
 
 # Flood / mass-account protection (application layer — Cloudflare's own WAF,
 # Bot Fight Mode and Under Attack mode remain the first line for real DDoS).
@@ -41,21 +46,108 @@ RATE_LIMIT_REPORT = "5"
 #   RATE_LIMIT_FLOOD     burst breaches per 10 min before a temporary auto IP ban
 #   AUTO_IP_BAN_MINUTES  how long an automatic flood ban lasts
 #   SIGNUP_SURGE_LIMIT   site-wide signups per 10 min before registration pauses ("0" disables)
-RATE_LIMIT_BURST = "240"
-RATE_LIMIT_FLOOD = "5"
+RATE_LIMIT_BURST = "600"
+RATE_LIMIT_FLOOD = "10"
 AUTO_IP_BAN_MINUTES = "60"
-SIGNUP_SURGE_LIMIT = "30"
+SIGNUP_SURGE_LIMIT = "100"
 
 # Crypto payments (the /upgrade page). All optional — with none set the page
 # shows an honest "payments coming soon" note with the support contact.
-#   CRYPTO_PAY_URL        hosted checkout link (Coinbase Commerce, NOWPayments,
-#                         BTCPay, …) once you set one up — shown as the pay button
-#   CRYPTO_PAY_ADDRESSES  manual fallback, e.g. "BTC:bc1qxy...,ETH:0xab...,LTC:ltc1..."
-#   PAID_PRICE            display string, e.g. "$10 / month"
+#
+# PREFERRED: a self-hosted BTCPay Server (crypto-only, no third party). When the
+# four BTCPAY_* values plus PAID_PRICE_AMOUNT are set, /upgrade shows a one-click
+# "Pay with crypto" button that creates an invoice and upgrades the account
+# automatically once the payment confirms on-chain (verified by a signed
+# webhook). Full setup guide: BTCPAY-SETUP.md.
+#   BTCPAY_URL           https base URL of your BTCPay Server, e.g. https://btcpay.goyhub.st
+#   BTCPAY_STORE_ID      the store's id (Store Settings → the id in the URL / General)
+#   PAID_PRICE_AMOUNT    numeric price per membership, e.g. "10.00"
+#   PAID_PRICE_CURRENCY  ISO currency the invoice is priced in (default "USD")
+#   STORE_PLANS          FALLBACK catalogue, used only while the admin-managed
+#                        products table (Admin -> Shop) is empty. Offers several
+#                        lengths without touching the panel:
+#                          "id:Name:amount:days,…"   days 0 = lifetime
+#                        e.g. "m1:1 Month:9.99:30,m12:12 Months:79.99:365,life:Lifetime:149.99:0"
+#                        An entry that does not parse is dropped rather than sold
+#                        at a wrong price. Prices are read from here at checkout,
+#                        never from the buyer's form — the form only names a plan
+#                        id — and each order snapshots what it was sold at, so a
+#                        later price change never rewrites an in-flight purchase.
+#   PAID_PERIOD_DAYS     membership length in days; empty or "0" = lifetime
+# BTCPAY_URL = "https://btcpay.example.com"
+# BTCPAY_STORE_ID = ""
+# PAID_PRICE_AMOUNT = "10.00"
+# PAID_PRICE_CURRENCY = "USD"
+# STORE_PLANS = "m1:1 Month:9.99:30,m12:12 Months:79.99:365,life:Lifetime:149.99:0"
+# PAID_PERIOD_DAYS = "30"
+# RATE_LIMIT_CHECKOUT = "20"  # invoices a member can create per hour (abuse cap)
+#
+# BTCPAY_API_KEY and BTCPAY_WEBHOOK_SECRET are SECRETS — never put them here.
+# Add them in the Pages dashboard (Settings → Variables and Secrets, type
+# Secret) or with `npx wrangler pages secret put NAME`, exactly like
+# ADMIN_PASSWORD. See the secrets note near the bottom of this file.
+#
+# DIRECT-TO-WALLET (ETH / SOL / USDT) — independent of BTCPay, and can run
+# alongside it. Paste your own receiving addresses in as SECRETS (ETH_ADDRESS
+# and SOL_ADDRESS — see the secrets note below) and /buy gains a coin picker;
+# the site watches those addresses and grants Paid once a payment confirms on
+# chain. Nothing here holds or needs a private key. Full guide: CRYPTO-SETUP.md.
+#
+# The chain APIs are public and keyless by default (Blockscout for Ethereum,
+# the Solana mainnet RPC). Everything below is optional tuning:
+#   CRYPTO_ASSETS                 allowlist, e.g. "eth,sol" (default: all configured)
+#   CRYPTO_ETH_CONFIRMATIONS      blocks before ETH/USDT-ERC20 counts (default 12)
+#   CRYPTO_SOL_CONFIRMATIONS      Solana is read at `finalized` already (default 1)
+#   CRYPTO_UNDERPAY_TOLERANCE_PCT how far under the quote still counts as paid,
+#                                 covering exchange withdrawal rounding (default 1)
+#   CRYPTO_FEE_ALLOWANCE          the withdrawal fee an exchange may have taken OUT
+#                                 of a payment, per coin — the wider of this and the
+#                                 percentage is what a payment may fall short by
+#                                 (default "eth:0.001,usdt-erc20:5,sol:0.01,usdt-spl:2")
+#   CRYPTO_FEE_ALLOWANCE_MAX_PCT  the most of a quote that allowance may cover, so a
+#                                 fee bigger than the cheapest plan can never make
+#                                 dust pay for it (default 50; "0" turns it off)
+#   CRYPTO_OVERPAY_TOLERANCE_PCT  how far OVER still reads as that order's payment
+#                                 (default 100); past it a human decides, so a
+#                                 misplaced decimal point never quietly buys one
+#                                 month at fifty times the price
+#   CRYPTO_PAY_WINDOW_MINUTES     how long a quote is honoured (default 60)
+#   CRYPTO_MATCH_HOURS            how long a LATE payment is still matched to its
+#                                 order (default 48) — money that arrives slowly
+#                                 must still upgrade the account
+#   CRYPTO_SCAN_INTERVAL_SECONDS  floor on how often the chains are polled (default 20)
+#   CRYPTO_SCAN_DEPTH             recent transactions each scan reads (default 25)
+#   RATE_LIMIT_CRYPTO_ORDER       orders a member can open per hour (default 12)
+#   RATE_LIMIT_CRYPTO_TX          transaction hashes a member can submit per hour (default 10)
+#   USDT_ERC20_ADDRESS /          only if USDT should land somewhere other than
+#   USDT_SPL_ADDRESS              ETH_ADDRESS / SOL_ADDRESS
+# CRYPTO_ASSETS = "eth,sol,usdt-erc20,usdt-spl"
+# CRYPTO_ETH_CONFIRMATIONS = "12"
+# CRYPTO_UNDERPAY_TOLERANCE_PCT = "1"
+# CRYPTO_FEE_ALLOWANCE = "eth:0.001,usdt-erc20:5,sol:0.01,usdt-spl:2"
+# CRYPTO_FEE_ALLOWANCE_MAX_PCT = "50"
+# CRYPTO_PAY_WINDOW_MINUTES = "60"
+# CRYPTO_MATCH_HOURS = "48"
+#
+# ETH_ADDRESS and SOL_ADDRESS are SECRETS — never put them here. So are
+# CRYPTO_SCAN_SECRET (which lets an external cron drive the chain watcher via
+# /api/crypto/scan, so payments confirm while nobody is on the site) and the
+# optional higher-limit provider keys ETHERSCAN_API_KEY, SOLANA_RPC_URL and
+# COINGECKO_API_KEY. Add them exactly like ADMIN_PASSWORD — see the secrets
+# note near the bottom of this file.
+#
+# FALLBACKS (used only when BTCPay is not configured):
+#   CRYPTO_PAY_URL        hosted checkout link (Coinbase Commerce, NOWPayments…)
+#   CRYPTO_PAY_ADDRESSES  manual addresses, e.g. "BTC:bc1qxy...,ETH:0xab...,LTC:ltc1..."
+#   PAID_PRICE            display string that overrides the composed price, e.g. "$10 / month"
 # CRYPTO_PAY_URL = ""
 # CRYPTO_PAY_ADDRESSES = ""
 # PAID_PRICE = ""
-
+BTCPAY_URL = "https://btcpay.goyhub.st"
+BTCPAY_STORE_ID = "D67RM4RGe9SKTdqA7Au8kz37MaFTkb5oVzHhfHoJsh4v"
+PAID_PRICE_AMOUNT = "9.99"
+PAID_PRICE_CURRENCY = "EUR"
+PAID_PERIOD_DAYS = "30"
 # Outbound email (password reset + verification) via Cloudflare's Email
 # Service SMTPS relay (smtp.mx.cloudflare.net:465, spoken natively over
 # cloudflare:sockets). Alternatives: "resend" | "sendgrid" | "mailchannels".
@@ -69,19 +161,72 @@ SIGNUP_SURGE_LIMIT = "30"
 EMAIL_PROVIDER = "cloudflare"
 EMAIL_FROM = "welcome@noreply.goyhub.st"
 EMAIL_FROM_NAME = "GoyHub"
+STORE_PLANS = "7d:1 Week:3.00:7,14d:2 Weeks:5.00:14,30d:1 Month:10.00:30,90d:3 Months:25.00:90,180d:6 Months:45.00:180,365d:1 Year:80.00:365"
+
 # EMAIL_SMTP_HOST = "smtp.mx.cloudflare.net"   # default
 # EMAIL_SMTP_PORT = "465"                      # default
 # With email configured, forum posting requires a verified address
 # (REQUIRE_VERIFIED_EMAIL = "0" turns that gate off).
 # DISPOSABLE_EMAIL_DOMAINS = ""   # extra comma-separated throwaway domains to block
 
-
-#DOWNLOADER
-DOWNLOAD_URL = "downloader.goyhub.st/xd13/QeRc7Al.exe"
 # Cloudflare Turnstile (optional second signup CAPTCHA layered on the built-in
 # proof-of-work). Create a site in dashboard → Turnstile, then set:
 #   TURNSTILE_SITE_KEY    (plain var is fine)
 #   TURNSTILE_SECRET_KEY  (secret)
+
+# ---------------------------------------------------------------------------
+# Support desk (/help + /support + Admin → Support)
+#
+# All optional — the help centre, ticketing and the live chat work with none of
+# these set. They tune behaviour, and switch on the parts that talk to the
+# outside world.
+# SUPPORT_GUEST_TICKETS = "1"   # "0" = only signed-in accounts (every tier,
+#                               #       including Free) can open a ticket
+# SUPPORT_SLA_LOW_HOURS = "72"     # first-response target per priority; the
+# SUPPORT_SLA_NORMAL_HOURS = "24"  # queue stamps a breach when one is missed
+# SUPPORT_SLA_HIGH_HOURS = "8"
+# SUPPORT_SLA_URGENT_HOURS = "2"
+# SUPPORT_AUTOCLOSE_DAYS = "7"  # solved tickets nobody came back to; "0" = never
+# SUPPORT_ATTACH_MAX_KB = "512" # per file (max 600 — D1 caps a value at 1 MB
+#                               # and base64 inflates by a third)
+# SUPPORT_ATTACH_MAX_COUNT = "4"   # per message; "0" disables attachments
+# SUPPORT_ATTACH_TICKET_MAX_KB = "8192"  # total per conversation (8 MB). The
+#                               # per-message cap alone is not a ceiling: the
+#                               # reply limit is keyed per ticket.
+# SUPPORT_ATTACH_RETAIN_DAYS = "180"     # when a closed ticket's file contents
+#                               # are dropped (the record they existed stays)
+# SUPPORT_EMAIL_NOTIFY = "1"    # email the requester when support replies
+#                               # (needs EMAIL_* above; silently off without it)
+# SITE_URL = "https://goyhub.st"   # REQUIRED for absolute links in support
+#                               # emails and Discord alerts. Without it they
+#                               # fall back to bare paths and the webhook drops
+#                               # its clickable link.
+#
+# Gemini Flash assist (optional, free tier). With GEMINI_API_KEY unset the
+# whole support system still works — staff simply get no summary or drafts,
+# and "try this first" falls back to keyword search.
+# GEMINI_MODEL = "gemini-2.5-flash"  # default; falls back to gemini-2.0-flash
+#                                    # once automatically if the name is rejected
+# SUPPORT_AI_ASSIST = "1"    # staff-only thread summary + reply drafts
+# SUPPORT_AI_DEFLECT = "1"   # re-ranks "try this first" on the ticket form
+# SUPPORT_AI_CLASSIFY = "1"  # auto category / priority / language / spam flag
+#
+# The AI never replies to a customer on its own: a human presses send.
+#
+# Support rate-limit buckets, all optional and all sized in
+# functions/_lib/limits.js. Raise one only if a real person is hitting it.
+# RATE_LIMIT_TICKET = "10"          # new tickets, per hour, per account (per IP for guests)
+# RATE_LIMIT_TICKET_REPLY = "60"    # chat messages per ticket per 10 min (staff budgeted separately)
+# RATE_LIMIT_TICKET_POLL = "900"    # live-chat polls per IP per 10 min
+# RATE_LIMIT_TICKET_LOOKUP = "6"    # "email me my ticket link" per IP per hour
+# RATE_LIMIT_ATTACH = "30"          # files accepted per IP per hour
+# RATE_LIMIT_ATTACH_READ = "300"    # attachment downloads per IP per hour
+# RATE_LIMIT_HELP_VOTE = "40"       # article "did this help?" per IP per hour
+# RATE_LIMIT_HELP_VIEW = "1"        # counted article reads, per IP per article per hour
+# RATE_LIMIT_AI_ASSIST = "60"       # staff summary/draft calls per agent per hour
+# RATE_LIMIT_AI_DEFLECT = "30"      # "try this first" AI matching per IP per hour
+# RATE_LIMIT_AI_GLOBAL = "800"      # site-wide AI calls per day (the free-tier guard)
+# RATE_LIMIT_SUPPORT_SWEEP = "240"  # external cron hits on /api/support/sweep per IP per hour
 
 # Secrets are NOT set here. Add them in the Pages dashboard (Settings →
 # Variables and Secrets) or with `npx wrangler pages secret put NAME`, or in
@@ -95,10 +240,29 @@ DOWNLOAD_URL = "downloader.goyhub.st/xd13/QeRc7Al.exe"
 #                    verifies a member's tier with. Falls back to
 #                    CAPTCHA_SECRET if unset — set a dedicated one in
 #                    production so rotating one doesn't invalidate the other.
-
-# Optional: serve a real, multi-megabyte installer from R2 instead of the copy
-# embedded in the Function bundle. Create the bucket, upload the zip under its
-# exact filename, then uncomment. The download route prefers R2 automatically.
-# [[r2_buckets]]
-# binding = "INSTALLER"
-# bucket_name = "goyhub-installer"
+#   DOWNLOAD_URL     where the installer actually lives (your own host, a CDN,
+#                    a GitHub release asset, ...). REQUIRED for the download
+#                    to work — there is no fallback. The route fetches it
+#                    server-side and streams the bytes straight through, so
+#                    the URL itself is never sent to the browser. Unset, or
+#                    unreachable: /download/file serves a clean "unavailable"
+#                    response instead of silently substituting a different
+#                    file. Set it as a Secret, never as a plain [vars] entry
+#                    above — this file is committed, and a plain var would put
+#                    the "hidden" URL in plaintext in git history and the
+#                    dashboard's variable list.
+#   BTCPAY_API_KEY        BTCPay Greenfield API key with the
+#                         btcpay.store.cancreateinvoice + canviewinvoices
+#                         permissions on your store (creates checkout invoices)
+#   GEMINI_API_KEY        Google AI Studio key for the support desk's Gemini
+#                         Flash assist (free tier is enough). Unset = no AI.
+#   SUPPORT_WEBHOOK_URL   Discord-compatible webhook that gets a message on a
+#                         new ticket, an escalation and an SLA breach. Must be
+#                         https. Unset = no alerts.
+#   SUPPORT_SWEEP_SECRET  lets an external cron call
+#                         GET /api/support/sweep?key=... so SLA breaches are
+#                         stamped and stale tickets auto-closed while nobody is
+#                         in the admin panel. Unset closes the endpoint.
+#   BTCPAY_WEBHOOK_SECRET the signing secret of the store webhook that points at
+#                         https://your-site/api/btcpay/webhook — every webhook is
+#                         HMAC-verified against this before it can grant Paid

@@ -9,6 +9,7 @@ import {
 import { sendEmail, isEmailConfigured } from "./email.js";
 import { createAuthToken, peekAuthToken, consumeAuthToken } from "./tokens.js";
 import { verifyTurnstile } from "./turnstile.js";
+import { adoptGuestTickets } from "./support.js";
 import { tooMany } from "./routes-main.js";
 
 const USERNAME_RE = /^[A-Za-z0-9_]{3,20}$/;
@@ -87,7 +88,7 @@ function register(app) {
     // Site-wide surge breaker against DISTRIBUTED mass-account attacks that
     // stay under the per-IP limit: if signups across all IPs spike far above
     // organic volume, pause registration briefly instead of eating the flood.
-    const surgeLimit = Number(c.get('cfg').SIGNUP_SURGE_LIMIT ?? 30);
+    const surgeLimit = Number(c.get('cfg').SIGNUP_SURGE_LIMIT ?? 100);
     if (surgeLimit > 0) {
       const recent = await db.get(
         "SELECT COUNT(*) AS n FROM ip_logs WHERE event = 'signup' AND created_at > datetime('now', '-10 minutes')"
@@ -108,11 +109,11 @@ function register(app) {
     const confirm = String(body.confirm || '');
 
     const errors = [];
-    if (!USERNAME_RE.test(username)) errors.push('Username must be 3–20 characters: letters, numbers and underscores only.');
+    if (!USERNAME_RE.test(username)) errors.push('Username must be 3-20 characters: letters, numbers and underscores only.');
     else if (RESERVED_USERNAMES.has(username.toLowerCase())) errors.push('That username is reserved.');
     if (!EMAIL_RE.test(email) || email.length > 254) errors.push('Enter a valid email address.');
-    else if (isDisposableEmail(email, c.get('cfg'))) errors.push('Disposable email addresses cannot be used — use a real inbox.');
-    if (password.length < 8 || password.length > 128) errors.push('Password must be 8–128 characters.');
+    else if (isDisposableEmail(email, c.get('cfg'))) errors.push('Disposable email addresses cannot be used; use a real inbox.');
+    if (password.length < 8 || password.length > 128) errors.push('Password must be 8-128 characters.');
     if (password !== confirm) errors.push('Passwords do not match.');
 
     // Bot gates before the uniqueness query, so a scripted signup can't probe
@@ -218,7 +219,7 @@ function register(app) {
     const confirm = String(body.confirm || '');
 
     const errors = [];
-    if (password.length < 8 || password.length > 128) errors.push('Password must be 8–128 characters.');
+    if (password.length < 8 || password.length > 128) errors.push('Password must be 8-128 characters.');
     if (password !== confirm) errors.push('Passwords do not match.');
     if (errors.length > 0) {
       // Only validation failed — the token stays live for the retry.
@@ -239,7 +240,7 @@ function register(app) {
     await db.run('UPDATE users SET password_hash = ? WHERE id = ?', await hashPassword(password), row.user_id);
     await destroyUserSessions(db, row.user_id); // a reset means the old credentials can't be trusted
     await audit(c, 'password_reset', { userId: row.user_id, username: user ? user.username : null });
-    setFlash(c, 'success', 'Password updated — log in with your new password.');
+    setFlash(c, 'success', 'Password updated. Log in with your new password.');
     return c.redirect('/auth/login', 302);
   });
 
@@ -253,9 +254,19 @@ function register(app) {
       return c.redirect(c.get('user') ? '/profile' : '/auth/login', 302);
     }
     await db.run("UPDATE users SET email_verified_at = datetime('now') WHERE id = ?", row.user_id);
+    // Verifying the address is what makes it safe to hand over the tickets
+    // opened at it before there was an account.
+    const verified = await db.get('SELECT id, username, email, email_verified_at FROM users WHERE id = ?', row.user_id);
+    const adopted = await adoptGuestTickets(db, verified);
+    if (adopted > 0) {
+      await audit(c, 'ticket_adopted', {
+        userId: verified.id, username: verified.username,
+        detail: `${adopted} guest ticket${adopted === 1 ? '' : 's'} claimed on verification`,
+      });
+    }
     const user = await db.get('SELECT username FROM users WHERE id = ?', row.user_id);
     await audit(c, 'email_verified', { userId: row.user_id, username: user ? user.username : null });
-    setFlash(c, 'success', 'Email verified — thanks!');
+    setFlash(c, 'success', 'Email verified. Thanks!');
     return c.redirect(c.get('user') ? '/profile' : '/auth/login', 302);
   });
 

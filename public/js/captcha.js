@@ -128,7 +128,8 @@
     text.className = 'captcha-text muted';
     text.id = 'captcha-status-text';
     text.setAttribute('role', 'status');
-    text.textContent = 'Verification required before you can sign up.';
+    text.textContent = box.getAttribute('data-captcha-idle')
+      || 'Verification required before you can sign up.';
 
     status.appendChild(trigger);
     status.appendChild(text);
@@ -171,7 +172,7 @@
             tokenField.value = challenge.token;
             solutionField.value = String(counter);
             if (submitBtn) submitBtn.disabled = false;
-            setState('done', 'Verified — you can sign up now.');
+            setState('done', box.getAttribute('data-captcha-done') || 'Verified. You can sign up now.');
             return;
           }
           counter++;

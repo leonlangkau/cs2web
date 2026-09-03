@@ -14,6 +14,12 @@ ADMIN_PASSWORD=choose-a-strong-password
 # tier with. Optional — falls back to CAPTCHA_SECRET if unset.
 # LICENSE_SECRET=replace_me_with_a_different_long_random_string
 
+# Where the real installer lives. Fetched server-side by /download/file and
+# streamed straight through — the URL itself is never sent to the browser.
+# Required for downloads to work — no fallback. Leave unset in dev and
+# /download/file will correctly return "unavailable" rather than fake content.
+# DOWNLOAD_URL=https://example.com/path/to/GoyHub-Setup-1.0.0.zip
+
 # Outbound email (optional in dev). Use provider "test" to capture messages
 # in-process (the smoke tests do), or a real provider + key.
 # EMAIL_PROVIDER=test
@@ -22,3 +28,79 @@ ADMIN_PASSWORD=choose-a-strong-password
 # Cloudflare Turnstile (optional). Cloudflare's public ALWAYS-PASS test keys:
 # TURNSTILE_SITE_KEY=1x00000000000000000000AA
 # TURNSTILE_SECRET_KEY=1x0000000000000000000000000000000AA
+
+# BTCPay Server crypto checkout (optional). Set all of these to turn the
+# /upgrade page into a real one-click crypto checkout that upgrades the account
+# automatically once a payment confirms. Full guide: BTCPAY-SETUP.md.
+# BTCPAY_URL=https://btcpay.example.com
+# BTCPAY_STORE_ID=your-store-id
+# BTCPAY_API_KEY=your-greenfield-api-key
+# BTCPAY_WEBHOOK_SECRET=the-store-webhook-signing-secret
+# PAID_PRICE_AMOUNT=10.00
+# PAID_PRICE_CURRENCY=USD
+# PAID_PERIOD_DAYS=30       # empty or 0 = lifetime membership
+
+# Direct-to-wallet crypto payments (optional). Paste your OWN receiving
+# addresses and /buy gains a coin picker for ETH, SOL and USDT; the site
+# watches the chain and upgrades the account once a payment confirms. Runs
+# happily alongside BTCPay, or instead of it. Full guide: CRYPTO-SETUP.md.
+#
+# Nothing here holds or needs a private key — these are receive-only addresses
+# and every chain call is read-only.
+# ETH_ADDRESS=0x0000000000000000000000000000000000000000
+# SOL_ADDRESS=YourBase58SolanaAddressHere
+
+# Lets an external cron drive the chain watcher (GET or POST
+# /api/crypto/scan?key=...), so payments confirm while nobody is browsing.
+# Unset, the endpoint is closed to everyone.
+# CRYPTO_SCAN_SECRET=another_long_random_string
+
+# The chain and price APIs are keyless by default (Blockscout, the Solana
+# mainnet RPC, Coinbase). Set these only if you want higher rate limits.
+# ETHERSCAN_API_KEY=
+# SOLANA_RPC_URL=
+# COINGECKO_API_KEY=
+
+# --- Support desk -----------------------------------------------------------
+# The help centre, ticketing and the live chat need NOTHING here. These switch
+# on the parts that reach outside the site.
+
+# Absolute base URL, used for the links inside support emails and Discord
+# alerts. Without it they fall back to bare paths.
+# SITE_URL=http://localhost:8788
+
+# Gemini Flash assist: staff-side thread summaries and reply drafts, the
+# "try this first" re-ranking on the ticket form, and automatic ticket
+# triage. Get a free key at https://aistudio.google.com/apikey.
+# Unset and every one of those degrades quietly — nothing breaks.
+# GEMINI_API_KEY=your_google_ai_studio_key
+# GEMINI_MODEL=gemini-2.5-flash
+# SUPPORT_AI_ASSIST=1
+# SUPPORT_AI_DEFLECT=1
+# SUPPORT_AI_CLASSIFY=1
+
+# Discord-compatible webhook for new tickets, escalations and SLA breaches.
+# Must be https.
+# SUPPORT_WEBHOOK_URL=https://discord.com/api/webhooks/…
+
+# Lets an external cron call GET /api/support/sweep?key=... so SLA breaches
+# get stamped and stale tickets auto-closed while nobody is in the panel.
+# SUPPORT_SWEEP_SECRET=a_long_random_string
+
+# Behaviour knobs (defaults shown).
+# SUPPORT_GUEST_TICKETS=1
+# SUPPORT_SLA_NORMAL_HOURS=24
+# SUPPORT_ATTACH_MAX_KB=512
+# SUPPORT_ATTACH_MAX_COUNT=4
+# SUPPORT_ATTACH_TICKET_MAX_KB=8192
+# SUPPORT_ATTACH_RETAIN_DAYS=180
+# SUPPORT_AUTOCLOSE_DAYS=7
+# SUPPORT_EMAIL_NOTIFY=1
+
+# Rate-limit buckets for the support desk. Defaults live in
+# functions/_lib/limits.js; wrangler.toml lists every one with its meaning.
+# RATE_LIMIT_TICKET=10
+# RATE_LIMIT_TICKET_REPLY=60
+# RATE_LIMIT_TICKET_POLL=900
+# RATE_LIMIT_ATTACH=30
+# RATE_LIMIT_AI_GLOBAL=800

@@ -57,6 +57,10 @@ No build command is needed — the Functions are committed ready to run.
 | `CAPTCHA_SECRET` | a long random string |
 | `ADMIN_PASSWORD` | password for the seeded admin account |
 | `ADMIN_USERNAME` | optional, defaults to `admin` |
+| `DOWNLOAD_URL` | required for the download to work (no fallback) — where the real installer lives (see "Shipping a real installer" below) |
+| `GEMINI_API_KEY` | optional — turns on the support desk's AI assist (see "The support desk" below) |
+| `SUPPORT_WEBHOOK_URL` | optional — a Discord-compatible webhook for new tickets, escalations and SLA breaches |
+| `SUPPORT_SWEEP_SECRET` | optional — lets an external cron reconcile SLA timers while nobody is in the panel |
 
 Generate a CAPTCHA secret:
 
@@ -99,6 +103,11 @@ enter `goyhub.st` (or `www.`, or any subdomain) → **Activate**. Cloudflare
 creates the DNS record and issues the TLS certificate automatically. Do **not**
 add an A/CNAME by hand.
 
+Attach **both** `goyhub.st` and `www.goyhub.st` as Custom domains. The app then
+301-redirects `www` to the bare apex automatically, so the site is served from a
+single canonical host. To flip the direction (apex → `www`), set
+`CANONICAL_WWW = "1"` in `wrangler.toml`.
+
 After it is live, turn on **SSL/TLS → Edge Certificates → Always Use HTTPS**.
 IP logging works with no configuration: `CF-Connecting-IP` is set by Cloudflare
 and can't be spoofed, so the app trusts it directly. Don't set `TRUST_PROXY` on
@@ -121,20 +130,265 @@ the schema with `npm run db:local`.
 
 ## Shipping a real installer
 
-The placeholder zip is embedded in the Function bundle. A real installer will be
-too big (the bundle caps at ~1 MB free / 10 MB paid), so use R2:
+The download route serves whatever `DOWNLOAD_URL` points at — **required**,
+with **no fallback**. Without it (or if it's unreachable), `/download/file`
+returns a clean "unavailable" response rather than silently serving the
+placeholder zip embedded in the Function bundle.
+
+Host the installer anywhere reachable over HTTPS — your own server, a CDN, a
+GitHub release asset, S3/B2, R2, etc. — then set:
 
 ```bash
-npx wrangler r2 bucket create goyhub-installer
-npx wrangler r2 object put goyhub-installer/GoyHub-Setup-1.0.0.zip --file=./installer.zip
+npx wrangler pages secret put DOWNLOAD_URL
+# paste the file's URL when prompted
 ```
 
-Uncomment the `[[r2_buckets]]` block in `wrangler.toml` (or add the binding in
-the dashboard as `INSTALLER`). The download route prefers R2 and falls back to
-the embedded copy. The artifact stays out of `public/`, so every download goes
-through the audited, rate-limited route.
+`/download/file` (still behind the sign-in + Paid-tier gate and the download
+rate limit) fetches that URL **server-side** on each request and streams the
+response straight back to the browser. The URL itself is never sent to the
+client — not in the page HTML, not in a redirect's `Location` header, not in
+any script — the browser only ever talks to the same-site `/download/file`.
+That's the obfuscation: the value never leaves the server, which beats any
+client-side encoding of the link (Base64, split strings, etc. are all
+trivially readable from a browser's dev tools; a value the browser never
+receives can't be read from it at all). And because there's no fallback, a
+broken or misconfigured `DOWNLOAD_URL` fails loudly (a 503 on `/download/file`)
+instead of quietly handing members a stale placeholder.
+
+If hosting on Cloudflare R2, make the object itself the URL — either a public
+R2.dev/custom domain, or a signed/presigned URL — and set that as
+`DOWNLOAD_URL`; the route doesn't bind R2 directly, it only ever fetches a URL.
+
+Always set it as a **Secret**, never as a plain `[vars]` entry in
+`wrangler.toml` — that file is committed, and a plain var would put the
+"hidden" URL in cleartext in git history and in the dashboard's variable
+list. A Secret is encrypted at rest and, once saved, is no longer readable
+from the dashboard either.
+
+Keep the version metadata honest: `functions/_lib/installer-data.js` (built
+from `artifacts/GoyHub-Setup-1.0.0.exe` — see below) is what the site shows
+as the download's name, size and SHA-256 checksum — its filename's extension
+also drives the `Content-Disposition` name and `scripts/build-installer.cjs`'s
+`NAME` constant, so it must match whatever `DOWNLOAD_URL` actually serves.
+When `DOWNLOAD_URL` points at a newer build, replace that artifact (renaming
+it too, if the file type changes) and run `npm run build`, so the checksum
+and filename shown on `/download` still match the file actually served.
 
 ---
+
+The artifact stays out of `public/` regardless, so every download goes
+through the same audited, rate-limited, login-gated route.
+
+---
+
+## Crypto payments — option A: BTCPay Server (Bitcoin)
+
+The `/upgrade` page can run a fully automated, **crypto-only** checkout backed
+by your own **BTCPay Server** — no card processor, no third party, no personal
+data. A member clicks **Pay with crypto**, pays a Bitcoin (on-chain or
+Lightning) invoice on your BTCPay checkout, and the account is upgraded to
+**Paid** automatically once the payment confirms. There is no manual step and
+no admin action.
+
+**Setting up the server** (a small VPS) is documented end-to-end in
+[BTCPAY-SETUP.md](BTCPAY-SETUP.md) — swap, firewall, DNS, the one-line
+`btcpayserver-docker` install tuned for a 2‑core / 4 GB box (pruned node), and
+creating the store, API key and webhook.
+
+**Connecting it to this site** (the four values from that guide):
+
+1. In `wrangler.toml` `[vars]`, set the non-secret pieces:
+   ```toml
+   BTCPAY_URL = "https://btcpay.yourdomain.com"
+   BTCPAY_STORE_ID = "the-store-id"
+   PAID_PRICE_AMOUNT = "10.00"
+   PAID_PRICE_CURRENCY = "USD"
+   PAID_PERIOD_DAYS = "30"        # empty or "0" = lifetime
+   ```
+2. Add the two **secrets** in **Settings → Variables and Secrets** (type
+   **Secret**), or with wrangler:
+   ```bash
+   npx wrangler pages secret put BTCPAY_API_KEY
+   npx wrangler pages secret put BTCPAY_WEBHOOK_SECRET
+   ```
+3. In BTCPay, point the store **webhook** at
+   `https://yourdomain.com/api/btcpay/webhook` (the guide walks through this),
+   and paste that webhook's signing secret into `BTCPAY_WEBHOOK_SECRET`.
+4. Redeploy. The upgrade page switches from "coming soon" to a live pay button.
+
+---
+
+## Crypto payments — option B: straight to your own wallet (ETH, SOL, USDT)
+
+No server, no processor, no account with anybody: buyers send ETH, SOL or USDT
+directly to **your** wallet, and the site watches those addresses and grants
+**Paid** automatically once the payment confirms on chain. It runs happily
+**alongside** BTCPay — the store shows whichever are configured — or instead of
+it.
+
+Two secrets is the whole setup. **Settings → Variables and Secrets → + Add**,
+type **Secret**, then **redeploy** (Pages binds variables at deploy time, so an
+existing deployment keeps the old values until you do):
+
+| Name | Value |
+| --- | --- |
+| `ETH_ADDRESS` | your `0x…` address — covers ETH and USDT-ERC20 |
+| `SOL_ADDRESS` | your base58 address — covers SOL and USDT-SPL |
+
+Or `npx wrangler pages secret put ETH_ADDRESS` if you prefer the CLI.
+
+Use a wallet you hold the keys to, not an exchange deposit address. Both are
+validated before anything is offered — an Ethereum address is checked against
+its EIP-55 checksum, so a transposed character is caught rather than quietly
+collecting money nobody can spend. A address that fails takes its coins off the
+checkout and is flagged in **Admin → On-chain**.
+
+Because Pages Functions have no cron, the chains are polled during requests that
+were happening anyway — in particular the buyer's own payment page, which polls
+while they watch it. To have the watcher run regardless, add a `CRYPTO_SCAN_SECRET` secret the same
+way and point any scheduler (cron-job.org, a GitHub Actions schedule, a Cloudflare
+**Worker** cron) at `https://yourdomain.com/api/crypto/scan?key=YOUR_SECRET`
+every few minutes. Unset, that endpoint is closed to everyone.
+
+Prices come from **Admin → Shop**, the same catalogue BTCPay sells, quoted at a
+live rate when the buyer clicks. Full guide, including tuning, the admin queue
+for payments that need a human, and how the "credit exactly once" guarantees
+work: [CRYPTO-SETUP.md](CRYPTO-SETUP.md).
+
+**How the security holds up** (all enforced in `functions/_lib/`):
+
+- Price, currency and membership length are **server config** — the checkout
+  request from the browser carries none of them, so a tampered form can't buy a
+  cheaper or longer membership.
+- Every webhook is authenticated by an **HMAC‑SHA256 signature over the exact
+  raw body** using `BTCPAY_WEBHOOK_SECRET`; an unsigned or mis‑signed call is
+  rejected before it touches an account.
+- Before crediting, the handler **re‑fetches the invoice from BTCPay** with the
+  store key and re‑checks status (`Settled`), amount, currency and order id — a
+  forged "settled" body can't grant access even if it somehow passed the
+  signature check.
+- Crediting is **idempotent**: `payments.credited_at` is flipped once under a
+  `WHERE credited_at IS NULL` guard, so a replayed webhook can never grant a
+  second period.
+- Invoice creation is **rate‑limited per member** (`RATE_LIMIT_CHECKOUT`), and
+  every checkout, grant and rejection is written to the IP audit log.
+
+> Keep `BTCPAY_API_KEY` scoped to just `btcpay.store.cancreateinvoice` and
+> `btcpay.store.canviewinvoices` on the one store. It can create and read
+> invoices — it can't move funds.
+
+---
+
+## The support desk
+
+`/help` and `/support` work the moment you deploy — the help centre seeds itself
+with a starter library of articles, and tickets are open to every tier including
+Free, plus visitors with no account at all. Nothing below is required; each item
+adds a capability and degrades to a sensible default when unset.
+
+### Make the links in emails and alerts clickable
+
+Set `SITE_URL` in `wrangler.toml` `[vars]`:
+
+```toml
+SITE_URL = "https://goyhub.st"
+```
+
+Without it, the ticket link in a confirmation email and the "open in admin" link
+in a Discord alert fall back to bare paths — which means a guest who loses their
+cookie cannot get back into their ticket. Set this before you announce support.
+
+### Turn on the AI assist (optional, free tier)
+
+1. Get a key at <https://aistudio.google.com/apikey> — the Gemini free tier is
+   enough for a small desk.
+2. Add it as a **Secret** named `GEMINI_API_KEY`.
+
+Staff then get a one-click thread summary and reply drafts on every ticket, the
+contact form matches what someone is typing against the help centre, and new
+tickets are triaged into a topic and priority automatically.
+
+Three switches turn the uses on and off individually — `SUPPORT_AI_ASSIST`,
+`SUPPORT_AI_DEFLECT`, `SUPPORT_AI_CLASSIFY` — and `GEMINI_MODEL` overrides the
+model (default `gemini-2.5-flash`; a rejected name retries once on
+`gemini-2.0-flash`).
+
+**What leaves your site:** the text of a ticket, with credential-shaped strings
+masked first. Attachments never do. The AI never sends anything to a customer —
+a person reads the draft, edits it and presses send. This is described in the
+Privacy Policy, section 7; if you disable AI, that section still reads correctly
+because it is written as "where the operator has configured it".
+
+### Alert your staff channel (optional)
+
+Create a Discord webhook (Server Settings → Integrations → Webhooks) and add the
+URL as the **Secret** `SUPPORT_WEBHOOK_URL`. It must be `https`. You get a
+message on a new ticket, an escalation to urgent and an SLA breach — reference,
+subject, topic, priority and who opened it, never the message contents.
+
+### Keep the SLA clock honest between visits
+
+Pages has no cron, so SLA breaches and stale-ticket closures are reconciled
+whenever staff open **Admin → Support**. If your team checks the queue rarely,
+point an external cron (cron-job.org, a GitHub Action, any uptime monitor) at:
+
+```
+https://your-site/api/support/sweep?key=YOUR_SUPPORT_SWEEP_SECRET
+```
+
+Set `SUPPORT_SWEEP_SECRET` as a Secret first; while it is unset the endpoint
+returns 404 to everyone. Hourly is plenty. The same call also expires old
+attachment bytes.
+
+### Tuning
+
+All optional, all in `wrangler.toml` `[vars]` — the comments there list every
+one with its default: `SUPPORT_GUEST_TICKETS`, `SUPPORT_SLA_*_HOURS`,
+`SUPPORT_ATTACH_MAX_KB`, `SUPPORT_ATTACH_MAX_COUNT`,
+`SUPPORT_ATTACH_RETAIN_DAYS`, `SUPPORT_AUTOCLOSE_DAYS`, `SUPPORT_EMAIL_NOTIFY`.
+
+> Attachments live in D1 as base64, so no R2 bucket is needed to deploy — but
+> the bytes do count against your database. `SUPPORT_ATTACH_RETAIN_DAYS`
+> (default 180) drops the contents of files on long-closed tickets while
+> keeping the record that they existed.
+
+## The status page
+
+`/status` works out of the box with a seeded set of components (website,
+accounts, app, match tracking, forum, payments, support), all reading
+Operational. Nothing to configure.
+
+Staff run it from **Admin → Status**:
+
+- change any component's state from the dropdown — that is live on `/status`
+  the moment you press Set;
+- **Report something** opens an incident (or schedules maintenance), moves the
+  components it names, and posts the first public update in the same step;
+- posting an update with the final state (**Resolved** / **Completed**) closes
+  the incident and hands its components back — except any that another open
+  incident still claims;
+- **All clear** puts every component back to Operational in one click.
+
+The banner at the top is not a setting: it is whatever the worst visible
+component says, so it can never contradict the list beneath it.
+
+Two things happen automatically once something is degraded: the help centre and
+the new-ticket form carry a "we already know about this" strip naming the
+incident, and — where `SUPPORT_WEBHOOK_URL` is set — opening and resolving an
+incident pings your staff channel.
+
+`/status.json` is the same data with `Access-Control-Allow-Origin: *`. Point an
+uptime monitor at it, or read it from the desktop app:
+
+```json
+{ "status": "degraded", "headline": "Degraded performance",
+  "components": [{ "slug": "stats", "name": "Match tracking", "status": "degraded", … }],
+  "incidents": [{ "title": "Match tracking is delayed", … }] }
+```
+
+> Maintenance windows are entered and displayed in **UTC**. The form says so and
+> the server reads them that way, so a window never shifts by an admin's
+> timezone between typing it and publishing it.
 
 ## How it's laid out
 
@@ -187,3 +441,5 @@ Other issues:
 | Query the database | `npx wrangler d1 execute goyhub --remote --command "SELECT COUNT(*) FROM users"` |
 | Re-apply schema | `npm run db:remote` |
 | Rollback | Dashboard → Deployments → **Rollback** |
+| Reconcile support SLAs | `curl "https://your-site/api/support/sweep?key=$SUPPORT_SWEEP_SECRET"` |
+| Open ticket count | `npx wrangler d1 execute goyhub --remote --command "SELECT status, COUNT(*) FROM tickets GROUP BY status"` |

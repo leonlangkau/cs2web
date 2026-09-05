@@ -73,8 +73,15 @@ test("skin assets are built and committed", () => {
       assert.ok(fs.existsSync(file), `${rel} exists (run npm run build)`);
       assert.ok(fs.statSync(file).size > 2048, `${rel} is a real build, not a stub`);
     }
-    const js = fs.readFileSync(path.join(ROOT, `public/js/ui-${id}.js`), "utf8");
-    assert.ok(!/https?:\/\/(?!www\.w3\.org)/.test(js.slice(0, 200000)) || true, "no-op: external URLs are checked at runtime by CSP");
+    // The CSP (connect/img/font/script-src 'self') would block them silently at
+    // runtime, so an external URL in a bundle is a broken feature, not a style choice.
+    const bundles = fs.readdirSync(path.join(ROOT, "public/js")).filter((n) => n === `ui-${id}.js` || n.startsWith("rb-"));
+    for (const name of bundles) {
+      const js = fs.readFileSync(path.join(ROOT, "public/js", name), "utf8");
+      const urls = [...js.matchAll(/https?:\/\/[a-z0-9.-]+/gi)].map((m) => m[0]).filter((u) => !/w3\.org|reactjs\.org|react\.dev|github\.com|threejs\.org|greensock\.com|gsap\.com|motion\.dev|khronos\.org|npmjs\.com|mozilla\.org|schema\.org|localhost/i.test(u));
+      assert.deepEqual([...new Set(urls)], [], `${name}: no runtime URLs to other origins`);
+      assert.ok(!/<style[\s>]/.test(js) && !/createElement\(["']style["']\)/.test(js), `${name}: no <style> injection (CSP style-src 'self')`);
+    }
   }
 });
 

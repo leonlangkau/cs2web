@@ -25,7 +25,7 @@ import { register as registerAdmin } from "./routes-admin.js";
 import { register as registerAdminSupport } from "./routes-admin-support.js";
 import { register as registerAdminStatus } from "./routes-admin-status.js";
 
-const APP_VERSION = "1.1.0";
+const APP_VERSION = "1.2.0";
 const MAX_BODY_BYTES = 256 * 1024;
 /**
  * Support tickets are the only place a visitor uploads a file (screenshots

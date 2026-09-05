@@ -78,6 +78,29 @@ Edit `[vars]` in `wrangler.toml`. Until `COMPANY_LEGAL_NAME`,
 `COMPANY_REG_NUMBER` and `COMPANY_ADDRESS` are real, both legal pages show a
 "Setup required" banner.
 
+## 4b. Choose the site design
+
+The site ships three complete designs: `classic` (liquid glass), `neon`
+(cyberdeck) and `prism` (holo-glass). `wrangler.toml` sets `UI_THEME = "neon"`
+and `UI_SWITCHER = "1"`, which means every page shows a small switcher pill in
+the bottom-left corner so you can compare all three live, on any page, on the
+preview deployment of this branch.
+
+To pin the site to one design from the dashboard, without touching the file:
+**Workers & Pages → your project → Settings → Variables and Secrets → + Add**,
+type **Text**, name `UI_THEME`, value `classic`, `neon` or `prism`. Add
+`UI_SWITCHER` = `0` the same way once you have decided, so visitors no longer
+see the pill (and `?ui=` stops working). Set them for **Production** and, if you
+want previews to differ, again under **Preview**. Redeploy after changing them
+(Deployments → the latest deployment → **Retry deployment**); variables are read
+at request time, so no code change is needed.
+
+The redesign bundles are built with Vite but the output is committed
+(`public/js/ui-*.js`, `public/css/ui-*.css`), so the Pages project still needs
+**no build command**. If you ever change the design sources under `ui/`, run
+`npm run build` locally and commit the result; `npm test` fails when the
+committed bundles or the asset manifest are stale.
+
 ## 5. Deploy
 
 Push to the branch Pages is watching. Every push builds and deploys. Or from

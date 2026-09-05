@@ -21,7 +21,11 @@ functions/
 ├─ [[path]].js           one catch-all Pages Function = the whole app
 └─ _lib/                 router, middleware, routes, views, D1 adapter, crypto
 schema.sql               D1 schema
-scripts/                 build-schema.cjs, build-installer.cjs
+scripts/                 build-schema.cjs, build-installer.cjs, build-ui.cjs, build-assets.cjs
+ui/                      the two React Bits redesigns (Vite source; output is committed to public/)
+├─ SKINS.md              how a skin is built, the contract, the design briefs
+├─ src/reactbits/        vendored React Bits component catalogue
+└─ src/skins/{neon,prism}/  each redesign's bundle (cursor, backgrounds, landing app)
 tests/                   node --test suites (drive the same app code)
 wrangler.toml            Pages + D1 config
 ```
@@ -42,6 +46,36 @@ Copy `.dev.vars.example` to `.dev.vars` and set `CAPTCHA_SECRET` and
 `ADMIN_PASSWORD` before `npm run dev`.
 
 ## Features
+
+### Three site designs
+The site ships three complete front-ends, switchable per request. Pick the
+default with `UI_THEME` (`classic`, `neon` or `prism`); while `UI_SWITCHER` is
+on, a pill in the bottom-left corner lets anyone flip between them on any page
+(`?ui=<id>` does the same and is remembered in a cookie), so the designs can
+be compared live on a preview deployment.
+
+- **`classic`**: the original liquid-glass design described below
+- **`neon`: CYBERDECK**: a dark operator console. Phosphor cyan and magenta on
+  near-black, cut corners, scanlines, monospace data. Built on
+  [React Bits](https://reactbits.dev): a shader terminal hero, glitch/decrypt
+  text, a target-lock cursor with click sparks, an electric-border HUD, a
+  magic-bento feature grid, a gooey nav, a dock, and scroll choreography on
+  every page
+- **`prism`: HOLO-GLASS**: a luminous glass instrument. Indigo space with
+  iridescent light, thick glass with rainbow rims, big soft radii. Built on
+  React Bits too: a refracting prism hero, a fluid-simulation splash cursor,
+  blur/split headlines, tilting glass cards, a card-swap showcase, curved
+  marquees and a pill nav
+
+Each redesign is a server-rendered chrome (`functions/_lib/views/skins/`), a
+site-wide stylesheet written from scratch (`public/css/skin-<id>.css`) and a
+React Bits bundle (`ui/src/skins/<id>` compiled by Vite into `public/js` and
+`public/css`, committed so the Pages project still deploys with no build
+command). All three honour the same strict CSP, render complete HTML without
+JavaScript, stand down under `prefers-reduced-motion`, and only show custom
+cursors to real pointers. `tests/skins.test.mjs` proves each redesign renders
+every page with the same status codes as classic, ships no inline styles or
+scripts, and styles every class the site uses. See [ui/SKINS.md](ui/SKINS.md).
 
 ### Website
 - **Liquid glass throughout.** Every surface — the floating nav bar, cards,
@@ -277,6 +311,8 @@ Set as `[vars]`/secrets in `wrangler.toml` / the Pages dashboard (see DEPLOY.md)
 | `SUPPORT_ATTACH_RETAIN_DAYS` / `SUPPORT_AUTOCLOSE_DAYS` | `180` / `7` | When a closed ticket's attachment bytes are dropped (the record that a file existed stays), and when a solved ticket nobody returned to is closed. `0` disables either |
 | `SUPPORT_EMAIL_NOTIFY` | `1` | Email the requester when a ticket opens and when staff reply (needs `EMAIL_*`) |
 | `TURNSTILE_SITE_KEY` / `TURNSTILE_SECRET_KEY` | unset | Optional Cloudflare Turnstile on signup |
+| `UI_THEME` | `classic` (`neon` in wrangler.toml) | Default site design: `classic`, `neon` or `prism` (see "Three site designs") |
+| `UI_SWITCHER` | `1` | Show the design switcher pill and honour `?ui=<id>`; `0` pins everyone to `UI_THEME` |
 | `LICENSE_SECRET` | falls back to `CAPTCHA_SECRET` | Signs loader license tokens |
 | `COMPANY_*` | placeholders | Registered entity on the legal pages |
 | `TRUST_PROXY` | unset | Non-Cloudflare proxies only |
@@ -291,8 +327,15 @@ code actually does.
 
 ## Regenerating build artifacts
 
-`npm run build` regenerates two files the runtime needs (it has no filesystem);
-`npm test` fails if they drift.
+`npm run build` regenerates the files the runtime needs (it has no filesystem)
+and the redesign bundles; `npm test` fails if any of them drift.
 
 - `functions/_lib/schema-sql.js` from `schema.sql`
 - `functions/_lib/installer-data.js` from `artifacts/GoyHub-Setup-1.0.0.exe`
+- `public/js/ui-*.js`, `public/js/rb-*.js` and `public/css/ui-*.css` from `ui/src/skins/*` (Vite; `npm run build:ui` on its own rebuilds just these)
+- `functions/_lib/asset-manifest.js`: a content hash per static asset, so every stylesheet, script and font URL carries a `?v=` stamp
+
+To work on a redesign: `node tests/serve.mjs 8787 neon` starts the real app
+over an in-memory database seeded with an admin, a Paid member, a thread and a
+ticket; `node scripts/shots.mjs http://localhost:8787 neon ./shots --mobile`
+screenshots every page and reports console errors. `ui/SKINS.md` has the rest.

@@ -37,6 +37,12 @@ const FAQ_ITEMS = [
 ];
 
 const CHANGELOG = [
+  ['1.2.0', '2026-09-05', 'Two new site designs', [
+    'Neon: a cyberdeck. Phosphor cyan on near-black, cut corners and scanlines, a shader terminal behind the headline, a target-lock cursor, glitch and decrypt text, an electric HUD and a dock.',
+    'Prism: holo-glass. Indigo space lit through thick glass with rainbow rims, a refracting prism, a fluid splash cursor, blur and split headlines, tilting cards and curved marquees.',
+    'Switch designs from the pill in the corner of any page; the choice is remembered. The classic liquid-glass design stays available.',
+    'Every design renders complete pages without JavaScript, respects reduced-motion settings and keeps custom cursors to real pointers.',
+  ]],
   ['1.1.0', '2026-08-28', 'Help centre and support desk', [
     'New help centre at /help: browsable, searchable runbooks that solve the common problems before you have to ask.',
     'Support tickets for everyone — free accounts, paid members, and visitors with no account at all.',

@@ -59,11 +59,20 @@ async function audit(as, viewport) {
   page.on("response", (r) => { if (r.status() >= 400) issues.push({ kind: "http", text: `${r.status()} ${r.url()}` }); });
 
   await page.goto(`${baseUrl}/?ui=${skin}`, { waitUntil: "networkidle" });
+  // First visit shows the terms gate (a dialog over every page); accept it once
+  // so the screenshots show the pages themselves and the login form is clickable.
+  const gate = page.locator('.terms-gate form button[type="submit"]');
+  if (await gate.count()) {
+    await Promise.all([page.waitForNavigation({ waitUntil: "networkidle" }), gate.first().click()]);
+  }
   if (CREDS[as]) {
     await page.goto(`${baseUrl}/auth/login`, { waitUntil: "networkidle" });
-    await page.fill('input[name="identifier"]', CREDS[as].identifier);
-    await page.fill('input[name="password"]', CREDS[as].password);
-    await Promise.all([page.waitForNavigation({ waitUntil: "networkidle" }), page.click('form button[type="submit"], form input[type="submit"]')]);
+    const form = page.locator('form[action="/auth/login"]');
+    await form.locator('input[name="identifier"]').fill(CREDS[as].identifier);
+    await form.locator('input[name="password"]').fill(CREDS[as].password);
+    await Promise.all([page.waitForNavigation({ waitUntil: "networkidle" }), form.locator('button[type="submit"], input[type="submit"]').first().click()]);
+    const loggedIn = await page.locator('form[action="/auth/logout"]').count();
+    if (!loggedIn) report.push({ as, viewport: viewport.width, path: "(login)", error: `login as ${as} did not produce a session`, issues: [] });
   }
   for (const [who, p] of pages) {
     if (who !== as) continue;

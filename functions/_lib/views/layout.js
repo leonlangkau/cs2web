@@ -142,7 +142,7 @@ function page(ctx, { title, body, bodyClass = '', scripts = [] } = {}) {
   const skin = getSkin(ctx.ui);
 
   if (skin) {
-    const styles = [...skin.stylesheets, '/css/ui-switch.css']
+    const styles = [...skin.stylesheets, ...(ctx.uiSwitcher ? ['/css/ui-switch.css'] : [])]
       .map((href) => `<link rel="stylesheet" href="${esc(asset(href))}">`).join('\n');
     const modules = (skin.modules || [])
       .map((src) => `<script type="module" src="${esc(asset(src))}"></script>`).join('\n');

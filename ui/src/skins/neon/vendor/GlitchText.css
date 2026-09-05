@@ -1,0 +1,49 @@
+.nl-glitch {
+  position: relative;
+  display: block;
+}
+.nl-glitch::before,
+.nl-glitch::after {
+  content: attr(data-text);
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 100%;
+  color: inherit;
+  background: var(--nl-bg, #05070c);
+  overflow: hidden;
+  clip-path: inset(0 0 100% 0);
+  opacity: 0;
+  pointer-events: none;
+  -webkit-text-fill-color: currentColor;
+}
+.nl-glitch.is-live::after,
+.nl-glitch--hover:hover::after {
+  opacity: 1;
+  transform: translate(4px, 0);
+  color: var(--nl-magenta, #ff2bd6);
+  animation: nl-glitch-clip var(--after-duration, 3s) infinite linear alternate-reverse;
+}
+.nl-glitch.is-live::before,
+.nl-glitch--hover:hover::before {
+  opacity: 1;
+  transform: translate(-4px, 0);
+  color: var(--nl-cyan, #00f0ff);
+  animation: nl-glitch-clip var(--before-duration, 2s) infinite linear alternate-reverse;
+}
+@media (prefers-reduced-motion: reduce) {
+  .nl-glitch::before, .nl-glitch::after { display: none; }
+}
+@keyframes nl-glitch-clip {
+  0% { clip-path: inset(20% 0 50% 0); }
+  10% { clip-path: inset(15% 0 55% 0); }
+  20% { clip-path: inset(30% 0 40% 0); }
+  30% { clip-path: inset(10% 0 60% 0); }
+  40% { clip-path: inset(25% 0 35% 0); }
+  50% { clip-path: inset(20% 0 50% 0); }
+  60% { clip-path: inset(15% 0 55% 0); }
+  70% { clip-path: inset(30% 0 40% 0); }
+  80% { clip-path: inset(40% 0 20% 0); }
+  90% { clip-path: inset(15% 0 55% 0); }
+  100% { clip-path: inset(30% 0 40% 0); }
+}

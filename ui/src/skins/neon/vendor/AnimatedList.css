@@ -1,0 +1,28 @@
+.nl-list {
+  position: relative;
+  width: 100%;
+}
+.nl-list__scroll {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 420px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--nl-border-strong, rgba(0, 240, 255, 0.45)) transparent;
+}
+.nl-list__scroll::-webkit-scrollbar { width: 6px; }
+.nl-list__scroll::-webkit-scrollbar-track { background: transparent; }
+.nl-list__scroll::-webkit-scrollbar-thumb { background: var(--nl-border-strong, rgba(0, 240, 255, 0.45)); }
+.nl-list__item { margin: 0 0 10px; }
+.nl-list__item:last-child { margin-bottom: 0; }
+.nl-list__fade {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 44px;
+  pointer-events: none;
+  transition: opacity 0.3s ease;
+}
+.nl-list__fade--top { top: 0; background: linear-gradient(to bottom, var(--nl-bg, #05070c), transparent); }
+.nl-list__fade--bottom { bottom: 0; background: linear-gradient(to top, var(--nl-bg, #05070c), transparent); }

@@ -1,0 +1,214 @@
+/* ==========================================================================
+   NEON — site-wide effect surfaces rendered by the bundle
+   (background host, boot overlay, nav enhancement host, spotlight, toast).
+   Host elements owned by the server chrome are styled with :where() so the
+   site sheet always wins if it has an opinion.
+   ========================================================================== */
+
+/* Background host (skin.chrome renders <div id="rb-bg">) */
+:where(#rb-bg) {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  overflow: hidden;
+}
+.rb-bg-neon {
+  position: absolute;
+  inset: 0;
+  opacity: 0.9;
+}
+.rb-bg-neon::after {
+  /* vignette so the grid recedes at the edges */
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(120% 90% at 50% 40%, transparent 45%, var(--nl-bg, #05070c) 100%);
+  pointer-events: none;
+}
+.rb-bg-neon--static {
+  background-image:
+    radial-gradient(circle, rgba(0, 240, 255, 0.22) 0 1px, transparent 1.5px);
+  background-size: 32px 32px;
+  background-position: 16px 16px;
+  opacity: 0.5;
+}
+
+/* Nav enhancement host (GooeyNav lives here on desktop) */
+.rb-gooey {
+  display: none;
+  flex: 1;
+  justify-content: center;
+  min-width: 0;
+}
+@media (min-width: 960px) {
+  #site-nav.rb-gooey-on .rb-gooey { display: flex; }
+  #site-nav.rb-gooey-on .nav-links { display: none !important; }
+}
+
+/* Dock room at the bottom of the page */
+@media (min-width: 960px) and (hover: hover) {
+  body.rb-has-dock { padding-bottom: 76px; }
+}
+
+/* ---------- boot overlay ---------- */
+.rb-boot {
+  position: fixed;
+  inset: 0;
+  z-index: 2147482000;
+  display: grid;
+  place-items: center;
+  background: var(--nl-bg, #05070c);
+  color: var(--nl-ink, #dfe7ff);
+  font-family: var(--nl-mono, monospace);
+  cursor: pointer;
+  overflow: hidden;
+}
+.rb-boot::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: repeating-linear-gradient(0deg, transparent 0 2px, rgba(0, 0, 0, 0.22) 2px 3px);
+  pointer-events: none;
+}
+.rb-boot::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(60% 60% at 50% 50%, rgba(0, 240, 255, 0.08), transparent 70%);
+  pointer-events: none;
+}
+.rb-boot.is-leaving { animation: rb-boot-out 0.22s ease forwards; }
+@keyframes rb-boot-out { to { opacity: 0; } }
+.rb-boot__frame {
+  position: relative;
+  width: min(560px, 90vw);
+  padding: 1.4rem 1.6rem 1.3rem;
+  border: 1px solid var(--nl-border-strong, rgba(0, 240, 255, 0.45));
+  background: rgba(10, 14, 23, 0.6);
+  clip-path: polygon(14px 0, 100% 0, 100% calc(100% - 14px), calc(100% - 14px) 100%, 0 100%, 0 14px);
+}
+.rb-boot__head {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  font-size: 0.66rem;
+  letter-spacing: 0.24em;
+  text-transform: uppercase;
+  color: var(--nl-cyan, #00f0ff);
+  margin-bottom: 0.9rem;
+  padding-bottom: 0.6rem;
+  border-bottom: 1px solid var(--nl-border, rgba(0, 240, 255, 0.18));
+}
+.rb-boot__line {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  font-size: 0.78rem;
+  line-height: 1.7;
+  color: var(--nl-ink-soft, #aab6d3);
+  opacity: 0;
+  animation: rb-boot-line 0.12s steps(1) forwards;
+  animation-delay: var(--d, 0s);
+}
+.rb-boot__line b { font-weight: 600; color: var(--nl-lime, #c6ff3d); letter-spacing: 0.12em; }
+.rb-boot__line::before { content: "> "; color: var(--nl-cyan, #00f0ff); }
+@keyframes rb-boot-line { to { opacity: 1; } }
+.rb-boot__online {
+  margin-top: 0.9rem;
+  font-family: var(--nl-display, sans-serif);
+  font-weight: 700;
+  font-size: clamp(1.4rem, 4vw, 2.2rem);
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--nl-cyan, #00f0ff);
+  text-shadow: 0 0 18px rgba(0, 240, 255, 0.55);
+  opacity: 0;
+  animation: rb-boot-online 0.28s steps(3) forwards;
+  animation-delay: 0.5s;
+}
+@keyframes rb-boot-online {
+  0% { opacity: 0; transform: translateX(-6px); }
+  40% { opacity: 1; transform: translateX(4px); color: var(--nl-magenta, #ff2bd6); }
+  100% { opacity: 1; transform: none; }
+}
+.rb-boot__skip {
+  margin-top: 0.7rem;
+  font-size: 0.62rem;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--nl-muted, #7683a3);
+}
+.rb-boot__bar {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  height: 2px;
+  width: 100%;
+  background: var(--nl-cyan, #00f0ff);
+  transform-origin: left;
+  animation: rb-boot-bar 0.8s linear forwards;
+}
+@keyframes rb-boot-bar { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+
+/* ---------- pointer spotlight on panels / cards ---------- */
+.rb-spot { position: relative; isolation: isolate; }
+.rb-spot-light {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  border-radius: inherit;
+  opacity: 0;
+  transition: opacity 0.35s ease;
+  background: radial-gradient(260px circle at var(--mx, 50%) var(--my, 50%), rgba(0, 240, 255, 0.11), transparent 62%);
+}
+.rb-spot:hover > .rb-spot-light { opacity: 1; }
+
+/* ---------- download toast ---------- */
+.rb-toast {
+  position: fixed;
+  right: 18px;
+  bottom: 18px;
+  z-index: 1200;
+  width: min(360px, calc(100vw - 36px));
+  display: flex;
+  gap: 0.8rem;
+  align-items: flex-start;
+  padding: 0.9rem 1rem;
+  background: rgba(10, 14, 23, 0.94);
+  border: 1px solid var(--nl-border-strong, rgba(0, 240, 255, 0.45));
+  color: var(--nl-ink, #dfe7ff);
+  font-family: var(--nl-body, sans-serif);
+  clip-path: polygon(12px 0, 100% 0, 100% calc(100% - 12px), calc(100% - 12px) 100%, 0 100%, 0 12px);
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.55);
+  animation: rb-toast-in 0.3s var(--nl-ease, ease) both;
+}
+.rb-toast.is-out { animation: rb-toast-out 0.25s ease forwards; }
+@keyframes rb-toast-in { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: none; } }
+@keyframes rb-toast-out { to { opacity: 0; transform: translateY(8px); } }
+.rb-toast__icon { flex: none; width: 22px; height: 22px; color: var(--nl-lime, #c6ff3d); margin-top: 0.1rem; }
+.rb-toast__title { font-family: var(--nl-display, sans-serif); font-weight: 700; font-size: 0.85rem; letter-spacing: 0.1em; text-transform: uppercase; color: var(--nl-lime, #c6ff3d); }
+.rb-toast__body { color: var(--nl-ink-soft, #aab6d3); font-size: 0.85rem; margin-top: 0.2rem; overflow-wrap: anywhere; }
+.rb-toast__body a { color: var(--nl-cyan, #00f0ff); }
+.rb-toast__close {
+  flex: none;
+  margin-left: auto;
+  appearance: none;
+  background: transparent;
+  border: 0;
+  color: var(--nl-muted, #7683a3);
+  font-size: 1rem;
+  line-height: 1;
+  padding: 0.1rem 0.2rem;
+  cursor: pointer;
+}
+.rb-toast__close:hover { color: var(--nl-ink, #dfe7ff); }
+.rb-toast__close:focus-visible { outline: 2px solid var(--nl-lime, #c6ff3d); outline-offset: 2px; }
+@media (max-width: 959px) {
+  .rb-toast { right: 12px; left: 12px; bottom: 12px; width: auto; }
+}
+
+/* Busy/done states for any download button the bundle drives */
+[data-download].is-busy { pointer-events: none; opacity: 0.85; }
+[data-download].is-done { pointer-events: none; }

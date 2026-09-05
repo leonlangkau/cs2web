@@ -4,6 +4,7 @@ const MANIFEST = {
   "/css/skin-neon.css": "72eb2586",
   "/css/style.css": "4a010702",
   "/css/ui-neon.css": "cbc0da9b",
+  "/css/ui-switch.css": "fecc2f0a",
   "/js/boot.js": "e295cf6b",
   "/js/captcha.js": "cb02d481",
   "/js/crypto-pay.js": "c03e40a0",

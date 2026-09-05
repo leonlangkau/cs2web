@@ -8,8 +8,11 @@ const MANIFEST = {
   "/js/fingerprint.js": "7c3dc35d",
   "/js/fx.js": "fdd03416",
   "/js/main.js": "a04d3099",
+  "/js/rb-client-BAUGi7xL.js": "97d37d76",
   "/js/status.js": "fcc1a3b7",
   "/js/support.js": "b287e3fc",
+  "/js/ui-neon.js": "70a29f34",
+  "/js/ui-prism.js": "70a29f34",
   "/fonts/jetbrains-mono-var.woff2": "18be4527",
   "/fonts/space-grotesk-var.woff2": "06408904",
 };

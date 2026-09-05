@@ -75,4 +75,14 @@ function emailLink(email) {
   return `<a class="email-protect" data-u="${esc(user)}" data-d="${esc(domain)}">${esc(user)}&#8203;&nbsp;[at]&nbsp;${esc(domain)}</a>`;
 }
 
-export { esc, timeAgo, pageWindow, pagination, map, emailLink };
+/**
+ * A data block for a client bundle: <script type="application/json" id="…">.
+ * Not executable, so the CSP's script-src does not apply, but the payload is
+ * still inside a <script> element — `<` is escaped so no value can close it.
+ */
+function jsonScript(id, data) {
+  const json = JSON.stringify(data).replace(/</g, '\\u003c').replace(/\u2028/g, '\\u2028').replace(/\u2029/g, '\\u2029');
+  return `<script type="application/json" id="${esc(id)}">${json}</script>`;
+}
+
+export { esc, timeAgo, pageWindow, pagination, map, emailLink, jsonScript };

@@ -1,22 +1,43 @@
 {
   "name": "goyhub-web",
   "version": "1.1.0",
-  "description": "GoyHub — CS2 companion app site, community forum and secured admin backend. A Cloudflare Pages project (static public/ + one catch-all Pages Function backed by D1).",
+  "description": "GoyHub \u2014 CS2 companion app site, community forum and secured admin backend. A Cloudflare Pages project (static public/ + one catch-all Pages Function backed by D1).",
   "type": "module",
   "private": true,
   "scripts": {
-    "build": "node scripts/build-schema.cjs && node scripts/build-installer.cjs && node scripts/build-assets.cjs",
+    "build": "node scripts/build-schema.cjs && node scripts/build-installer.cjs && node scripts/build-ui.cjs && node scripts/build-assets.cjs",
     "dev": "wrangler pages dev",
     "test": "node --test",
     "db:local": "wrangler d1 execute goyhub --local --file=schema.sql",
     "db:remote": "wrangler d1 execute goyhub --remote --file=schema.sql",
     "deploy": "wrangler pages deploy",
-    "tail": "wrangler pages deployment tail"
+    "tail": "wrangler pages deployment tail",
+    "build:ui": "node scripts/build-ui.cjs && node scripts/build-assets.cjs",
+    "dev:ui": "vite build --config ui/vite.config.js --watch"
   },
   "engines": {
     "node": ">=22.5.0"
   },
   "devDependencies": {
+    "@gsap/react": "^2.1.2",
+    "@react-three/drei": "^10.7.8",
+    "@react-three/fiber": "^9.7.0",
+    "@react-three/postprocessing": "^3.1.1",
+    "@use-gesture/react": "^10.3.1",
+    "@vitejs/plugin-react": "^6.1.1",
+    "gl-matrix": "^3.4.4",
+    "gsap": "^3.15.0",
+    "lenis": "^1.3.26",
+    "maath": "^0.10.8",
+    "matter-js": "^0.20.0",
+    "meshline": "^3.3.1",
+    "motion": "^13.2.0",
+    "ogl": "^1.0.11",
+    "postprocessing": "^6.39.4",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
+    "three": "^0.185.1",
+    "vite": "^8.2.2",
     "wrangler": "^4.125.0"
   }
 }

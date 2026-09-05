@@ -1,14 +1,9 @@
 import { esc } from "./util.js";
 import { asset } from "../asset-manifest.js";
 import { isStaff, meetsTier } from "../tiers.js";
-
-const BRAND_MARK = `<svg class="brand-mark" viewBox="0 0 32 32" aria-hidden="true">
-  <path d="M16 4L26.4 22H5.6z" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linejoin="round"/>
-  <path d="M16 28L5.6 10h20.8z" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linejoin="round"/>
-</svg>`;
-
-// White backing plate so the blue mark stays visible in dark browser tab strips.
-const FAVICON = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23ffffff'/%3E%3Cpath d='M16 5L25.5 21.5H6.5z' fill='none' stroke='%230137B7' stroke-width='2.6' stroke-linejoin='round'/%3E%3Cpath d='M16 27L6.5 10.5h19z' fill='none' stroke='%230137B7' stroke-width='2.6' stroke-linejoin='round'/%3E%3C/svg%3E";
+import { SKINS, skinIds } from "../ui-skins.js";
+import { getSkin } from "./skins/index.js";
+import { BRAND_MARK, FAVICON } from "./brand.js";
 
 function termsGate(ctx) {
   return `<div class="terms-gate" role="dialog" aria-modal="true" aria-labelledby="terms-gate-title">
@@ -94,11 +89,28 @@ function footer(ctx) {
 }
 
 /**
- * Wraps page body HTML in the full document.
- * `body` is trusted markup produced by a view; data inside it must already be escaped.
+ * The floating "which design?" pill. Rendered under every skin (its stylesheet
+ * is skin-neutral) so the redesigns can be compared on any page; UI_SWITCHER=0
+ * removes it. Links re-request the current path with ?ui=<id>, which also
+ * remembers the choice in a cookie (see middleware.js).
  */
-function page(ctx, { title, body, bodyClass = '', scripts = [] } = {}) {
-  const fullTitle = title ? `${title} · ${ctx.appName}` : `${ctx.appName} · The Ultimate CS2 Companion`;
+function uiSwitcher(ctx) {
+  if (!ctx.uiSwitcher) return '';
+  const items = skinIds().map((id) => {
+    const skin = SKINS[id];
+    const active = ctx.ui === id;
+    return `<a href="${esc(ctx.path)}?ui=${id}" class="ui-switch-item${active ? ' is-active' : ''}"${active ? ' aria-current="true"' : ''}>`
+      + `<span class="ui-switch-dot" aria-hidden="true"></span>`
+      + `<span class="ui-switch-label">${esc(skin.label)}</span>`
+      + `<span class="ui-switch-tag">${esc(skin.tagline)}</span></a>`;
+  }).join('');
+  return `<nav class="ui-switch" id="ui-switch" aria-label="Choose a site design" data-ui="${esc(ctx.ui)}">
+  <span class="ui-switch-title">UI</span>${items}
+</nav>`;
+}
+
+/** Shared status strips: announcement banner, flash message, terms gate. */
+function notices(ctx) {
   const announcement = ctx.announcement
     ? `<div class="announcement" id="announcement" role="status">
         <div class="container announcement-inner">
@@ -110,7 +122,60 @@ function page(ctx, { title, body, bodyClass = '', scripts = [] } = {}) {
   const flash = ctx.flash
     ? `<div class="flash flash-${ctx.flash.type === 'error' ? 'error' : 'success'}" role="status"><div class="container">${esc(ctx.flash.message)}</div></div>`
     : '';
+  return `${announcement}\n${flash}\n${ctx.needsTermsGate ? termsGate(ctx) : ''}`;
+}
+
+/**
+ * Wraps page body HTML in the full document.
+ * `body` is trusted markup produced by a view; data inside it must already be escaped.
+ *
+ * With a redesign skin active (ctx.ui !== 'classic') the document is built from
+ * that skin's chrome instead: its stylesheets, its nav and footer, and its
+ * React Bits module. The classic effects script (fx.js) is not loaded there —
+ * the skin bundle owns every animation — while boot.js, main.js and the
+ * page-specific scripts (forms, captcha, live chat, status) stay, since they
+ * carry behaviour rather than decoration.
+ */
+function page(ctx, { title, body, bodyClass = '', scripts = [] } = {}) {
+  const fullTitle = title ? `${title} · ${ctx.appName}` : `${ctx.appName} · The Ultimate CS2 Companion`;
   const extraScripts = scripts.map((src) => `<script src="${esc(asset(src))}" defer></script>`).join('\n');
+  const skin = getSkin(ctx.ui);
+
+  if (skin) {
+    const styles = [...skin.stylesheets, '/css/ui-switch.css']
+      .map((href) => `<link rel="stylesheet" href="${esc(asset(href))}">`).join('\n');
+    const modules = (skin.modules || [])
+      .map((src) => `<script type="module" src="${esc(asset(src))}"></script>`).join('\n');
+    const classes = [`skin-${skin.id}`, skin.bodyClass || '', bodyClass].filter(Boolean).join(' ');
+    return `<!DOCTYPE html>
+<html lang="en" data-skin="${esc(skin.id)}">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>${esc(fullTitle)}</title>
+<meta name="description" content="GoyHub is the all-in-one CS2 companion app: match stats, crosshair &amp; config manager, skin tracker and performance presets for Counter-Strike 2.">
+<link rel="icon" href="${FAVICON}">
+${skin.head ? skin.head(ctx) : ''}
+${styles}
+<script src="${asset('/js/boot.js')}"></script>
+</head>
+<body class="${esc(classes)}">
+<a class="skip-link" href="#main">Skip to content</a>
+${skin.chrome ? skin.chrome(ctx) : ''}
+${skin.nav(ctx)}
+${notices(ctx)}
+<main id="main">
+${body}
+</main>
+${skin.footer(ctx)}
+${uiSwitcher(ctx)}
+<script src="${asset('/js/main.js')}" defer></script>
+<script src="${asset('/js/fingerprint.js')}" defer></script>
+${extraScripts}
+${modules}
+</body>
+</html>`;
+  }
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -123,18 +188,18 @@ function page(ctx, { title, body, bodyClass = '', scripts = [] } = {}) {
 <meta name="theme-color" content="#0137B7">
 <link rel="preload" href="${asset('/fonts/space-grotesk-var.woff2')}" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="${asset('/css/style.css')}">
+${ctx.uiSwitcher ? `<link rel="stylesheet" href="${esc(asset('/css/ui-switch.css'))}">` : ''}
 <script src="${asset('/js/boot.js')}"></script>
 </head>
 <body class="${esc(bodyClass)}">
 <a class="skip-link" href="#main">Skip to content</a>
 ${nav(ctx)}
-${announcement}
-${flash}
-${ctx.needsTermsGate ? termsGate(ctx) : ''}
+${notices(ctx)}
 <main id="main">
 ${body}
 </main>
 ${footer(ctx)}
+${uiSwitcher(ctx)}
 <script src="${asset('/js/main.js')}" defer></script>
 <script src="${asset('/js/fx.js')}" defer></script>
 <script src="${asset('/js/fingerprint.js')}" defer></script>
@@ -143,4 +208,4 @@ ${extraScripts}
 </html>`;
 }
 
-export { page, BRAND_MARK };
+export { page, BRAND_MARK, FAVICON, termsGate, notices };

@@ -3,6 +3,7 @@ import { esc, timeAgo, map, emailLink } from "./util.js";
 import { meetsTier, tierOf, TIER_LABELS } from "../tiers.js";
 import { planDuration } from "../plans.js";
 import { payChoices } from "./pay.js";
+import { getSkin } from "./skins/index.js";
 
 const DOWNLOAD_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m0 0l-5-5m5 5l5-5M4 19h16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
 const DL_ARROW_ICON = '<svg class="dl-arrow" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m0 0l-5-5m5 5l5-5M4 19h16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
@@ -39,6 +40,14 @@ const FEATURES = [
 function home(ctx, { stats, recentThreads, downloadMeta }) {
   const canDownload = meetsTier(ctx.user, 'paid');
   const canViewForum = meetsTier(ctx.user, 'paid');
+
+  // A redesign skin renders its own landing page (its React Bits app, with a
+  // server-rendered fallback), from the same data this view gets.
+  const skin = getSkin(ctx.ui);
+  if (skin && skin.home) {
+    const r = skin.home(ctx, { stats, recentThreads, downloadMeta, canDownload, canViewForum });
+    return page(ctx, { title: null, body: r.body, bodyClass: r.bodyClass || 'landing' });
+  }
 
   const heroCta = canDownload
     ? `<span class="star-border" data-magnet>${downloadBtn('Download Loader')}</span>`

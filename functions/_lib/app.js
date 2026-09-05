@@ -45,7 +45,7 @@ function fallbackView() {
   return {
     user: null, path: "/", flash: null, csrfToken: "",
     needsTermsGate: false, termsVersion: "", company: createCompany({}),
-    appName: "GoyHub", appVersion: APP_VERSION,
+    appName: "GoyHub", appVersion: APP_VERSION, ui: "classic", uiSwitcher: false,
   };
 }
 

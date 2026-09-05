@@ -12,6 +12,16 @@ database_name = "goyhub"
 database_id = "1f2fd246-9cf1-46d0-a88a-629ad12f4243"
 
 [vars]
+# UI design. The site ships three complete front-ends (see functions/_lib/ui-skins.js):
+#   "classic"  the original liquid-glass design
+#   "neon"     redesign A — dark cyberdeck / terminal HUD, React Bits animations
+#   "prism"    redesign B — holographic glass, React Bits animations
+# Visitors can still override with ?ui=<id> (remembered in a cookie) while
+# UI_SWITCHER is on; set UI_SWITCHER = "0" to hide the corner switcher and pin
+# everyone to UI_THEME. Both can also be set per-environment in the Pages
+# dashboard (Settings -> Variables and Secrets).
+UI_THEME = "neon"
+UI_SWITCHER = "1"
 # Host canonicalization. By default www.<domain> is 301-redirected to the
 # bare apex (goyhub.st). Set CANONICAL_WWW = "1" to make www the canonical
 # host instead (apex → www). Attach BOTH hostnames as Custom domains in the

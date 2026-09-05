@@ -6,6 +6,7 @@ import * as limits from "./limits.js";
 import { getSetting, ANNOUNCEMENT_KEY } from "./settings.js";
 import { isTurnstileConfigured } from "./turnstile.js";
 import { isEmailConfigured } from "./email.js";
+import { UI_COOKIE, UI_COOKIE_DAYS, isSkin, defaultSkin, switcherEnabled } from "./ui-skins.js";
 
 const SESSION_COOKIE = 'ghsession';
 const CSRF_COOKIE = 'ghcsrf';
@@ -160,6 +161,8 @@ async function destroyUserSessions(db, userId) {
 }
 
 /** Builds the render context and loads the signed-in user. */
+const DEFAULT_UI = 'classic';
+
 const loadContext = async (c, next) => {
   const db = c.get('db');
   const url = new URL(c.req.url);
@@ -176,8 +179,27 @@ const loadContext = async (c, next) => {
     appVersion: c.get('appVersion'),
     announcement: '',
     turnstileSiteKey: isTurnstileConfigured(c.get('cfg') || {}) ? c.get('cfg').TURNSTILE_SITE_KEY : '',
+    ui: DEFAULT_UI,
+    uiSwitcher: false,
   };
   c.set('view', view);
+
+  // --- UI skin (see ui-skins.js) ---
+  // `?ui=<id>` picks a design and remembers it; otherwise the cookie, then the
+  // deployment default. The cookie is readable by the page (not HttpOnly) so
+  // the skin bundles can tell which design they are running under.
+  {
+    const cfg = c.get('cfg') || {};
+    const requested = url.searchParams.get('ui');
+    if (requested !== null && isSkin(requested)) {
+      view.ui = requested;
+      setCookie(c, UI_COOKIE, requested, cookieOptions(c, { httpOnly: false, maxAge: UI_COOKIE_DAYS * 86400 }));
+    } else {
+      const remembered = getCookie(c, UI_COOKIE);
+      view.ui = isSkin(remembered) ? remembered : defaultSkin(cfg);
+    }
+    view.uiSwitcher = switcherEnabled(cfg);
+  }
 
   // Site-wide announcement banner (admin-set). Only fetched for page GETs —
   // API calls, form posts and the JSON polls behind the live chat and the

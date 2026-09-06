@@ -1,6 +1,5 @@
-import CountUp from '@rb/TextAnimations/CountUp/CountUp';
+import CountUp from '../vendor/CountUp.jsx';
 import ElectricBorder from '../vendor/ElectricBorder.jsx';
-import { fmtInt } from '../lib/dom.js';
 
 const STATS = [
   ['users', 'Cheaters registered', 'OPERATORS', '#00f0ff'],
@@ -12,6 +11,7 @@ const STATS = [
 /** Deterministic little bar-chart so every card has a distinct "trace". */
 const bars = (seed) => Array.from({ length: 14 }, (_, i) => 30 + Math.round(((Math.sin((i + 1) * (seed + 3) * 1.7) + 1) / 2) * 65));
 
+/** Telemetry: four ElectricBorder HUD cards; the numbers are real at once and count up on first sight. */
 export default function HudStats({ d, env }) {
   return (
     <section className="nl-section nl-stats" id="stats">
@@ -29,7 +29,7 @@ export default function HudStats({ d, env }) {
                       <i className="nl-led nl-led--pulse" aria-hidden="true" />
                     </div>
                     <div className="nl-stat__value">
-                      {env.reduced ? <span>{fmtInt(value)}</span> : <CountUp to={value} from={0} duration={1.6} separator="," delay={0.1 + i * 0.1} />}
+                      <CountUp to={value} from={0} duration={1.1 + i * 0.15} separator="," disabled={env.reduced} />
                     </div>
                     <div className="nl-stat__label">{label}</div>
                     <div className="nl-stat__bars" aria-hidden="true">

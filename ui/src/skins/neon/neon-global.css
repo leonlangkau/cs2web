@@ -44,6 +44,9 @@
 @media (min-width: 960px) {
   #site-nav.rb-gooey-on .rb-gooey { display: flex; }
   #site-nav.rb-gooey-on .nav-links { display: none !important; }
+  /* The gooey filter needs a black plate behind it (blur + contrast); the
+     header's blend group swallows it, so keep it from bleeding past the bar. */
+  #site-nav.rb-gooey-on { overflow: clip; }
 }
 
 /* Dock room at the bottom of the page */
@@ -78,7 +81,7 @@
   background: radial-gradient(60% 60% at 50% 50%, rgba(0, 240, 255, 0.08), transparent 70%);
   pointer-events: none;
 }
-.rb-boot.is-leaving { animation: rb-boot-out 0.22s ease forwards; }
+.rb-boot.is-leaving { animation: rb-boot-out 0.22s ease forwards; pointer-events: none; }
 @keyframes rb-boot-out { to { opacity: 0; } }
 .rb-boot__frame {
   position: relative;
@@ -206,7 +209,8 @@
 .rb-toast__close:hover { color: var(--nl-ink, #dfe7ff); }
 .rb-toast__close:focus-visible { outline: 2px solid var(--nl-lime, #c6ff3d); outline-offset: 2px; }
 @media (max-width: 959px) {
-  .rb-toast { right: 12px; left: 12px; bottom: 12px; width: auto; }
+  /* above the design switcher pill (fixed bottom-left) */
+  .rb-toast { right: 12px; left: 12px; bottom: 4.6rem; width: auto; }
 }
 
 /* Busy/done states for any download button the bundle drives */

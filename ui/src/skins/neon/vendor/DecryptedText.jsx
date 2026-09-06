@@ -5,6 +5,8 @@
  *  - once decrypted the plain text is rendered without aria-hidden
  *  - `disabled` renders the final text at once (reduced motion)
  *  - `onComplete` fires when the reveal finishes
+ *  - `duration` (ms) makes the sequential reveal time-based, so the line lands
+ *    on schedule even when the main thread is busy and ticks arrive late
  * Supports animateOn: 'view' | 'mount' | 'hover'.
  */
 import { useEffect, useState, useRef, useMemo, useCallback } from 'react';
@@ -24,6 +26,7 @@ export default function DecryptedText({
   animateOn = 'view',
   disabled = false,
   delay = 0,
+  duration = 0,
   onComplete,
   as: Tag = 'span',
 }) {
@@ -52,6 +55,7 @@ export default function DecryptedText({
   useEffect(() => {
     if (!animating) return undefined;
     let iteration = 0;
+    let t0 = 0;
     const len = text.length;
     const nextIndex = (set) => {
       if (revealDirection === 'end') return len - 1 - set.size;
@@ -77,9 +81,13 @@ export default function DecryptedText({
         if (sequential) {
           if (prev.size >= len) { finish(); return prev; }
           const next = new Set(prev);
-          // reveal ~2 chars per tick on long strings so the whole line lands quickly
+          // reveal ~2 chars per tick on long strings so the whole line lands quickly;
+          // with a duration the reveal follows the clock instead of the tick count
           const per = len > 24 ? 2 : 1;
-          for (let k = 0; k < per && next.size < len; k += 1) next.add(nextIndex(next));
+          const target = duration > 0
+            ? Math.max(next.size + 1, Math.min(len, Math.ceil((len * (performance.now() - t0)) / duration)))
+            : next.size + per;
+          while (next.size < target && next.size < len) next.add(nextIndex(next));
           setDisplay(shuffle(next));
           return next;
         }
@@ -90,11 +98,12 @@ export default function DecryptedText({
       });
     };
     timer.current = window.setTimeout(() => {
+      t0 = performance.now();
       tick();
       timer.current = window.setInterval(tick, speed);
     }, delay);
     return () => { window.clearTimeout(timer.current); window.clearInterval(timer.current); };
-  }, [animating, text, speed, maxIterations, sequential, revealDirection, shuffle, delay, onComplete]);
+  }, [animating, text, speed, maxIterations, sequential, revealDirection, shuffle, delay, duration, onComplete]);
 
   useEffect(() => {
     if (disabled) { setDisplay(text); setDone(true); return undefined; }

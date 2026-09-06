@@ -1,0 +1,46 @@
+.star-border-container {
+  --star-color: #ff2bd6;
+  --star-speed: 5s;
+  --star-pad: 1px;
+  display: inline-block;
+  position: relative;
+  padding: var(--star-pad) 0;
+  overflow: hidden;
+}
+.border-gradient-bottom,
+.border-gradient-top {
+  position: absolute;
+  width: 300%;
+  height: 50%;
+  opacity: 0.8;
+  border-radius: 50%;
+  background: radial-gradient(circle, var(--star-color), transparent 10%);
+  z-index: 0;
+  pointer-events: none;
+}
+.border-gradient-bottom {
+  bottom: -12px;
+  right: -250%;
+  animation: star-movement-bottom var(--star-speed) linear infinite alternate;
+}
+.border-gradient-top {
+  top: -12px;
+  left: -250%;
+  animation: star-movement-top var(--star-speed) linear infinite alternate;
+}
+.inner-content {
+  position: relative;
+  display: block;
+  z-index: 1;
+}
+@keyframes star-movement-bottom {
+  0% { transform: translate(0%, 0%); opacity: 1; }
+  100% { transform: translate(-100%, 0%); opacity: 0; }
+}
+@keyframes star-movement-top {
+  0% { transform: translate(0%, 0%); opacity: 1; }
+  100% { transform: translate(100%, 0%); opacity: 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .border-gradient-bottom, .border-gradient-top { animation: none; opacity: 0; }
+}

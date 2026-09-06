@@ -24,7 +24,9 @@
 }
 .nl-h2__accent { color: var(--nl-cyan); text-shadow: 0 0 22px rgba(0, 240, 255, 0.35); }
 .nl-lede { color: var(--nl-ink-soft); font-size: 1.02rem; line-height: 1.65; max-width: 62ch; margin: 0; }
-.nl a { color: var(--nl-cyan); }
+/* Inline text links only — buttons, thread rows and the StarBorder CTA carry their own colours. */
+.nl p a, .nl li a, .nl dd a, .nl span a { color: var(--nl-cyan); text-decoration: underline; text-decoration-color: rgba(0, 240, 255, 0.35); text-underline-offset: 3px; }
+.nl p a:hover, .nl li a:hover, .nl dd a:hover, .nl span a:hover { color: #7ff7ff; text-decoration-color: currentColor; }
 .nl a:focus-visible { outline: 2px solid var(--nl-lime); outline-offset: 3px; }
 .nl .nl-decrypting, .rb-decrypting { color: var(--nl-magenta); opacity: 0.9; }
 
@@ -106,7 +108,19 @@
   min-height: 3.2em;
   margin: 0 0 2rem;
 }
-.nl-hero__sub .text-type { display: inline; }
+.nl-hero__sub-main { display: block; }
+.nl-hero__tagline {
+  display: block;
+  margin-top: 0.7rem;
+  min-height: 1.5em;
+  font-family: var(--nl-mono);
+  font-size: 0.78rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--nl-cyan);
+}
+.nl-hero__tagline::before { content: "> "; color: var(--nl-magenta); }
+.nl-hero__sub .text-type { display: inline; white-space: normal; }
 .nl-hero__caret { color: var(--nl-cyan); margin-left: 0.15rem; }
 .nl-hero__cta { display: flex; flex-wrap: wrap; align-items: center; gap: 1rem 1.1rem; margin-bottom: 1.8rem; }
 .nl-hero__meta {
@@ -200,7 +214,10 @@
 .nl-star .inner-content {
   border: 0;
   border-radius: 0;
+  display: block;
+  text-align: center;
   background: var(--nl-cyan);
+  transition: background-color 0.25s ease, color 0.25s ease;
   color: var(--nl-on-accent);
   font-family: var(--nl-display);
   font-weight: 700;
@@ -213,9 +230,11 @@
 .nl-star--xl .inner-content { font-size: 1.05rem; padding: 1.2rem 2.3rem; }
 .nl-star__label { display: inline-flex; align-items: center; gap: 0.6rem; }
 .nl-star__label svg { width: 1.1em; height: 1.1em; }
-.nl-star .border-gradient-top, .nl-star .border-gradient-bottom { opacity: 0.9; }
+.nl-star .border-gradient-top, .nl-star .border-gradient-bottom { opacity: 0.95; }
+.nl-star:hover .inner-content { background: #6cf6ff; }
 .nl-star.is-busy .inner-content { background: var(--nl-warn); }
 .nl-star.is-done .inner-content { background: var(--nl-lime); }
+.nl-star.is-busy, .nl-star.is-done { pointer-events: none; }
 @media (prefers-reduced-motion: reduce) {
   .nl-star .border-gradient-top, .nl-star .border-gradient-bottom { animation: none; opacity: 0; }
 }
@@ -436,14 +455,14 @@
   .nl-hero__foot { display: none; }
   .nl-hero { padding-bottom: 3rem; }
   .nl-hero__title { font-size: clamp(2.2rem, 11vw, 3.4rem); }
-  .nl-console__reticle { width: 140px; height: 140px; right: -30px; top: 24px; }
+  .nl-console__reticle { width: 140px; height: 140px; right: -48px; top: 26px; opacity: 0.16; }
   .nl-bento--wide { grid-column: auto; }
 }
 @media (max-width: 599px) {
   .nl-stats__grid { grid-template-columns: 1fr; }
   .nl-hero__cta .nl-magnet-wrap, .nl-hero__cta .nl-star, .nl-hero__cta .nl-btn { width: 100%; }
   .nl-star .inner-content, .nl-btn--outline > .nl-btn__inner { width: 100%; }
-  .nl-hero__sub { min-height: 4.8em; }
+  .nl-hero__sub { min-height: 0; }
   .nl-thread__title { white-space: normal; }
   .nl-stepper--deploy { padding: 1.1rem 1rem 1.2rem; }
   .nl-radar__corner--br { flex-direction: column; align-items: flex-end; gap: 0.5rem; }

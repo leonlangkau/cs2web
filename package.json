@@ -1,11 +1,11 @@
 {
   "name": "goyhub-web",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "GoyHub — CS2 companion app site, community forum and secured admin backend. A Cloudflare Pages project (static public/ + one catch-all Pages Function backed by D1).",
   "type": "module",
   "private": true,
   "scripts": {
-    "build": "node scripts/build-schema.cjs && node scripts/build-installer.cjs",
+    "build": "node scripts/build-schema.cjs && node scripts/build-installer.cjs && node scripts/build-assets.cjs",
     "dev": "wrangler pages dev",
     "test": "node --test",
     "db:local": "wrangler d1 execute goyhub --local --file=schema.sql",

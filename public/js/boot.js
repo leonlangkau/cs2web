@@ -12,3 +12,31 @@ document.documentElement.classList.add('js');
     document.documentElement.setAttribute('data-theme', theme);
   } catch (e) { /* localStorage blocked (private mode, etc.) — CSS still falls back to prefers-color-scheme */ }
 })();
+
+/* Admin "hide all IPs" preference — hidden by default, applied before paint
+   so IPs never flash visible on load. An explicit opt-out is remembered;
+   anything else (no preference yet, or storage blocked) stays hidden. */
+document.documentElement.setAttribute('data-hide-ips', '1');
+(function () {
+  try {
+    if (localStorage.getItem('gh-hide-ips') === '0') {
+      document.documentElement.removeAttribute('data-hide-ips');
+    }
+  } catch (e) { /* localStorage blocked — stays hidden by default for the session */ }
+})();
+
+/* Reveal watchdog. `.js .reveal { opacity: 0 }` is only safe while fx.js is
+   guaranteed to run — if it is blocked by an extension or filter, 404s from a
+   stale cache, or dies on the network, every revealed element (hero copy, CTAs,
+   stats, feature cards) stays invisible and the page looks empty. fx.js sets
+   data-reveal-ready as its first act; if that hasn't happened shortly after
+   load, unhide everything unconditionally. */
+(function () {
+  var disarm = function () {
+    if (!document.documentElement.hasAttribute('data-reveal-ready')) {
+      document.documentElement.classList.add('reveal-failsafe');
+    }
+  };
+  window.setTimeout(disarm, 2500);
+  window.addEventListener('load', function () { window.setTimeout(disarm, 500); });
+})();

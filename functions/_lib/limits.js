@@ -11,16 +11,47 @@
  */
 
 const DEFAULTS = {
-  login: { limit: 10, windowMs: 10 * 60 * 1000 },     // per IP
-  signup: { limit: 5, windowMs: 60 * 60 * 1000 },     // per IP
-  post: { limit: 6, windowMs: 60 * 1000 },            // per user
-  download: { limit: 3, windowMs: 3 * 60 * 60 * 1000 }, // per IP (3 per 3 hours)
-  shout: { limit: 3, windowMs: 60 * 1000 },           // per user
-  burst: { limit: 240, windowMs: 60 * 1000 },         // per IP, ALL dynamic routes (flood control)
-  flood: { limit: 5, windowMs: 10 * 60 * 1000 },      // per IP, burst BREACHES before auto-ban
-  report: { limit: 5, windowMs: 60 * 60 * 1000 },     // per user
-  reset: { limit: 3, windowMs: 60 * 60 * 1000 },      // per IP (password-reset emails)
-  verify: { limit: 3, windowMs: 60 * 60 * 1000 },     // per user (verification emails)
+  login: { limit: 20, windowMs: 10 * 60 * 1000 },     // per IP
+  signup: { limit: 10, windowMs: 60 * 60 * 1000 },    // per IP
+  post: { limit: 15, windowMs: 60 * 1000 },           // per user
+  download: { limit: 60, windowMs: 3 * 60 * 60 * 1000 }, // per IP (60 per 3 hours; staff exempt)
+  shout: { limit: 10, windowMs: 60 * 1000 },          // per user
+  burst: { limit: 600, windowMs: 60 * 1000 },         // per IP, ALL dynamic routes (flood control)
+  flood: { limit: 10, windowMs: 10 * 60 * 1000 },     // per IP, burst BREACHES before auto-ban
+  report: { limit: 15, windowMs: 60 * 60 * 1000 },    // per user
+  reset: { limit: 6, windowMs: 60 * 60 * 1000 },      // per IP (password-reset emails)
+  verify: { limit: 6, windowMs: 60 * 60 * 1000 },     // per user (verification emails)
+  fingerprint: { limit: 60, windowMs: 10 * 60 * 1000 }, // per IP (client fingerprint beacon)
+  checkout: { limit: 20, windowMs: 60 * 60 * 1000 },  // per user (BTCPay invoice creation)
+  // Sized in the same spirit as the loosening above — backstops against abuse,
+  // not friction. Someone comparing all four coins before choosing opens an
+  // order per coin, so a tight cap here would bite an ordinary buyer.
+  cryptoorder: { limit: 30, windowMs: 60 * 60 * 1000 },  // per user (on-chain order + its rate lookup)
+  cryptotx: { limit: 25, windowMs: 60 * 60 * 1000 },     // per user (buyer-submitted transaction hashes)
+  cryptoscan: { limit: 240, windowMs: 60 * 60 * 1000 },  // per IP (external cron hitting /api/crypto/scan)
+  // Support desk. Deliberately generous on the conversational buckets — a
+  // person mid-crisis sends short messages in bursts, and throttling them is
+  // how a support system earns a reputation for being hostile. The tight
+  // buckets are the ones that cost money or send mail.
+  ticket: { limit: 10, windowMs: 60 * 60 * 1000 },        // per user, or per IP for guests
+  ticketreply: { limit: 60, windowMs: 10 * 60 * 1000 },   // per ticket (chat messages)
+  ticketpoll: { limit: 900, windowMs: 10 * 60 * 1000 },   // per IP (3s live-chat polling, several tabs)
+  helpvote: { limit: 40, windowMs: 60 * 60 * 1000 },      // per IP (article "did this help?")
+  ticketlookup: { limit: 6, windowMs: 60 * 60 * 1000 },   // per IP (emails a ticket link back)
+  aiassist: { limit: 60, windowMs: 60 * 60 * 1000 },      // per staff user (Gemini summary/drafts)
+  aideflect: { limit: 30, windowMs: 60 * 60 * 1000 },     // per IP (AI "try this first" matching)
+  supportsweep: { limit: 240, windowMs: 60 * 60 * 1000 }, // per IP (external cron hitting /api/support/sweep)
+  // Uploads are the one support action that costs STORAGE rather than time, so
+  // this is a per-IP budget on files, not on requests: the reply bucket is
+  // keyed per ticket and would otherwise let one address open ticket after
+  // ticket and fill the database from each.
+  attach: { limit: 30, windowMs: 60 * 60 * 1000 },        // per IP (files accepted)
+  attachread: { limit: 300, windowMs: 60 * 60 * 1000 },   // per IP (attachment downloads)
+  helpview: { limit: 1, windowMs: 60 * 60 * 1000 },       // per IP+article (the read counter)
+  // A site-wide ceiling on AI calls, on top of the per-IP and per-agent ones.
+  // The free Gemini tier has a daily quota; this keeps one busy afternoon from
+  // spending it before the staff assist needs it.
+  aiglobal: { limit: 800, windowMs: 24 * 60 * 60 * 1000 },
 };
 
 const ENV_KEYS = {
@@ -34,6 +65,23 @@ const ENV_KEYS = {
   report: 'RATE_LIMIT_REPORT',
   reset: 'RATE_LIMIT_RESET',
   verify: 'RATE_LIMIT_VERIFY',
+  fingerprint: 'RATE_LIMIT_FINGERPRINT',
+  checkout: 'RATE_LIMIT_CHECKOUT',
+  cryptoorder: 'RATE_LIMIT_CRYPTO_ORDER',
+  cryptotx: 'RATE_LIMIT_CRYPTO_TX',
+  cryptoscan: 'RATE_LIMIT_CRYPTO_SCAN',
+  ticket: 'RATE_LIMIT_TICKET',
+  ticketreply: 'RATE_LIMIT_TICKET_REPLY',
+  ticketpoll: 'RATE_LIMIT_TICKET_POLL',
+  helpvote: 'RATE_LIMIT_HELP_VOTE',
+  ticketlookup: 'RATE_LIMIT_TICKET_LOOKUP',
+  aiassist: 'RATE_LIMIT_AI_ASSIST',
+  aideflect: 'RATE_LIMIT_AI_DEFLECT',
+  supportsweep: 'RATE_LIMIT_SUPPORT_SWEEP',
+  attach: 'RATE_LIMIT_ATTACH',
+  attachread: 'RATE_LIMIT_ATTACH_READ',
+  helpview: 'RATE_LIMIT_HELP_VIEW',
+  aiglobal: 'RATE_LIMIT_AI_GLOBAL',
 };
 
 function limitFor(name, env = {}) {

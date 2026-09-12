@@ -43,7 +43,7 @@ function signup(ctx, { errors = [], values = {} } = {}) {
 <section class="section auth-page">
   <div class="container auth-card">
     <h1>Create your account</h1>
-    <p class="muted">Join the GoyHub community — it takes 20 seconds.</p>
+    <p class="muted">Join the GoyHub community in 20 seconds.</p>
     ${errorList(errors)}
     <form method="post" action="/auth/signup" class="stack">
       <input type="hidden" name="_csrf" value="${esc(ctx.csrfToken)}">
@@ -72,8 +72,7 @@ function signup(ctx, { errors = [], values = {} } = {}) {
     </form>
     <p class="muted center">Already have an account? <a href="/auth/login">Log in</a></p>
     <p class="fineprint">By signing up you agree to our <a href="/terms">Terms &amp; Conditions</a> and
-      <a href="/privacy">Privacy Policy</a>. For security and anti-abuse, we record the IP address
-      and browser of sign-ups, logins and downloads.</p>
+      <a href="/privacy">Privacy Policy</a>.</p>
   </div>
 </section>`;
   const scripts = ['/js/captcha.js'];
@@ -85,7 +84,7 @@ function forgot(ctx, { emailConfigured }) {
   const note = emailConfigured
     ? '<p class="muted">Enter your username or email and we\'ll send a one-hour reset link.</p>'
     : `<p class="form-errors">Email sending isn't configured on this site yet, so automatic resets are
-        unavailable — contact ${emailLink(ctx.company.contactEmail)}
+        unavailable. Contact ${emailLink(ctx.company.contactEmail)}
         instead.</p>`;
   const body = `
 <section class="section auth-page">

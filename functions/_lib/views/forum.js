@@ -56,7 +56,7 @@ function index(ctx, { categories, recent, shouts }) {
 <div class="section forum-page">
   <div class="container">
     <div class="page-head">
-      <div><p class="section-kicker">// COMMUNITY</p><h1 class="section-title">Forum</h1></div>
+      <div><h1 class="section-title">Forum</h1></div>
       <div class="forum-head-actions">
         <form method="get" action="/forum/search" class="forum-search" role="search">
           <input type="search" name="q" minlength="2" maxlength="100" required
@@ -255,7 +255,7 @@ function newThread(ctx, { categories, errors = [], values = {} }) {
         </select></label>
       <label><span>Title</span>
         <input type="text" name="title" required minlength="3" maxlength="120"
-               placeholder="Be specific — good titles get better answers"
+               placeholder="Be specific: good titles get better answers"
                value="${esc(values.title || '')}"></label>
       <label><span>Body</span>
         <textarea name="body" rows="10" required maxlength="10000"
@@ -307,13 +307,13 @@ function searchResults(ctx, { q, threads, posts }) {
     : (threads.length === 0 && posts.length === 0)
       ? `<p class="muted empty-state">No results for “${esc(q)}”.</p>`
       : `${threads.length ? `<h2 class="search-group">Threads (${esc(threads.length)})</h2>
-          <div class="thread-list">${map(threads, (t) => `<a class="thread-row" href="/forum/t/${esc(t.id)}">
+          <div class="thread-list">${map(threads, (t) => `<a class="thread-row thread-row--flush" href="/forum/t/${esc(t.id)}">
             <div class="thread-main">
               <span class="thread-title">${esc(t.title)}</span>
               <span class="muted">${esc(t.category)} · by ${esc(t.username)} · ${esc(timeAgo(t.updated_at))}</span>
             </div></a>`)}</div>` : ''}
         ${posts.length ? `<h2 class="search-group">Posts (${esc(posts.length)})</h2>
-          <div class="thread-list">${map(posts, (p) => `<a class="thread-row" href="/forum/t/${esc(p.thread_id)}#post-${esc(p.id)}">
+          <div class="thread-list">${map(posts, (p) => `<a class="thread-row thread-row--flush" href="/forum/t/${esc(p.thread_id)}#post-${esc(p.id)}">
             <div class="thread-main">
               <span class="thread-title">${esc(p.thread_title)}</span>
               <span class="muted">${esc(excerpt(p.body, q))}</span>

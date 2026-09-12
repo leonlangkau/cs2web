@@ -1,23 +1,25 @@
 'use strict';
 
 /**
- * Generates src/installer-data.js from artifacts/GoyHub-Setup-1.0.0.zip.
+ * Generates functions/_lib/installer-data.js from artifacts/${NAME} below —
+ * published metadata only (name, sha256, size), the numbers /download and
+ * the homepage show for the current build.
  *
- * Workers has no filesystem, so the download route needs the artifact from
- * somewhere else. Small builds are embedded directly in the bundle; anything
- * larger must live in R2 (bind it as INSTALLER) because Workers caps the
- * script bundle at 1 MB on the free plan / 10 MB on paid.
+ * The download route never serves this artifact's bytes: DOWNLOAD_URL is the
+ * only source /download/file fetches from (see functions/_lib/routes-main.js),
+ * with no fallback. NAME's extension flows straight into the Content-Disposition
+ * filename members see, so it must match whatever DOWNLOAD_URL actually serves
+ * (currently a bare .exe, not a .zip). When DOWNLOAD_URL points at a new build,
+ * replace this artifact (renaming it too, if the file type changes) and rerun
+ * `npm run build`, so the published checksum and filename stay honest.
  */
 const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
 
-const NAME = 'GoyHub-Setup-1.0.0.zip';
+const NAME = 'GoyHub-Setup-1.0.0.exe';
 const SRC = path.join(__dirname, '..', 'artifacts', NAME);
 const OUT = path.join(__dirname, '..', 'functions', '_lib', 'installer-data.js');
-
-/** Above this, embedding would bloat the Worker bundle — use R2 instead. */
-const EMBED_LIMIT = 256 * 1024;
 
 /** Renders the module without writing, so build() and isInSync() never diverge. */
 function render() {
@@ -25,25 +27,23 @@ function render() {
   const buf = fs.readFileSync(SRC);
   const sha256 = crypto.createHash('sha256').update(buf).digest('hex');
   const sizeKb = Math.max(1, Math.round(buf.length / 1024));
-  const embed = buf.length <= EMBED_LIMIT;
   const text = `// GENERATED FROM artifacts/${NAME} by scripts/build-installer.js — do not edit by hand.
+// Published metadata only — the download route serves DOWNLOAD_URL, not this file.
 
 export default {
   name: ${JSON.stringify(NAME)},
   sha256: ${JSON.stringify(sha256)},
   sizeKb: ${sizeKb},
   bytes: ${buf.length},
-  // ${embed ? 'Embedded because the artifact is small.' : 'Too large to embed — bind an R2 bucket as INSTALLER.'}
-  base64: ${embed ? JSON.stringify(buf.toString('base64')) : 'null'},
 };
 `;
-  return { text, sha256, sizeKb, embed, bytes: buf.length };
+  return { text, sha256, sizeKb, bytes: buf.length };
 }
 
 function build() {
-  const { text, sha256, sizeKb, embed, bytes } = render();
+  const { text, sha256, sizeKb, bytes } = render();
   fs.writeFileSync(OUT, text);
-  return { sha256, sizeKb, embed, bytes };
+  return { sha256, sizeKb, bytes };
 }
 
 function isInSync() {
@@ -53,7 +53,7 @@ function isInSync() {
 
 if (require.main === module) {
   const info = build();
-  console.log(`installer: ${info.bytes} bytes, sha256 ${info.sha256.slice(0, 16)}…, embedded: ${info.embed}`);
+  console.log(`installer metadata: ${info.bytes} bytes, sha256 ${info.sha256.slice(0, 16)}…`);
 }
 
 module.exports = { build, isInSync, NAME };

@@ -235,7 +235,7 @@ function register(app) {
 
     const first = await db.get('SELECT MIN(id) AS m FROM posts WHERE thread_id = ?', post.thread_id);
     if (Number(first.m) === post.id) {
-      setFlash(c, 'error', 'That is the opening post — delete the whole thread instead.');
+      setFlash(c, 'error', 'That is the opening post; delete the whole thread instead.');
       return c.redirect(`/forum/t/${post.thread_id}`, 302);
     }
     await db.run('DELETE FROM posts WHERE id = ?', id);
@@ -335,7 +335,7 @@ function register(app) {
       );
       await audit(c, 'post_reported', { userId: user.id, username: user.username, detail: `post #${id}: ${reason.slice(0, 120)}` });
     }
-    setFlash(c, 'success', 'Thanks — the moderators will take a look.');
+    setFlash(c, 'success', 'Thanks, the moderators will take a look.');
     return c.redirect(`/forum/t/${post.thread_id}#post-${id}`, 302);
   });
 

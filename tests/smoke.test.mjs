@@ -2058,6 +2058,52 @@ test("www host is 301-redirected to the bare apex, preserving path and query", a
   assert.notEqual(sub.status, 301);
 });
 
+test("a POST across the canonical-host redirect keeps its method and body (308, not 301)", async () => {
+  const { app } = await buildTestApp(ENV);
+
+  // 301 lets a client re-issue a POST as a bodyless GET, and most do — which
+  // would land a loader's POST /api/loader/verify on the 404 page and make the
+  // endpoint look deleted. 308 requires the method and body to survive.
+  const res = await app.fetch(
+    new Request("https://www.goyhub.st/api/loader/verify", {
+      method: "POST",
+      headers: { host: "www.goyhub.st", "x-forwarded-proto": "https", "content-type": "application/json" },
+      body: JSON.stringify({ license: {} }),
+    }),
+    ENV,
+  );
+  assert.equal(res.status, 308, "a POST is redirected with 308, which preserves method and body");
+  assert.equal(res.headers.get("location"), "https://goyhub.st/api/loader/verify");
+
+  // GET keeps the plain 301 it always had.
+  const get = await app.fetch(
+    new Request("https://www.goyhub.st/upgrade", {
+      headers: { host: "www.goyhub.st", "x-forwarded-proto": "https" },
+    }),
+    ENV,
+  );
+  assert.equal(get.status, 301);
+});
+
+test("a POST-only route hit with GET answers 405, not the HTML 404 page", async () => {
+  const { app } = await buildTestApp(ENV);
+
+  // Opening /api/loader/verify in a browser used to return the site's
+  // "this page does not exist" page, which reads as the endpoint being gone.
+  for (const path of ["/api/loader/verify", "/api/loader/auth"]) {
+    const res = await app.fetch(new Request("http://local" + path), ENV);
+    assert.equal(res.status, 405, `${path} exists, so GET is 405 rather than 404`);
+    assert.equal(res.headers.get("allow"), "POST");
+    const body = await res.json();
+    assert.equal(body.error, "method_not_allowed", "the loader API answers in JSON, not HTML");
+    assert.deepEqual(body.allow, ["POST"]);
+  }
+
+  // A path that genuinely does not exist still 404s.
+  const missing = await app.fetch(new Request("http://local/api/not-a-route"), ENV);
+  assert.equal(missing.status, 404);
+});
+
 test("CANONICAL_WWW=1 inverts the redirect: apex is sent to www", async () => {
   const env = { ...ENV, CANONICAL_WWW: "1" };
   const { app } = await buildTestApp(env);

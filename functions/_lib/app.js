@@ -178,6 +178,7 @@ class Router {
     this.middleware = [];
     this.routes = [];
     this._notFound = null;
+    this._methodNotAllowed = null;
     this._onError = null;
   }
 
@@ -185,6 +186,7 @@ class Router {
   get(pattern, handler) { this.routes.push({ method: "GET", match: compile(pattern), handler }); }
   post(pattern, handler) { this.routes.push({ method: "POST", match: compile(pattern), handler }); }
   notFound(handler) { this._notFound = handler; }
+  methodNotAllowed(handler) { this._methodNotAllowed = handler; }
   onError(handler) { this._onError = handler; }
 
   async dispatch(c) {
@@ -208,14 +210,22 @@ class Router {
 
   async runRoute(c) {
     const path = c._url.pathname;
+    // Paths that exist under a DIFFERENT method answer 405, not 404. Without
+    // this, GET /api/loader/verify (a POST-only route opened in a browser, or
+    // a POST downgraded to GET by a redirect) returns the site's HTML "this
+    // page does not exist" page, which reads as "the endpoint was removed".
+    let allowed = null;
     for (const route of this.routes) {
-      if (route.method !== c.req.method) continue;
       const params = route.match(path);
-      if (params) {
-        c._params = params;
-        return route.handler(c);
+      if (!params) continue;
+      if (route.method !== c.req.method) {
+        (allowed ||= new Set()).add(route.method);
+        continue;
       }
+      c._params = params;
+      return route.handler(c);
     }
+    if (allowed && this._methodNotAllowed) return this._methodNotAllowed(c, [...allowed]);
     return this._notFound ? this._notFound(c) : c.text("Not found", 404);
   }
 }
@@ -283,6 +293,27 @@ function createApp({ resolveDb, env = {} }) {
   app.notFound((c) => c.html(errorPage(c.get("view") || fallbackView(), {
     code: 404, title: "Not found", message: "This page does not exist.",
   }), 404));
+
+  // The route is there, the method isn't. Answering the loader API in JSON
+  // (rather than the HTML error page) keeps a client that only parses JSON
+  // from reporting the endpoint as missing.
+  app.methodNotAllowed((c, allow) => {
+    c.header("Allow", allow.join(", "));
+    c.header("Cache-Control", "no-store");
+    if (c._url.pathname.startsWith("/api/")) {
+      return c.json({
+        ok: false,
+        error: "method_not_allowed",
+        allow,
+        detail: `This endpoint expects ${allow.join(" or ")}, not ${c.req.method}.`,
+      }, 405);
+    }
+    return c.html(errorPage(c.get("view") || fallbackView(), {
+      code: 405,
+      title: "Method not allowed",
+      message: `This address only accepts ${allow.join(" or ")} requests.`,
+    }), 405);
+  });
 
   app.onError((err, c) => {
     const status = Number(err && (err.status || err.statusCode));

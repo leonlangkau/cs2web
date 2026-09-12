@@ -69,7 +69,8 @@ function userAgent(c) {
 
 /**
  * Canonical host redirect: send www.<domain> to the bare apex with a permanent
- * 301, preserving path and query. Runs first so every response — pages, forms,
+ * redirect (301 for GET/HEAD, 308 for anything with a body), preserving path,
+ * query, method and body. Runs first so every response — pages, forms,
  * the sitemap — is served from a single canonical host (better for SEO, cookies
  * and CSP). Hosts without a leading "www." (localhost, the apex itself, custom
  * subdomains like downloader.) pass straight through, so local dev is unaffected.
@@ -96,7 +97,12 @@ const wwwRedirect = async (c, next) => {
   const url = new URL(c.req.url);
   const proto = c.req.header('x-forwarded-proto') || url.protocol.replace(':', '');
   const location = `${proto}://${targetHost}${url.pathname}${url.search}`;
-  return c.redirect(location, 301);
+  // 301/302 let a client re-issue a POST as a bodyless GET, and most do. That
+  // silently turned a loader's POST /api/loader/verify against the wrong host
+  // into a GET, which then hit the 404 page — the endpoint looked deleted. 308
+  // means the same "permanently moved" but requires method and body to survive.
+  const safe = c.req.method === 'GET' || c.req.method === 'HEAD';
+  return c.redirect(location, safe ? 301 : 308);
 };
 
 const securityHeaders = async (c, next) => {

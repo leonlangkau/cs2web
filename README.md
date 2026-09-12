@@ -109,7 +109,13 @@ Copy `.dev.vars.example` to `.dev.vars` and set `CAPTCHA_SECRET` and
 - **Admin → Payments**: the order queue, with re-check and manual credit both
   staff-level and audited
 - Loader API: `POST /api/loader/auth` (username+password → tier + signed
-  license) and `POST /api/loader/verify` (server-side check, live tier)
+  license) and `POST /api/loader/verify` (server-side check, live tier).
+  Both are **POST-only** — a GET answers `405 method_not_allowed` with an
+  `Allow: POST` header, not a 404, so a wrong method is never mistaken for a
+  missing endpoint. Post to the **canonical host** (the bare apex by default,
+  see `CANONICAL_WWW`): the wrong host still redirects, now with a 308 that
+  preserves the method and body, but a client that does not follow redirects
+  will see the 308 rather than its answer.
 
 ### Help centre & support desk
 - **`/help` — the "try this first" layer.** Admin-editable sections and articles,
